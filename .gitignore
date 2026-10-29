@@ -1,0 +1,4 @@
+# Real business exports — never commit (repo may be public)
+fixtures/
+*.csv
+.DS_Store
