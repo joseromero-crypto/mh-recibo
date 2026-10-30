@@ -78,8 +78,9 @@ ARMADO_BUCKET = 'solcitudesarmado'        // read-only from this app
 -- Append-only event log: one row per scan / correction / lifecycle event
 create table public.rec_events (
   id          bigserial primary key,
-  session_id  text not null,          -- '{slug}__{fecha}__{epochMs}' created on the phone
+  session_id  text not null,          -- '{slug}__{area}__{fecha}__{epochMs}' created on the phone
   hub         text not null,          -- slug, e.g. 'mh-contry'
+  area        text not null,          -- 'abarrotes' | 'carnes'
   fecha       date not null,          -- reception day (America/Monterrey)
   tipo        text not null,          -- 'abrir'|'scan'|'ajuste'|'confirmacion'|'cerrar'
   sku_key     text,                   -- bcKey(barcode) or 'name:'+normalized name when no barcode
@@ -91,7 +92,7 @@ create table public.rec_events (
   device_id   text,
   ts          timestamptz not null default now()
 );
-create index on public.rec_events (hub, fecha);
+create index on public.rec_events (hub, area, fecha);
 create index on public.rec_events (session_id);
 alter table public.rec_events enable row level security;
 create policy rec_events_insert on public.rec_events for insert to anon with check (true);
@@ -126,9 +127,9 @@ Read with `imgUrl()`/`imgName()` helpers that accept both the `{url,name}` and p
 
 | Path | Written by | Read by |
 |---|---|---|
-| `envios/{slug}/{fecha}__{epochMs}.csv` | upload of the Envío export (raw, verbatim) | session load, audit |
-| `envios/{slug}/{fecha}__{epochMs}.json` | same upload, projected rows (§5.2) | phones joining the session |
-| `reportes/{slug}/{fecha}_{HH-MM}_{receptor}.csv` | cerrar recepción | coordinator / Jose |
+| `envios/{slug}/{area}/{fecha}__{epochMs}.csv` | upload of the Envío export (raw, verbatim) | session load, audit |
+| `envios/{slug}/{area}/{fecha}__{epochMs}.json` | same upload, projected rows (§5.2) | phones joining the session |
+| `reportes/{slug}/{area}/{fecha}_{HH-MM}_{receptor}.csv` | cerrar recepción | coordinator / Jose |
 
 `{slug}`: `mh-contry`, `mh-cumbres`, `mh-guadalupe`, `mh-san-nicolas`, `mh-avicola`, `mh-zapopan`, `mh-condesa`
 (same as Armado CH and Sorting Hub). CH Guadalupe is not a receiving hub in v1.
@@ -165,13 +166,12 @@ next to **Enviado**: `Armado (app) · Enviado (sistema) · Recibido`. When they 
 Missing armado data → "—".
 
 ### 5.4 Áreas (scope)
-- **Abarrotes** and **Carnes**: in scope, received in this app (today they're separate Google Sheets per hub).
+- **Abarrotes** and **Carnes** are separate receptions: different downloads, trucks, times and receptors.
+  After choosing the hub the receptor picks the **área**; every file, event, reception and report is keyed by
+  `hub + área`. Areas never mix.
 - **Fruta y verdura**: on hold — future version.
-- **Proveedores directos**: items may appear but are received in the commercial team's own sheet, so they are
-  **not scanned here**. The app must recognize them, keep them out of Pendientes and the deltas, and list them
-  apart ("Recepción en hoja de comercial"). How to identify them in the file: Q8.
-
----
+- **Proveedores directos**: nothing in the file identifies them, so there is **no special handling** — every
+  item in the uploaded file is received the same way.
 
 ## 6. Users, screens & flows
 
@@ -182,18 +182,18 @@ scans, counts, types pieces, answers flags in real time, reviews the summary and
 cross-hub view is a later addition (§12).
 
 ### 6.1 Inicio
-Hub picker (remembered in `localStorage` `mr_hub`) + receptor name (remembered `mr_receptor`).
-After choosing the hub: if there's no reception in progress → the only action is **Subir envío**.
-Open receptions for the hub show "Continuar". (Rules for older orders, re-uploads and daily cleanup: TBD, Q7.)
+Hub picker (remembered `mr_hub`) → **área: Abarrotes | Carnes** (remembered `mr_area`) → receptor name
+(remembered `mr_receptor`). Then the hub+área's **active envío** (§6.7): "Continuar recepción" if one exists,
+and always "Subir envío". A hub+área with no file yet can only "Subir envío".
 
 ### 6.2 Subir envío
-Upload the system export → validate (§5.2) → split by **área** (§5.4) → store raw + projected in
+Upload the system export → validate (§5.2) → store raw + projected in
 `recibo/envios/…` → `abrir` event → Recibir. The salida is registered at CH the day before, so the file is
 normally ready before the truck arrives.
 
 ### 6.3 Recibir (main screen) — blind
 Top: progress as **products received / products expected** (counts of lines, never quantities), offline badge,
-área tabs if the envío has more than one (Abarrotes / Carnes).
+hub + área label.
 Scan field (`inputmode="none"`, scanner types + Enter or 300 ms pause auto-submit as in Sorting Hub) + 📷 camera
 + "Sin código" (manual search).
 
@@ -221,10 +221,26 @@ Now the expected quantities are revealed: `Producto · Enviado · Recibido · Di
 - "Cerrar recepción" → `cerrar` event + report CSV to `recibo/reportes/…`.
 
 ### 6.6 Recepciones (registration view — lives in the app, like Armado's "Pedidos armados")
-List of this hub's closed receptions. Opening one shows the final summary in the **system's order** (Q3),
-big Recibido numbers, filter/sort (solo diferencias, A-Z), tick boxes per row (`localStorage`), and
-**Descargar CSV**. This is what the receptor uses later to type Recepción into the system — no printing,
-no Google Sheet.
+List of this hub+área's closed receptions (last 30 days). Opening one shows the final summary in the
+**system's order** (Q3), big Recibido numbers, filter/sort (solo diferencias, A-Z), tick boxes per row
+(`localStorage`), and **Descargar CSV**. This is what the receptor uses later to type Recepción into the
+system — no printing, no Google Sheet.
+
+### 6.7 Lifecycle: active file, stale warning, re-uploads, deletes
+- **One active envío per hub+área** = the newest upload. It stays active until a new file is uploaded —
+  no automatic expiry, no daily wipe.
+- **Stale warning.** On opening Recibir and again at the first scan of the day, if the active file was uploaded
+  on an earlier day (America/Monterrey), a modal: "**Estás trabajando con el archivo cargado el {d} de {mes}.
+  Carga el archivo de hoy.**" → [Cargar archivo de hoy] / [Ignorar]. Ignorar is remembered for that file for
+  the rest of the day. Also shown at upload time if the file's newest `Actualización envío` is older than
+  2 days ("¿Es el envío correcto?").
+- **Re-upload, same reception, nothing scanned yet** → the new file simply replaces the active one.
+- **Re-upload while a reception has scans and is open** → modal with two options:
+  "Reemplazar el archivo y conservar lo escaneado" (scans are physical counts, so they carry over and are
+  re-evaluated against the new file — safe because counting is blind and deltas appear only in the summary) or
+  "Primero cerrar la recepción actual" (goes to its Resumen y cierre). No option discards scans.
+- **Deletes:** the receptor can't delete anything. Old files and reports stay in storage as history;
+  `rec_events` is never deleted. Pruning (e.g. raw envíos older than 90 days) can come later if storage grows.
 
 ## 7. Error guards (the point of the app)
 
@@ -277,7 +293,7 @@ never auto-skip, auto-fill or reorder anything.
 
 ## 9. Report CSV (`reportes/…csv`)
 ```
-Hub, Fecha, Receptor(es), Producto, Código de barras, Kg/Pz, Posición, Armado, Enviado, Recibido,
+Hub, Área, Fecha, Receptor(es), Producto, Código de barras, Kg/Pz, Posición, Armado, Enviado, Recibido,
 Diferencia, Estado, Notas (correcciones / confirmaciones)
 ```
 All cells quoted, CRLF, BOM only on browser download.
@@ -307,21 +323,18 @@ All cells quoted, CRLF, BOM only on browser download.
 
 Answered 2026-10-29: one receptor role does everything (no PIN) · blind count with real-time flags, deltas
 revealed in the summary · the receptor downloads and uploads the envío (salida is registered the day before) ·
-same person receives and registers · scope = Abarrotes + Carnes; Fruta y verdura later; Proveedores directos
-not scanned · Sorting Hub already in the shared project.
+same person receives and registers · Abarrotes and Carnes are separate receptions chosen after the hub ·
+no column identifies Proveedores directos, so all items are treated alike · lifecycle = newest upload stays
+active, stale-file warning with Ignorar, re-upload keeps scans, no deletes (§6.7) · scope = Abarrotes + Carnes; Fruta y verdura later · Sorting Hub already in the shared project.
 
 - **Q1 Expected quantity column:** **`Envío (kg o pz)` > 0** vs `Requiere confirmar = TRUE`. Need a real export
   in `fixtures/`.
-- **Q2 Abarrotes vs Carnes:** one export containing both (split by `Temp`/`Categoría`?) or separate downloads?
-  Same truck/time or separate receptions? Default **one upload, split into área tabs by `Temp`**.
 - **Q3 Registration order:** order of the system's reception screen. Default **Posición armado**.
 - **Q4 One envío per day per hub, or several?** Default **several allowed**.
 - **Q5 Receptor name:** free text (default) vs a managed list.
 - **Q6 Kg products (Carnes):** weighed on reception, decimals. Default **yes**.
-- **Q7 Lifecycle:** older orders, re-uploads, deletes, daily cleanup — **to be discussed** before Phase 1 is final.
-- **Q8 Proveedores directos:** which column identifies them (`Compra` > 0? `Proveedor`? category)?
 
 ## 12. Not in v1
-Coordinator/cross-hub view for Jose, PINs, Fruta y verdura, scanning Proveedores directos,
+Coordinator/cross-hub view for Jose, PINs, Fruta y verdura,
 metrics dashboard (scans/min, error rate per hub/receiver), photo evidence on discrepancies, expiry checks,
 sorting edits, Retool anything, CH Guadalupe as receiver.
