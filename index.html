@@ -188,6 +188,17 @@ mark{background:var(--yellow-light);color:inherit;padding:0 3px;border-radius:4p
 .sum-row.ticked{opacity:.5}
 .badge-warn{display:inline-block;font-size:11px;font-weight:800;padding:3px 8px;border-radius:12px;background:#EDE7F6;color:#4527A0;margin:2px 4px 2px 0}
 
+/* Admin */
+.tabs{display:flex;gap:6px;overflow-x:auto;margin:4px 0 14px;padding-bottom:4px}
+.tabs .choice{flex-shrink:0;min-height:40px;padding:8px 12px;font-size:14px}
+.adm-row{background:white;border-radius:var(--radius-sm);box-shadow:var(--shadow-sm);padding:10px 12px;margin-bottom:8px;font-size:14px;line-height:1.4}
+.adm-row .btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.adm-row .btns .btn{min-height:38px;padding:8px 12px;font-size:13px}
+.day-chk{display:inline-flex;align-items:center;gap:3px;font-size:13px;margin-right:8px}
+.adm-field{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:14px;flex-wrap:wrap}
+.adm-field input[type=time],.adm-field input[type=date],.adm-field input[type=number],.adm-field select{padding:6px 8px;font-size:14px;border:2px solid var(--gray-300);border-radius:6px}
+textarea.text-input{min-height:110px;font-size:15px}
+
 /* Modal (only where plan §7.5 / §6.3 / §6.7 allow one) */
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:60;align-items:center;justify-content:center;padding:16px}
 .modal-bg.open{display:flex}
@@ -273,6 +284,12 @@ mark{background:var(--yellow-light);color:inherit;padding:0 3px;border-radius:4p
   <div class="wrap" id="recep-body"></div>
 </div>
 
+<!-- ═══════════ ADMIN (§6.8, §6.9) — PIN from recibo/config/admin_pin.txt, held in memory only ═══════════ -->
+<div class="screen" id="screen-admin">
+  <div class="topbar"><button class="back" onclick="goInicio()">← Inicio</button><div class="topbar-title">Admin</div></div>
+  <div class="wrap" id="admin-body"></div>
+</div>
+
 <!-- Sheet: Sin código / Pendientes -->
 <div class="sheet" id="sheet">
   <div class="sheet-head"><div class="sheet-title" id="sheet-title"></div><button class="back" onclick="closeSheet()">Cerrar ✕</button></div>
@@ -298,7 +315,7 @@ mark{background:var(--yellow-light);color:inherit;padding:0 3px;border-radius:4p
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'v1 · fase 5';
+const APP_VERSION = 'v1 · fase 5b';
 
 /* ════════════════════════════════════════════════════════════════════════════════════
    SUPABASE — shared project with Armado CH + Sorting Hub (plan §3). This app writes ONLY to bucket
@@ -725,6 +742,7 @@ function renderInicio(){
     h+=`<div class="step"><div class="step-title">4 · Envío de ${escapeHtml(hubName(INI.hub))} · ${areaName(INI.area)}</div>${inicioActionsHtml()}
       <button class="link-btn" onclick="openRecepciones()">📚 Recepciones cerradas (para registrar en el sistema)</button></div>`;
   }
+  h+=`<button class="link-btn" style="color:var(--gray-500);margin-top:28px" onclick="openAdmin()">🔒 Admin</button>`;
   b.innerHTML=h;
 }
 function inicioActionsHtml(){
@@ -1938,6 +1956,191 @@ function descargarReporte(){
   const blob=new Blob(['﻿'+RV.csv], { type:'text/csv;charset=utf-8' });
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=RV.info.reporte.split('/').pop();
   document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════════════
+   ADMIN (§6.8) + ALERTAS (§6.9). PIN read from recibo/config/admin_pin.txt, kept in memory for this visit
+   only. No hard deletes: every admin action on a reception is itself an event (tipo='admin').
+   ════════════════════════════════════════════════════════════════════════════════════ */
+const ADM={ ok:false, tab:'recep', hub:'mh-contry', area:'abarrotes', alertCount:0 };
+const ADM_HUBS=()=>HUBS.filter(h=>h.slug!=='test-hub' || IS_LOCAL);
+const DIAS=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+async function pgUpsert(table, rows, onConflict){
+  if(!/^rec_/.test(table)) throw new Error('Solo se escribe en tablas rec_*');
+  const r=await sbReq(`${SB_URL}/rest/v1/${table}?on_conflict=${onConflict}`,{ method:'POST',
+    headers:{'apikey':SB_KEY,'Authorization':`Bearer ${SB_KEY}`,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'},
+    body:JSON.stringify(rows) });
+  if(!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+}
+function downloadText(name, text){
+  const blob=new Blob(['﻿'+text], { type:'text/csv;charset=utf-8' });
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name;
+  document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+// An admin action on a reception, written straight to rec_events (admin works online)
+async function adminEvent(base, detalle){
+  await pgInsert('rec_events', [{ session_id:base.session_id, hub:base.hub, area:base.area, fecha:base.fecha, tipo:'admin',
+    detalle:Object.assign({ uid:newUid() }, detalle), receptor:'Admin', device_id:DEVICE_ID, ts:serverNow().toISOString() }]);
+}
+function openAdmin(){
+  closeSheet(); showScreen('screen-admin');
+  if(!ADM.ok){
+    document.getElementById('admin-body').innerHTML=`<h2>Admin</h2><p class="muted">Solo para Jose o a quien él le dé el PIN.</p>
+      <div style="display:flex;gap:8px;margin-top:12px"><input id="adm-pin" class="text-input" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN" onkeydown="if(event.key==='Enter')admLogin()">
+      <button class="btn btn-primary" onclick="admLogin()">Entrar</button></div><div id="adm-err"></div>`;
+    setTimeout(()=>{ const i=document.getElementById('adm-pin'); if(i) i.focus(); }, 60);
+    return;
+  }
+  renderAdmin();
+}
+async function admLogin(){
+  const v=String(document.getElementById('adm-pin').value||'').trim(), err=document.getElementById('adm-err');
+  let pin; try{ pin=(await sbFetch('config/admin_pin.txt')).trim(); }
+  catch(e){ err.innerHTML=`<div class="err-box">${isNetErr(e)?'Sin conexión.':'Todavía no hay PIN: crea <b>recibo/config/admin_pin.txt</b> en el dashboard de Supabase.'}</div>`; return; }
+  if(!pin || v!==pin){ err.innerHTML='<div class="err-box">PIN incorrecto.</div>'; return; }
+  ADM.ok=true; renderAdmin();
+}
+function admTab(t){ ADM.tab=t; renderAdmin(); }
+async function renderAdmin(){
+  const tabs=[['recep','Recepciones'],['resp','Respaldos'],['recept','Receptores'],['alert',`Alertas${ADM.alertCount?' ('+ADM.alertCount+')':''}`]];
+  document.getElementById('admin-body').innerHTML=`<div class="tabs">${tabs.map(([k,n])=>`<button class="choice ${ADM.tab===k?'sel':''}" onclick="admTab('${k}')">${n}</button>`).join('')}</div><div id="adm-tab"><div class="muted">Cargando…</div></div>`;
+  admAlertCount();
+  try{ await ({ recep:admRecepciones, resp:admRespaldos, recept:admReceptores, alert:admAlertas })[ADM.tab](); }
+  catch(e){ document.getElementById('adm-tab').innerHTML=`<div class="err-box">${isNetErr(e)?'Sin conexión.':'Error: '+escapeHtml(e.message)}</div>`; }
+}
+async function admAlertCount(){
+  try{
+    const r=await pgSelect('rec_alerts', `fecha=eq.${todayStr()}&tipo=neq.digest&select=id`);
+    if(r.length!==ADM.alertCount){ ADM.alertCount=r.length; const b=[...document.querySelectorAll('.tabs .choice')].pop(); if(b) b.textContent=`Alertas${r.length?' ('+r.length+')':''}`; }
+  }catch(_){}
+}
+function hubSelectHtml(id, val, withAll){
+  return `<select id="${id}" onchange="ADM.${id==='adm-hub'?'hub':'area'}=this.value;renderAdmin()">${withAll?'<option value="">Todos</option>':''}`
+    +(id==='adm-hub' ? ADM_HUBS().map(h=>`<option value="${h.slug}" ${val===h.slug?'selected':''}>${escapeHtml(h.name)}</option>`).join('')
+                     : AREAS.map(a=>`<option value="${a.id}" ${val===a.id?'selected':''}>${a.name}</option>`).join(''))+`</select>`;
+}
+
+/* ── Recepciones: every hub+área, open and closed, by day (last 14 days) ── */
+let _admRecep=[];
+async function admRecepciones(){
+  const desde=localDateStr(new Date(serverNow().getTime()-14*86400000));
+  const evs=await pgSelectAll('rec_events', `tipo=in.(abrir,reemplazo,cerrar,admin)&fecha=gte.${desde}&select=id,session_id,hub,area,fecha,tipo,receptor,detalle,ts`);
+  const by=new Map();
+  for(const e of evs){
+    if(e.hub==='test-hub' && !IS_LOCAL) continue;
+    let r=by.get(e.session_id);
+    if(!r){ r={ session_id:e.session_id, hub:e.hub, area:e.area, fecha:e.fecha, abierta:e.ts, receptores:new Set(), cerrada:null, sinArchivo:false, envio:null }; by.set(e.session_id, r); }
+    if(e.receptor && e.receptor!=='Admin') r.receptores.add(e.receptor);
+    const d=e.detalle||{};
+    if(e.tipo==='abrir' || e.tipo==='reemplazo'){ if(d.envio) r.envio=d.envio; if(d.sin_archivo) r.sinArchivo=true; if(d.tras_sin_archivo) r.sinArchivo=false; }
+    if(e.tipo==='cerrar') r.cerrada=Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id }, d);
+    if(e.tipo==='admin' && d.accion==='reabrir') r.cerrada=null;
+  }
+  _admRecep=[...by.values()].sort((a,b)=>b.fecha.localeCompare(a.fecha) || a.hub.localeCompare(b.hub) || a.area.localeCompare(b.area));
+  let h='<div class="muted" style="margin-bottom:8px">Últimos 14 días. Una recepción abierta se reconstruye sola desde los eventos al abrirla en cualquier teléfono (Continuar recepción).</div>', day='';
+  _admRecep.forEach((r,i)=>{
+    if(r.fecha!==day){ day=r.fecha; h+=`<div class="section-title">${fechaLarga(day)}</div>`; }
+    const c=r.cerrada;
+    h+=`<div class="adm-row"><b>${escapeHtml(hubName(r.hub))} · ${areaName(r.area)}</b> — ${c?`<span class="tag green">✓ cerrada ${localHM(new Date(c.ts))}</span>`:`<span class="tag orange">abierta desde ${localHM(new Date(r.abierta))}</span>`}${r.sinArchivo?' <span class="tag red">sin archivo</span>':''}
+      <div class="muted" style="font-size:12px">${escapeHtml([...r.receptores].join(', ')||'—')}${c?` · ${c.lineas||0} productos · ${c.diferencias||0} con diferencia`:''}</div>
+      ${c?(c.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join(''):''}
+      <div class="btns">${c?`<button class="btn btn-secondary" onclick="openRecepcion(_admRecep[${i}].cerrada,'admin')">Ver</button>
+        <button class="btn btn-secondary" onclick="admDescargar(${i})">⬇ CSV</button><button class="btn btn-warn" onclick="admReabrir(${i})">Reabrir</button>`:''}</div></div>`;
+  });
+  document.getElementById('adm-tab').innerHTML=h||'<div class="empty-hint">Sin recepciones.</div>';
+}
+async function admDescargar(i){
+  const c=_admRecep[i].cerrada;
+  try{ downloadText(c.reporte.split('/').pop(), await sbFetch(c.reporte)); }catch(e){ toast('No se pudo descargar'); }
+}
+async function admReabrir(i){
+  const r=_admRecep[i];
+  const v=await showModal({ title:`¿Reabrir ${hubName(r.hub)} · ${areaName(r.area)} del ${fechaLarga(r.fecha)}?`,
+    html:'<p>Se podrá volver a escanear y cerrar. El reporte anterior se queda guardado como historial.</p>',
+    buttons:[{label:'Sí, reabrir', value:'si', kind:'warn'}], cancel:true });
+  if(v!=='si') return;
+  try{ await adminEvent(r, { accion:'reabrir', reporte_anterior:r.cerrada.reporte }); toast('✓ Recepción reabierta'); renderAdmin(); }
+  catch(e){ toast('No se pudo reabrir: '+e.message); }
+}
+
+/* ── Respaldos: every uploaded envío file stays in storage; an old one can be made active again ── */
+let _admFiles=[];
+async function admRespaldos(){
+  const items=await sbList(`envios/${ADM.hub}/${ADM.area}/`);
+  _admFiles=(items||[]).map(o=>o.name).filter(n=>/\.json$/.test(n)).sort().reverse();
+  let h=`<div class="adm-field">${hubSelectHtml('adm-hub', ADM.hub)} ${hubSelectHtml('adm-area', ADM.area)}</div>
+    <div class="muted" style="margin:10px 0">El archivo más reciente es el activo. "Hacer activo" copia un respaldo como el más reciente (con su misma recepción).</div>`;
+  h+=_admFiles.map((n,i)=>{ const m=n.match(/^(\d{4}-\d{2}-\d{2})__(\d+)/);
+    return `<div class="adm-row"><b>${m?fechaLarga(m[1])+' '+localHM(new Date(Number(m[2]))):escapeHtml(n)}</b> ${i===0?'<span class="tag green">activo</span>':''}
+      <div class="muted" style="font-size:12px">${escapeHtml(n)}</div><div class="btns">${i?`<button class="btn btn-secondary" onclick="admRestaurar(${i})">Hacer activo</button>`:''}</div></div>`; }).join('') || '<div class="empty-hint">No hay archivos para este hub y área.</div>';
+  document.getElementById('adm-tab').innerHTML=h;
+}
+async function admRestaurar(i){
+  const src=`envios/${ADM.hub}/${ADM.area}/${_admFiles[i]}`;
+  const v=await showModal({ title:'¿Hacer activo este archivo?', html:`<p>${escapeHtml(_admFiles[i])}</p>`, buttons:[{label:'Sí, hacer activo', value:'si', kind:'warn'}], cancel:true });
+  if(v!=='si') return;
+  try{
+    const data=JSON.parse(await sbFetch(src)), now=serverNow();
+    const dst=`envios/${ADM.hub}/${ADM.area}/${localDateStr(now)}__${now.getTime()}.json`;
+    data.restaurado_de=src; data.restauradoAt=now.toISOString(); delete data._path;
+    await sbUpload(dst, JSON.stringify(data), 'application/json');
+    await adminEvent({ session_id:data.session_id, hub:ADM.hub, area:ADM.area, fecha:data.session_fecha }, { accion:'restaurar', de:src, nuevo:dst });
+    toast('✓ Archivo activo'); renderAdmin();
+  }catch(e){ toast('No se pudo: '+e.message); }
+}
+
+/* ── Receptores: per-hub list → recibo/config/receptores.json (Inicio's name picker) ── */
+async function admReceptores(){
+  await loadReceptores();
+  const cur=(RECEPTORES && typeof RECEPTORES==='object') ? RECEPTORES : {};
+  document.getElementById('adm-tab').innerHTML=`<div class="muted" style="margin-bottom:10px">Un nombre por renglón. Es la lista que aparece en Inicio.</div>`
+    +ADM_HUBS().map(h=>`<div class="step-title" style="margin-top:12px">${escapeHtml(h.name)}</div><textarea class="text-input" data-hub="${h.slug}">${escapeHtml((cur[h.slug]||[]).join('\n'))}</textarea>`).join('')
+    +`<button class="btn btn-primary btn-block" style="margin-top:14px" onclick="admGuardarReceptores()">Guardar receptores</button>`;
+}
+async function admGuardarReceptores(){
+  const out={};
+  document.querySelectorAll('#adm-tab textarea[data-hub]').forEach(t=>{
+    const names=[...new Set(t.value.split('\n').map(x=>x.trim().replace(/\s+/g,' ')).filter(x=>x.length>=2))];
+    if(names.length) out[t.dataset.hub]=names;
+  });
+  try{ await sbUpload('config/receptores.json', JSON.stringify(out, null, 1), 'application/json'); RECEPTORES=out; toast('✓ Receptores guardados'); }
+  catch(e){ toast('No se pudo guardar: '+e.message); }
+}
+
+/* ── Alertas (§6.9): per hub×área schedule in rec_alert_config — nothing hard-coded, everything starts off ── */
+let _admCfg=new Map();
+async function admAlertas(){
+  const [cfg, alerts]=await Promise.all([ pgSelect('rec_alert_config','select=*'),
+    pgSelect('rec_alerts', `fecha=gte.${localDateStr(new Date(serverNow().getTime()-30*86400000))}&select=*&order=id.desc&limit=200`) ]);
+  _admCfg=new Map(cfg.map(c=>[c.hub+'|'+c.area, c]));
+  let h=`<div class="muted">Las alertas llegan a <b>jose.romero@calii.com</b> desde el Apps Script (alertas/apps-script.gs). Una alerta no se puede activar sin días y hora límite (o modo "tras armado").</div>`;
+  h+=`<div class="section-title">Alertas recientes</div>`+(alerts.length?alerts.slice(0,40).map(a=>`<div class="adm-row"><b>${a.tipo==='digest'?'Resumen del día':escapeHtml(hubName(a.hub))+' · '+escapeHtml(areaName(a.area))}</b> · ${fechaLarga(a.fecha)}
+      <span class="tag ${a.tipo==='sin_recepcion'?'red':a.tipo==='sin_cerrar'?'orange':''}">${escapeHtml(a.tipo.replace('_',' '))}</span>${a.enviado_email?' ✉️':''}
+      <div class="muted" style="font-size:12px;white-space:pre-line">${escapeHtml(String(a.mensaje||'').slice(0,400))}</div></div>`).join(''):'<div class="muted">Sin alertas en los últimos 30 días.</div>');
+  h+=`<div class="section-title">Horario por hub y área</div>`;
+  for(const hb of ADM_HUBS()) for(const ar of AREAS){
+    const k=hb.slug+'|'+ar.id, c=_admCfg.get(k)||{ activo:false, email:true, dias:[], hora_limite:null, pausado_hasta:null, modo:'diario', dias_gracia:3 };
+    const id=(hb.slug+'-'+ar.id).replace(/[^a-z0-9-]/g,'');
+    h+=`<div class="adm-row" id="cfg-${id}"><b>${escapeHtml(hb.name)} · ${ar.name}</b> ${c.activo?'<span class="tag green">activa</span>':'<span class="tag">apagada</span>'}${c.pausado_hasta && c.pausado_hasta>=todayStr()?` <span class="tag orange">⏸ hasta ${fechaLarga(c.pausado_hasta)}</span>`:''}
+      <div class="adm-field"><label><input type="checkbox" data-f="activo" ${c.activo?'checked':''}> Activa</label><label><input type="checkbox" data-f="email" ${c.email?'checked':''}> Email</label>
+        <select data-f="modo"><option value="diario" ${c.modo!=='tras_armado'?'selected':''}>Diario</option><option value="tras_armado" ${c.modo==='tras_armado'?'selected':''}>Tras armado (hubs irregulares)</option></select></div>
+      <div class="adm-field">${DIAS.map((d,i)=>`<label class="day-chk"><input type="checkbox" data-dia="${i}" ${(c.dias||[]).includes(i)?'checked':''}>${d}</label>`).join('')}</div>
+      <div class="adm-field">Hora límite <input type="time" data-f="hora_limite" value="${c.hora_limite?String(c.hora_limite).slice(0,5):''}"> · Días de gracia <input type="number" min="1" max="14" data-f="dias_gracia" value="${c.dias_gracia||3}" style="width:60px"></div>
+      <div class="adm-field">Pausar hasta <input type="date" data-f="pausado_hasta" value="${c.pausado_hasta||''}"></div>
+      <div class="qty-err" id="cfgerr-${id}"></div>
+      <div class="btns"><button class="btn btn-primary" onclick="admGuardarCfg('${hb.slug}','${ar.id}','${id}')">Guardar</button></div></div>`;
+  }
+  document.getElementById('adm-tab').innerHTML=h;
+}
+async function admGuardarCfg(hub, area, id){
+  const el=document.getElementById('cfg-'+id), err=document.getElementById('cfgerr-'+id), f=n=>el.querySelector(`[data-f="${n}"]`);
+  const dias=[...el.querySelectorAll('[data-dia]')].filter(x=>x.checked).map(x=>Number(x.dataset.dia));
+  const row={ hub, area, activo:f('activo').checked, email:f('email').checked, modo:f('modo').value, dias,
+    hora_limite:f('hora_limite').value||null, dias_gracia:Math.max(1, Number(f('dias_gracia').value)||3),
+    pausado_hasta:f('pausado_hasta').value||null, updated_at:serverNow().toISOString() };
+  if(row.activo && row.modo==='diario' && (!dias.length || !row.hora_limite)){ err.textContent='Para activarla, elige los días y la hora límite.'; return; }
+  try{ await pgUpsert('rec_alert_config', [row], 'hub,area'); toast('✓ Guardado'); renderAdmin(); }
+  catch(e){ err.textContent='No se pudo guardar: '+e.message; }
 }
 
 /* ════════════════════════════════════════════════════════════════════════════════════
