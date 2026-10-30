@@ -126,6 +126,14 @@ mark{background:var(--yellow-light);color:inherit;padding:0 3px;border-radius:4p
 .banner.red{background:var(--red-light);color:var(--red)}
 .banner.blue{background:#E3F2FD;color:#1565C0;font-size:16px}
 .banner.gray{background:var(--gray-100);color:var(--gray-700);font-weight:600}
+.banner.yellow{background:var(--yellow-light);border:2px solid var(--yellow);color:var(--gray-900)}
+.sib-row{display:flex;gap:8px;align-items:center;margin-top:8px;font-weight:600;font-size:13px}
+.sib-row img,.sib-row .thumb-none{width:52px;height:52px;object-fit:contain;flex-shrink:0;border-radius:6px;background:white}
+.unit-pick{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.unit-pick .choice{text-align:center}
+.look-item{display:flex;gap:10px;align-items:center;background:white;border:2px solid var(--gray-300);border-radius:var(--radius-sm);padding:8px;width:100%;text-align:left;cursor:pointer;margin-top:6px}
+.look-item img,.look-item .thumb-none{width:56px;height:56px;object-fit:contain;flex-shrink:0}
+.look-cta{font-size:12px;font-weight:800;color:var(--green-dark);white-space:nowrap}
 .qty-label{font-size:13px;font-weight:800;color:var(--gray-700);margin-bottom:6px;display:block}
 .qty-input{width:100%;font-size:32px;font-weight:900;padding:10px 14px;border:3px solid var(--gray-300);border-radius:var(--radius-sm);outline:none;text-align:center}
 .qty-input:focus{border-color:var(--green)}
@@ -257,7 +265,7 @@ mark{background:var(--yellow-light);color:inherit;padding:0 3px;border-radius:4p
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'v1 · fase 1';
+const APP_VERSION = 'v1 · fase 2';
 
 /* ════════════════════════════════════════════════════════════════════════════════════
    SUPABASE — shared project with Armado CH + Sorting Hub (plan §3). This app writes ONLY to bucket
@@ -555,6 +563,12 @@ function nameHtml(name){
   if(!p) return escapeHtml(s);
   return escapeHtml(s.slice(0,p.i))+'<mark>'+escapeHtml(p.t)+'</mark>'+escapeHtml(s.slice(p.i+p.t.length));
 }
+// §7.2 family key: the name without size/weight/count tokens ("Oreo 210g" ~ "Oreo 114g")
+const SIZE_RE=/\d+(?:[.,]\d+)?\s?(?:kg|kgs|gr|grs|g|mg|ml|lt|lts|l|oz|pzs|pz|piezas)(?![a-z])/gi;
+function familyKey(name){
+  const s=String(name||'').replace(/\([^)]*\d[^)]*\)/g,' ').replace(SIZE_RE,' ');
+  return normName(s).replace(/\b(de|con|x)$/,'').trim();
+}
 function imgTag(barcode, producto, cls){
   const u=getImgUrl(barcode, producto);
   return u ? `<img class="${cls}" src="${escapeHtml(u)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'${cls==='thumb'?'thumb-none':'pcard-noimg'}',textContent:'📦'}))">`
@@ -615,11 +629,10 @@ function showModal({title, html='', buttons, cancel=false}){
     const act=document.getElementById('modal-actions');
     act.innerHTML=buttons.map((b,i)=>`<button class="btn btn-${b.kind||'secondary'} btn-block" data-i="${i}">${escapeHtml(b.label)}</button>`).join('')
       +(cancel?`<button class="link-btn" data-cancel="1">Cancelar</button>`:'');
-    act.querySelectorAll('button').forEach(btn=>btn.onclick=()=>{
-      const v=btn.dataset.cancel?null:buttons[Number(btn.dataset.i)].value;
-      document.getElementById('modal-bg').classList.remove('open'); _modalResolve=null; res(v);
-      setTimeout(focusScan,30);
-    });
+    const done=v=>{ document.getElementById('modal-bg').classList.remove('open'); _modalResolve=null; res(v); setTimeout(focusScan,30); };
+    act.querySelectorAll('button').forEach(btn=>btn.onclick=()=>done(btn.dataset.cancel?null:buttons[Number(btn.dataset.i)].value));
+    // Choices inside the body (e.g. §7.1 look-alikes) answer the modal too: data-mv="value"
+    document.getElementById('modal-body').querySelectorAll('[data-mv]').forEach(b=>b.onclick=()=>done(b.dataset.mv));
     document.activeElement && document.activeElement.blur && document.activeElement.blur();
     document.getElementById('modal-bg').classList.add('open');
   });
@@ -683,19 +696,27 @@ function renderInicio(){
 function inicioActionsHtml(){
   const a=INI.active;
   const subir=`<button class="btn btn-secondary btn-block" onclick="openSubir()">📄 Subir envío</button>`;
+  // §6.2b — the truck arrived before its file (mostly Carnes)
+  const sinArch=`<button class="btn btn-secondary btn-block" onclick="startSinArchivo()">📦 Empezar sin archivo</button>`;
   if(a===undefined) return `<div class="muted">Buscando el envío activo…</div>`;
   if(a.offline && !a.data) return `<div class="warn-box">Sin conexión. Conéctate a internet para cargar el envío.</div><button class="btn btn-secondary btn-block" onclick="refreshActive()">Reintentar</button>`;
-  if(a.none) return `<div class="info-card">Todavía no hay un envío cargado para este hub y área.</div><button class="btn btn-primary btn-block" onclick="openSubir()">📄 Subir envío</button>`;
+  if(a.none) return `<div class="info-card">Todavía no hay un envío cargado para este hub y área.</div><div class="stack"><button class="btn btn-primary btn-block" onclick="openSubir()">📄 Subir envío</button>${sinArch}</div>`;
   const d=a.data, today=todayStr();
+  if(d.sinArchivo && !a.closed){
+    return `<div class="info-card"><b>Recepción sin archivo</b>, empezada el ${fechaLarga(d.fecha)} a las ${localHM(new Date(d.uploadedAt))}${d.receptor?' por '+escapeHtml(d.receptor):''}.
+      <div class="muted" style="margin-top:4px">Sube el envío cuando esté listo: lo escaneado se conserva y se revisa.</div></div>
+      <div class="stack"><button class="btn btn-primary btn-block" onclick="continuarRecepcion()">▶ Continuar recepción</button>${a.offline?'':subir}</div>`;
+  }
   let info=`<b>Envío cargado el ${fechaLarga(d.fecha)}</b>, ${localHM(new Date(d.uploadedAt))} · ${d.stats.lineas} productos`
     +`<div class="muted" style="font-size:12px;margin-top:2px">${escapeHtml(d.sourceFile||'')}${d.receptor?' · subido por '+escapeHtml(d.receptor):''}</div>`;
   if(d.session_fecha && d.session_fecha<today && !a.closed) info+=`<div style="margin-top:6px"><span class="tag orange">Recepción abierta desde el ${fechaLarga(d.session_fecha)}</span></div>`;
   if(a.offline) info+=`<div style="margin-top:6px"><span class="tag red">Sin conexión — copia guardada en este teléfono</span></div>`;
   if(a.closed){
-    // §6.7 — no scanning against a closed file. (Ver resumen arrives with Phase 3.)
-    return `<div class="info-card"><b>El archivo cargado ya se recibió el ${fechaLarga(localDateStr(new Date(a.closed)))}.</b></div>`+subir.replace('btn-secondary','btn-primary');
+    // §6.7 — no scanning against a closed file
+    return `<div class="info-card"><b>El archivo cargado ya se recibió el ${fechaLarga(localDateStr(new Date(a.closed)))}.</b></div>`
+      +`<div class="stack"><button class="btn btn-secondary btn-block" onclick="verResumenCerrado()">📊 Ver resumen</button>${subir.replace('btn-secondary','btn-primary')}${d.fecha<today?sinArch:''}</div>`;
   }
-  return `<div class="info-card">${info}</div><div class="stack"><button class="btn btn-primary btn-block" onclick="continuarRecepcion()">▶ Continuar recepción</button>${a.offline?'':subir}</div>`;
+  return `<div class="info-card">${info}</div><div class="stack"><button class="btn btn-primary btn-block" onclick="continuarRecepcion()">▶ Continuar recepción</button>${a.offline?'':subir}${(!a.offline && d.session_fecha<today)?sinArch:''}</div>`;
 }
 async function refreshActive(){
   const tok=++_activeTok; INI.active=undefined; renderInicio();
@@ -841,13 +862,14 @@ async function doUpload(){
   const prev=await findActiveEnvio(slug, area);
   if(prev.offline) throw new TypeError('offline');
   let reuse=false;
-  if(prev.data && !prev.closed){
+  if(prev.data && !prev.closed && prev.data.sinArchivo) reuse=true; // §6.2b — the file of the reception already started
+  else if(prev.data && !prev.closed){
     if(await sessionHasScans(prev.data.session_id)){
       const v=await showModal({ title:'Esta recepción ya tiene productos escaneados',
         html:`<p>Lo escaneado es conteo físico: se conserva y se vuelve a comparar contra el archivo nuevo.</p>`,
         buttons:[{label:'Reemplazar el archivo y conservar lo escaneado', value:'replace', kind:'primary'},
                  {label:'Primero cerrar la recepción actual', value:'close', kind:'secondary'}], cancel:true });
-      if(v==='close'){ SUBIR=null; openRecibir(prev.data); return; } // Resumen y cierre lands in Phase 3
+      if(v==='close'){ SUBIR=null; openRecibir(prev.data); openResumen(); return; }
       if(v!=='replace') return;
       reuse=true;
     } else if(prev.data.session_fecha===fecha) reuse=true; // same day, nothing scanned → simply replaces
@@ -862,10 +884,28 @@ async function doUpload(){
   await sbUpload(base+'.json', JSON.stringify(data), 'application/json'); // written last: its presence makes it active
   data._path=base+'.json';
   const fileName=SUBIR.file.name; SUBIR=null;
-  openRecibir(data);
+  const wasSinArchivo=reuse && prev.data.sinArchivo;
+  openRecibir(data, { revisar:wasSinArchivo });
   recordEvent(makeEvent(reuse?'reemplazo':'abrir', { detalle:{ envio:base+'.json', csv:base+'.csv', archivo:fileName,
-    lineas:P.stats.lineas, anterior:reuse?prev.path:undefined } }));
-  toast(reuse?'✓ Archivo reemplazado — lo escaneado se conserva':'✓ Envío cargado. Empieza a escanear.');
+    lineas:P.stats.lineas, anterior:reuse?prev.path:undefined, tras_sin_archivo:wasSinArchivo||undefined } }));
+  toast(wasSinArchivo?'✓ Archivo cargado — revisando lo escaneado':reuse?'✓ Archivo reemplazado — lo escaneado se conserva':'✓ Envío cargado. Empieza a escanear.');
+}
+// §6.2b — start receiving before the file exists. A placeholder envío JSON makes the reception visible to
+// other phones; the real upload later reuses its session_id.
+async function startSinArchivo(){
+  const slug=INI.hub, area=INI.area, now=serverNow(), epochMs=now.getTime(), fecha=localDateStr(now);
+  let prev; try{ prev=await findActiveEnvio(slug, area); }catch(_){ prev={offline:true}; }
+  if(prev.offline){ toast('Sin conexión: conéctate para empezar la recepción'); return; }
+  if(prev.data && !prev.closed && prev.data.session_fecha===fecha){ toast('Ya hay una recepción abierta hoy: continúala'); refreshActive(); return; }
+  const session_id=`${slug}__${area}__${fecha}__${epochMs}`, base=`envios/${slug}/${area}/${fecha}__${epochMs}`;
+  const data={ v:1, hub:slug, area, fecha, epochMs, uploadedAt:now.toISOString(), receptor:INI.receptor, sinArchivo:true,
+    sourceFile:'', session_id, session_fecha:fecha, stats:{ lineas:0, kg:0, sinCodigo:0, catalogo:0, renglones:0 }, lines:[], catalogo:[] };
+  try{ await sbUpload(base+'.json', JSON.stringify(data), 'application/json'); }
+  catch(e){ toast(isNetErr(e)?'Sin conexión: intenta de nuevo':'No se pudo empezar ('+e.message+')'); return; }
+  data._path=base+'.json';
+  openRecibir(data);
+  recordEvent(makeEvent('abrir', { detalle:{ envio:base+'.json', sin_archivo:true } }));
+  toast('Recepción sin archivo: empieza a escanear');
 }
 
 /* ════════════════════════════════════════════════════════════════════════════════════
@@ -983,11 +1023,17 @@ function recibidoDe(sku){ return S.recibido.get(sku)||0; }
 Object.assign(S, { hub:null, area:null, receptor:null, envio:null, session:null, lines:new Map(), catalog:new Map(),
   catByCode:new Map(), events:[], eventUids:new Set(), recibido:new Map(), adjByRef:new Map(), noEsperados:new Map(),
   current:null, corrigiendo:null });
-function openRecibir(data){
-  S.hub=INI.hub; S.area=INI.area; S.receptor=INI.receptor;
-  S.envio=data; S.session={ id:data.session_id, fecha:data.session_fecha };
+function setEnvio(data){
+  S.envio=data;
   S.lines=new Map(data.lines.map(l=>[l.sku_key, Object.assign(l, { _n:normName(l.producto) })]));
-  S.events=[]; S.eventUids=new Set(); S.current=null; S.corrigiendo=null;
+  S.famLines=new Map();
+  for(const l of S.lines.values()){ const f=familyKey(l.producto); if(f.length<4) continue; if(!S.famLines.has(f)) S.famLines.set(f,[]); S.famLines.get(f).push(l); }
+}
+function openRecibir(data, opts={}){
+  S.hub=INI.hub; S.area=INI.area; S.receptor=INI.receptor;
+  S.session={ id:data.session_id, fecha:data.session_fecha };
+  setEnvio(data);
+  S.events=[]; S.eventUids=new Set(); S.current=null; S.corrigiendo=null; S.staleAsked=false;
   buildCatalog();
   const m=latestMirror(S.hub, S.area);
   if(m && m.envio && m.envio.session_id===S.session.id) addEvents(m.events);
@@ -999,8 +1045,21 @@ function openRecibir(data){
   showScreen('screen-recibir');
   renderRecibir(); focusScan();
   loadSorting(S.hub).then(()=>{ buildCatalog(); renderRecibir(); });
-  syncServerEvents();
+  syncServerEvents().then(()=>{ if(opts.revisar && revisarItems().length) openRevisar(); });
   flushOutbox();
+  staleCheck();
+}
+/* ── §6.7 stale warning: the active file was uploaded on an earlier day. Ignorar lasts for that file today. ── */
+function staleIgnored(){ try{ return localStorage.getItem('mr_stale_ign_'+S.envio._path)===todayStr(); }catch(_){ return S.staleIgnMem===S.envio._path+todayStr(); } }
+async function staleCheck(){
+  if(!S.envio || S.envio.sinArchivo || !(S.envio.fecha<todayStr()) || staleIgnored() || modalOpen()) return true;
+  S.staleAsked=true;
+  const v=await showModal({ title:`Estás trabajando con el archivo cargado el ${fechaLarga(S.envio.fecha)}.`,
+    html:'<p>Carga el archivo de hoy.</p>',
+    buttons:[{label:'Cargar archivo de hoy', value:'subir', kind:'primary'}, {label:'Ignorar', value:'ign', kind:'secondary'}] });
+  if(v==='subir'){ S.current=null; openSubir(); return false; }
+  try{ localStorage.setItem('mr_stale_ign_'+S.envio._path, todayStr()); }catch(_){ S.staleIgnMem=S.envio._path+todayStr(); }
+  return true;
 }
 async function syncServerEvents(){
   // Phase 4 adds the 15 s poll (id=gt.last) for other phones; here: one full read on open.
@@ -1029,12 +1088,23 @@ function buildCatalog(){
 function renderRecibir(){
   const total=S.lines.size; let got=0;
   for(const k of S.lines.keys()) if(recibidoDe(k)>0) got++;
-  document.getElementById('rec-progress').innerHTML=`<b>${got}</b> / ${total} productos recibidos`;
-  document.getElementById('rec-bar').style.width=(total?Math.round(got*100/total):0)+'%';
-  document.getElementById('pend-count').textContent=`(${total-got})`;
+  const sinArch=!!S.envio.sinArchivo;
+  if(sinArch){
+    const n=[...S.recibido.values()].filter(q=>q>0).length;
+    document.getElementById('rec-progress').innerHTML=`<b>${n}</b> productos escaneados · <span class="tag orange">sin archivo</span>`;
+    document.getElementById('rec-bar').style.width='0%';
+    document.getElementById('pend-count').textContent='';
+  } else {
+    document.getElementById('rec-progress').innerHTML=`<b>${got}</b> / ${total} productos recibidos`;
+    document.getElementById('rec-bar').style.width=(total?Math.round(got*100/total):0)+'%';
+    document.getElementById('pend-count').textContent=`(${total-got})`;
+  }
   let banner='';
-  if(S.sortStatus==='none') banner=`<div class="note">${escapeHtml(hubName(S.hub))} todavía no tiene archivo en Sorting Hub: las tarjetas no mostrarán canasta.</div>`;
-  else if(S.sortStatus==='err') banner=`<div class="note">No se pudo cargar el sorting de este hub: las tarjetas no mostrarán canasta.</div>`;
+  if(sinArch) banner+=`<div class="note"><b>Recibiendo sin archivo.</b> Escanea y cuenta normal; cuando el envío esté listo, súbelo desde Inicio → Subir envío y la app revisará todo lo escaneado.</div>`;
+  const rev=sinArch?[]:revisarItems();
+  if(rev.length) banner+=`<button class="btn btn-warn btn-block" style="margin-bottom:10px" onclick="openRevisar()">⚠ Revisar ahora · ${rev.length}</button>`;
+  if(S.sortStatus==='none') banner+=`<div class="note">${escapeHtml(hubName(S.hub))} todavía no tiene archivo en Sorting Hub: las tarjetas no mostrarán canasta.</div>`;
+  else if(S.sortStatus==='err') banner+=`<div class="note">No se pudo cargar el sorting de este hub: las tarjetas no mostrarán canasta.</div>`;
   document.getElementById('rec-banner').innerHTML=banner;
   renderCard(); renderRecent(); renderNet();
 }
@@ -1101,11 +1171,15 @@ async function processScan(raw, metodo){
   const now=Date.now();
   if(code===_lastScan.code && now-_lastScan.time<1500) return; // debounce a double trigger
   _lastScan={ code, time:now };
+  // §6.7 — also at the first scan of the day (a page left open overnight)
+  if(!S.staleAsked && !(await staleCheck())) return;
   let r=resolveCode(code);
   if(!r){ const g=extractEmbeddedGTIN(code.replace(/\D/g,'')); if(g) r=resolveCode(g); }
   const det={ codigo:code, teclado:metodo==='teclado'||undefined };
   const m=metodo==='teclado' ? 'scanner' : metodo;
   if(r && r.line){ vibrate(true); openCard({ ...r.line, enEnvio:true }, m, det); return; }
+  // §6.2b — no file yet: nothing can be flagged; the unit is asked on the card
+  if(r && r.product && S.envio.sinArchivo){ vibrate(true); openCard(sinArchivoProduct(r.product), m, det); return; }
   vibrate(false);
   if(r && r.product){ await notInEnvio(r.product, m, det); return; }
   // §6.3.3 — unknown barcode
@@ -1114,15 +1188,57 @@ async function processScan(raw, metodo){
   if(v==='search') openSinCodigo();
 }
 function vibrate(ok){ try{ if(navigator.vibrate) navigator.vibrate(ok?70:[60,50,60]); }catch(_){} }
-// §7.1 — not in the envío. Phase 2 adds up to 3 look-alikes from the envío ("Era este otro").
+/* ── Families (§7.2): envío lines grouped by familyKey; built in openRecibir ── */
+function siblingsOf(p){
+  const f=familyKey(p.producto); if(f.length<4) return [];
+  return (S.famLines.get(f)||[]).filter(l=>l.sku_key!==p.sku_key);
+}
+// §7.1 look-alikes: same family first, then envío lines sharing ≥2 significant words
+function lookAlikes(p){
+  const out=siblingsOf(p).slice(0,3); if(out.length>=3) return out;
+  const words=new Set(normName(p.producto).split(' ').filter(w=>w.length>=4 && !/\d/.test(w)));
+  if(words.size<2) return out;
+  const scored=[];
+  for(const l of S.lines.values()){
+    if(out.includes(l) || l.sku_key===p.sku_key) continue;
+    let n=0; for(const w of new Set(l._n.split(' '))) if(words.has(w)) n++;
+    if(n>=2) scored.push({ l, n });
+  }
+  scored.sort((a,b)=>b.n-a.n || a.l._n.localeCompare(b.l._n));
+  return out.concat(scored.slice(0,3-out.length).map(x=>x.l));
+}
+// §7.1 — not in the envío: photo of what was scanned + up to 3 envío look-alikes ("Era este otro")
 async function notInEnvio(p, metodo, det){
+  const looks=lookAlikes(p);
+  const looksHtml=looks.length ? `<p style="margin:12px 0 0;font-weight:700;color:var(--gray-900)">¿Era alguno de estos? Sí vienen en el envío:</p>`
+    +looks.map((l,i)=>{ const pos=positionOf(l.barcode, l.producto);
+      return `<button class="look-item" data-mv="look:${i}">${imgTag(l.barcode, l.producto, 'thumb')}<div style="flex:1;min-width:0"><div class="res-name">${nameHtml(l.producto)}</div>`
+        +`<div class="res-sub">${pos?escapeHtml(pos.palabra+' '+pos.full):'sin posición'}</div></div><span class="look-cta">Era este otro</span></button>`; }).join('') : '';
   const v=await showModal({ title:'Este producto no viene en el envío.',
-    html:`<div class="modal-prod">${imgTag(p.barcode, p.producto, 'thumb')}<div class="res-name">${nameHtml(p.producto)}</div></div>`,
+    html:`<div class="modal-prod">${imgTag(p.barcode, p.producto, 'thumb')}<div class="res-name">${nameHtml(p.producto)}</div></div>${looksHtml}`,
     buttons:[{label:'Volver a escanear', value:'again', kind:'primary'}, {label:'Sí, llegó este producto', value:'yes', kind:'danger'}] });
   if(v==='yes') openCard({ ...p, enEnvio:false }, metodo, det);
+  else if(v && v.startsWith('look:')){
+    const l=looks[Number(v.slice(5))];
+    // The scan is re-attributed to the chosen envío line; detalle keeps what was actually scanned
+    if(l) openCard({ ...l, enEnvio:true }, metodo, Object.assign({}, det, { reatribuido_de:{ sku_key:p.sku_key, producto:p.producto } }));
+  }
 }
 
 /* ── Product card ── */
+// §6.2b — without a file the unit isn't known: the receptor picks Pz / Kg on the card
+function sinArchivoProduct(p){ return { ...p, enEnvio:null, kgpz:null, kgpzUnknown:true }; }
+// Recontar (§6.2b Revisar ahora, §6.5): the receptor types the TOTAL counted now; stored as an ajuste
+function openRecount(sku, origen){
+  const l=S.lines.get(sku), ne=S.noEsperados.get(sku);
+  const p=l ? { ...l, enEnvio:true } : { sku_key:sku, producto:ne?ne.producto:sku, barcode:sku.startsWith('name:')?'':sku, kgpz:ne?ne.kgpz:'Pz', enEnvio:false };
+  if(!document.getElementById('screen-recibir').classList.contains('active')) showScreen('screen-recibir');
+  closeSheet();
+  S.current={ p, metodo:'recuento', det:{ recuento:true, origen }, recount:true };
+  renderCard();
+  const q=document.getElementById('qty-input'); if(q) setTimeout(()=>q.focus(), 40);
+  document.getElementById('card-area').scrollIntoView({ block:'start', behavior:'smooth' });
+}
 function openCard(p, metodo, det={}){
   const prev=S.current;
   if(prev && prev.p.sku_key!==p.sku_key) toast(`No se registró «${prev.p.producto}» (sin cantidad)`, 3000);
@@ -1138,8 +1254,12 @@ function renderCard(){
   if(!c){ el.innerHTML=S.events.some(e=>e.tipo==='scan')?'':'<div class="empty-hint">Escanea el primer producto para empezar.</div>'; return; }
   const p=c.p, kg=p.kgpz==='Kg', pos=positionOf(p.barcode, p.producto), pres=presentacion(p.producto), ya=recibidoDe(p.sku_key);
   const hadFocus=document.activeElement && document.activeElement.id==='qty-input';
-  el.innerHTML=`<div class="pcard ${p.enEnvio?'':'noesp'}">
-    ${p.enEnvio?'':'<div class="banner red">No viene en el envío — se registra como <b>No esperado</b></div>'}
+  const sibs=p.enEnvio===false?[]:siblingsOf(p);
+  const top = c.recount ? `<div class="banner yellow">🔁 <b>Recontar:</b> cuenta otra vez todo lo que hay de este producto y escribe el total.</div>`
+    : p.enEnvio===false ? '<div class="banner red">No viene en el envío — se registra como <b>No esperado</b></div>'
+    : p.enEnvio===null ? '<div class="banner gray">Sin archivo: se revisará cuando subas el envío.</div>' : '';
+  el.innerHTML=`<div class="pcard ${p.enEnvio===false?'noesp':''}">
+    ${top}
     <div class="pcard-top">
       ${imgTag(p.barcode, p.producto, 'pcard-img')}
       <div class="basket">${pos
@@ -1147,11 +1267,13 @@ function renderCard(){
         : `<div class="basket-none">Sin posición en el sorting de ${escapeHtml(hubName(S.hub))}</div>`}</div>
     </div>
     <div class="pcard-name">${nameHtml(p.producto)}</div>
-    <div class="pcard-tags">${pres?`<span class="pres-chip">${escapeHtml(pres.t)}</span>`:''}<span class="unit-chip ${kg?'kg':''}">${kg?'Kg':'Pz'}</span>${p.barcode?'':'<span class="tag">sin código</span>'}</div>
-    <div id="sibling-slot"></div>
-    ${ya>0?`<div class="banner gray">Ya registraste ${fmtQty(ya,p.kgpz)} ${unitOf(p.kgpz)} de este producto.</div>`:''}
+    <div class="pcard-tags">${pres?`<span class="pres-chip">${escapeHtml(pres.t)}</span>`:''}${p.kgpz?`<span class="unit-chip ${kg?'kg':''}">${kg?'Kg':'Pz'}</span>`:''}${p.barcode?'':'<span class="tag">sin código</span>'}</div>
+    <div id="sibling-slot">${sibs.length?`<div class="banner yellow">⚠️ Ojo: también vienen ${sibs.map(s=>'<b>'+escapeHtml(s.producto)+'</b>').join(', ')}. Cuenta por separado.
+      ${sibs.slice(0,3).map(s=>`<div class="sib-row">${imgTag(s.barcode, s.producto, 'thumb')}<span>${nameHtml(s.producto)}</span></div>`).join('')}</div>`:''}</div>
+    ${p.kgpzUnknown?`<div class="qty-label">¿Cómo se recibe?</div><div class="unit-pick">${['Pz','Kg'].map(u=>`<button class="choice ${p.kgpz===u?'sel':''}" onclick="pickUnit('${u}')">${u==='Kg'?'⚖️ Por peso (Kg)':'🔢 Por pieza (Pz)'}</button>`).join('')}</div>`:''}
+    ${ya>0?`<div class="banner gray">Ya registraste ${fmtQty(ya,p.kgpz||'Kg')} ${p.kgpz?unitOf(p.kgpz):''} de este producto.</div>`:''}
     ${kg?'<div class="banner blue">⚖️ Pésalo en la báscula</div>':''}
-    <label class="qty-label" for="qty-input">${kg?'kg (báscula)':'Piezas contadas'}</label>
+    <label class="qty-label" for="qty-input">${c.recount?(kg?'Total en kg (báscula)':'Total de piezas contadas ahora'):kg?'kg (báscula)':'Piezas contadas'}</label>
     <input id="qty-input" class="qty-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}">
     <div class="qty-err" id="qty-err"></div>
     <div class="pcard-actions"><button class="btn btn-secondary" onclick="cancelCard()">Cancelar</button><button class="btn btn-primary" onclick="confirmCard()">Registrar</button></div>
@@ -1184,26 +1306,84 @@ function parseQty(raw, kgpz, allowZero=false){
   const n=round2(Number(s));
   return (n>0 || (allowZero && n===0)) ? n : null;
 }
-// Phase 2 slots in here: §7.2 "¿Revisaste pieza por pieza…?" and §7.4 over-enviado / typo guards.
-async function guardQty(p, qty){ return true; }
+function pickUnit(u){ if(!S.current) return; S.current.p.kgpz=u; renderCard(); const q=document.getElementById('qty-input'); if(q) q.focus(); }
+// §7.6 scale tolerance: ±5% of enviado or ±0.10 kg, whichever is larger
+function kgTol(esperado){ return Math.max(0.05*esperado, 0.10); }
+function overEnviado(line, total){ return line.kgpz==='Kg' ? total > round2(line.esperado+kgTol(line.esperado)) : total > line.esperado; }
+// §7.2-qty + §7.4 — blocking only to stop a wrong number; the enviado number is never shown (still blind).
+async function guardQty(c, qty){
+  const p=c.p, line=p.enEnvio ? S.lines.get(p.sku_key) : null, kg=p.kgpz==='Kg', u=unitOf(p.kgpz);
+  const total = c.recount ? qty : round2(recibidoDe(p.sku_key)+qty);
+  if(line){
+    if(overEnviado(line, total)){
+      if(!c.overWarned){
+        c.overWarned=true;
+        await showModal({ title:'Esta cantidad es mayor a lo enviado. Vuelve a contar.',
+          html:`<p>Cuenta otra vez ${kg?'(pésalo de nuevo)':'pieza por pieza'} y escribe la cantidad.</p>`,
+          buttons:[{label:'Volver a contar', value:'again', kind:'primary'}] });
+        const q=document.getElementById('qty-input'); if(q){ q.value=''; c.val=''; }
+        return false;
+      }
+      c.det.sobrante=true; // counted twice and still above: stored and flagged Sobrante for the summary
+    }
+    // Typo guard: 120 instead of 12
+    const big = kg ? (qty>3*line.esperado || qty>50) : (qty>3*line.esperado || qty>200);
+    if(big && c.typoOk!==qty){
+      const v=await showModal({ title:`¿Seguro que son ${fmtQty(qty,p.kgpz)} ${u}?`,
+        html:`<p>Es mucho más de lo normal para este producto. Revisa que no sobre un número.</p>`,
+        buttons:[{label:`Sí, son ${fmtQty(qty,p.kgpz)} ${u}`, value:'yes', kind:'warn'}, {label:'Corregir', value:'no', kind:'secondary'}] });
+      if(v!=='yes') return false;
+      c.typoOk=qty;
+    }
+    // §7.2-qty: sibling in the envío and more than one piece
+    if(!kg && qty>1 && siblingsOf(p).length && c.sibOk!==qty){
+      const pres=presentacion(p.producto);
+      const v=await showModal({ title:`¿Revisaste pieza por pieza que las ${qty} son ${pres?pres.t:p.producto}?`,
+        html:`<p>En este envío también viene ${siblingsOf(p).map(s=>'<b>'+escapeHtml(s.producto)+'</b>').join(', ')}.</p>`,
+        buttons:[{label:'Sí, todas', value:'yes', kind:'primary'}, {label:'Voy a revisar', value:'no', kind:'secondary'}] });
+      if(v!=='yes') return false;
+      c.sibOk=qty; c.det.hermano_revisado=true;
+    }
+  } else {
+    const big = kg ? qty>50 : qty>200;
+    if(big && c.typoOk!==qty){
+      const v=await showModal({ title:`¿Seguro que son ${fmtQty(qty,p.kgpz)} ${u}?`, html:'<p>Es una cantidad muy grande. Revisa que no sobre un número.</p>',
+        buttons:[{label:`Sí, son ${fmtQty(qty,p.kgpz)} ${u}`, value:'yes', kind:'warn'}, {label:'Corregir', value:'no', kind:'secondary'}] });
+      if(v!=='yes') return false;
+      c.typoOk=qty;
+    }
+  }
+  return true;
+}
 async function confirmCard(){
   const c=S.current; if(!c || c.busy) return;
   const q=document.getElementById('qty-input'), err=document.getElementById('qty-err');
-  const qty=parseQty(q.value, c.p.kgpz);
+  if(!c.p.kgpz){ err.textContent='Elige si se recibe por pieza o por peso.'; return; }
+  const qty=parseQty(q.value, c.p.kgpz, c.recount);
   if(qty==null){
     err.textContent=c.p.kgpz==='Kg' ? 'Escribe el peso de la báscula (hasta 2 decimales).' : 'Escribe las piezas contadas (número entero).';
     q.focus(); return;
   }
   c.busy=true;
-  const ok=await guardQty(c.p, qty);
+  const ok=await guardQty(c, qty);
   c.busy=false;
-  if(!ok){ q.focus(); q.select(); return; }
-  recordEvent(makeEvent('scan', { sku_key:c.p.sku_key, producto:c.p.producto, cantidad:qty, metodo:c.metodo,
-    detalle:Object.assign({ esperado:c.p.enEnvio, kgpz:c.p.kgpz }, c.det) }));
+  if(S.current!==c) return;
+  if(!ok){ const q2=document.getElementById('qty-input'); if(q2){ q2.focus(); q2.select(); } return; }
+  const p=c.p;
+  if(c.recount){
+    const before=recibidoDe(p.sku_key);
+    recordEvent(makeEvent('ajuste', { sku_key:p.sku_key, producto:p.producto, cantidad:round2(qty-before), metodo:'recuento',
+      detalle:Object.assign({ antes:before, despues:qty, motivo:'Recuento', kgpz:p.kgpz }, c.det) }));
+    toast(`✓ Recontado: ${fmtQty(qty,p.kgpz)} ${unitOf(p.kgpz)} · ${p.producto}`);
+  } else {
+    recordEvent(makeEvent('scan', { sku_key:p.sku_key, producto:p.producto, cantidad:qty, metodo:c.metodo,
+      detalle:Object.assign({ esperado:p.enEnvio, kgpz:p.kgpz }, c.det) }));
+    toast(`✓ ${fmtQty(qty,p.kgpz)} ${unitOf(p.kgpz)} · ${p.producto}`);
+  }
   S.current=null;
   renderRecibir();
-  toast(`✓ ${fmtQty(qty,c.p.kgpz)} ${unitOf(c.p.kgpz)} · ${c.p.producto}`);
   focusScan();
+  if(c.after) c.after();
 }
 
 /* ── Últimos 10 escaneos + Corregir (ajuste event, never a delete — rule 4) ── */
@@ -1300,9 +1480,46 @@ async function pickSearch(i){
   const h=_searchHits[i]; if(!h) return;
   closeSheet();
   if(h.env) openCard({ ...h.p, enEnvio:true }, 'manual');
+  else if(S.envio.sinArchivo) openCard(sinArchivoProduct(h.p), 'manual');
   else await notInEnvio(h.p, 'manual', {});
 }
+/* ── §6.2b Revisar ahora: once the file arrives, every check runs over what was scanned without it ── */
+function revisarItems(){
+  if(!S.envio || S.envio.sinArchivo) return [];
+  const pre=new Set(), done=new Set();
+  for(const e of S.events){
+    if(e.tipo==='scan' && e.detalle && e.detalle.esperado===null) pre.add(e.sku_key);
+    if((e.tipo==='confirmacion' && e.detalle && e.detalle.revisar) || (e.tipo==='ajuste' && e.detalle && e.detalle.origen==='revisar')) done.add(e.sku_key);
+  }
+  const out=[];
+  for(const sku of pre){
+    if(done.has(sku)) continue;
+    const rec=recibidoDe(sku), line=S.lines.get(sku);
+    if(!line){ if(rec>0){ const ne=S.noEsperados.get(sku); out.push({ sku, tipo:'no_esperado', producto:ne?ne.producto:sku, kgpz:ne?ne.kgpz:'Pz', barcode:sku.startsWith('name:')?'':sku, rec }); } continue; }
+    const base={ sku, producto:line.producto, kgpz:line.kgpz, barcode:line.barcode, rec };
+    if(overEnviado(line, rec)) out.push({ ...base, tipo:'sobrante' });
+    else if(rec>0 && siblingsOf(line).length) out.push({ ...base, tipo:'hermano', sibs:siblingsOf(line) });
+  }
+  return out;
+}
+const REVISAR_TXT={ no_esperado:'No viene en el envío.', sobrante:'Registraste más de lo enviado.' };
+function openRevisar(){
+  const items=revisarItems();
+  if(!items.length){ closeSheet(); toast('✓ Todo revisado'); renderRecibir(); return; }
+  openSheet(`Revisar ahora · ${items.length}`, `<div class="muted" style="margin-bottom:10px">Esto se escaneó antes de subir el archivo. Revisa cada uno: recuéntalo o confirma que está bien.</div>`
+    +items.map(it=>`<div class="ritem" style="margin-bottom:8px"><div class="ritem-row">${imgTag(it.barcode, it.producto, 'thumb')}
+      <div class="ritem-main"><div class="ritem-name">${nameHtml(it.producto)}</div>
+      <div class="ritem-meta" style="color:var(--orange);font-weight:700">${it.tipo==='hermano'?'También viene '+escapeHtml(it.sibs.map(s=>s.producto).join(', '))+'. ¿Contaste por separado?':REVISAR_TXT[it.tipo]}</div>
+      <div class="ritem-meta">Registraste ${fmtQty(it.rec,it.kgpz)} ${unitOf(it.kgpz)}</div></div></div>
+      <div class="pcard-actions"><button class="btn btn-secondary" onclick="openRecount('${escapeHtml(it.sku)}','revisar')">🔁 Recontar</button><button class="btn btn-primary" onclick="revisarConfirmo('${escapeHtml(it.sku)}','${it.tipo}')">Confirmo</button></div></div>`).join(''));
+}
+function revisarConfirmo(sku, tipo){
+  const it=revisarItems().find(x=>x.sku===sku); if(!it) return;
+  recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:it.producto, cantidad:it.rec, detalle:{ revisar:tipo, recibido:it.rec, kgpz:it.kgpz } }));
+  renderRecibir(); openRevisar();
+}
 function openPendientes(){
+  if(S.envio.sinArchivo){ openSheet('Pendientes', '<div class="empty-hint">Los pendientes aparecen cuando subas el archivo del envío.</div>'); return; }
   const pend=[...S.lines.values()].filter(l=>!(recibidoDe(l.sku_key)>0)).map(l=>({ l, pos:positionOf(l.barcode, l.producto) }));
   pend.sort((a,b)=>(a.pos?a.pos.full:'~').localeCompare(b.pos?b.pos.full:'~', 'es', {numeric:true}) || a.l._n.localeCompare(b.l._n));
   // Products only — no quantities (blind), so the receptor hunts for boxes without being told how many.
