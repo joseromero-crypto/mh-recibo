@@ -290,6 +290,52 @@ dashboard), cached for the session only.
 - **Receptores**: per-hub list of names (`recibo/config/receptores.json`).
 - No hard deletes here either in v1.
 
+### 6.9 Admin → Alertas (did each hub check its reception?)
+Per **hub × área** switch, so a hub with a day off / permission doesn't generate useless emails.
+
+Config (one row per hub+área, table `rec_alert_config`): `activo` on/off · `dias` (e.g. Abarrotes Mon–Sat;
+Carnes Mon–Fri) · `hora_limite` (time by which reception should have started, e.g. 11:00) · `pausado_hasta`
+(date — "pausar hasta el viernes" turns itself back on, so nobody forgets) · `email` on/off.
+
+What is checked (all America/Monterrey):
+1. **At `hora_limite`** on an expected day: no `abrir` and no `scan` for that hub+área today →
+   alert "**MH Contry — Abarrotes: no se ha subido ni escaneado la recepción de hoy.**"
+2. **End of day (21:00):** reception opened but not closed → "recepción abierta sin cerrar".
+3. **Daily digest (21:00), one email for all active hubs:** each hub+área ✓ recibido (líneas, diferencias,
+   "Kg sin variación" badge) / ⚠ abierta sin cerrar / ✗ sin recepción / ⏸ pausado.
+- Abarrotes false alarm guard: if Armado CH has no assembly for that hub for the day's shipment, skip alert 1
+  ("sin envío"). Carnes has no Armado data → relies on the switch / pause.
+
+Channels:
+- **In app:** Admin shows an Alertas feed (from `rec_alerts`) with a count badge on entering Admin.
+- **Email:** sent server-side — a Supabase **Edge Function** (`rec-alertas`) run by **pg_cron** every 15 min
+  reads `rec_alert_config` + `rec_events`, writes `rec_alerts`, and sends email through an email API
+  (Resend or similar). The email API key lives only in the Edge Function's secrets, never in `index.html`.
+  Each alert is sent once (`rec_alerts` unique on hub+área+fecha+tipo).
+
+```sql
+create table public.rec_alert_config (
+  hub text not null, area text not null, activo boolean not null default true,
+  email boolean not null default true, dias int[] not null default '{1,2,3,4,5,6}', -- 0=Sun
+  hora_limite time not null default '11:00', pausado_hasta date,
+  updated_at timestamptz not null default now(), primary key (hub, area)
+);
+create table public.rec_alerts (
+  id bigserial primary key, hub text not null, area text not null, fecha date not null,
+  tipo text not null,            -- 'sin_recepcion'|'sin_cerrar'|'digest'
+  mensaje text, enviado_email boolean default false, ts timestamptz not null default now(),
+  unique (hub, area, fecha, tipo)
+);
+alter table public.rec_alert_config enable row level security;
+alter table public.rec_alerts enable row level security;
+create policy rac_all on public.rec_alert_config for all to anon using (true) with check (true);
+create policy ra_select on public.rec_alerts for select to anon using (true);
+grant select, insert, update on public.rec_alert_config to anon;
+grant select on public.rec_alerts to anon;
+grant select, insert, update on public.rec_alerts, public.rec_alert_config to service_role;
+grant usage, select on sequence public.rec_alerts_id_seq to service_role;
+```
+
 ## 7. Error guards (the point of the app)
 
 ### 7.1 Not in the envío
@@ -383,6 +429,7 @@ All cells quoted, CRLF, BOM only on browser download.
 - **Phase 3 — Close.** Revisar y cerrar, report CSV, Resumen para registrar.
 - **Phase 4 — Multi-device & resume.** Join session, polling, rebuild from events, overnight sessions.
 - **Phase 5 — Canastas + Armado enrichment** (§6.4, §5.3).
+- **Phase 5b — Alertas** (§6.9): config UI in Admin, Edge Function + pg_cron, email provider set up by Jose.
 - **Phase 6 — Real-device QA** at one hub (MH Contry suggested) side by side with the Google Sheet for a few days;
   compare deltas.
 
@@ -403,6 +450,8 @@ real Contry file) · scope = Abarrotes + Carnes; Fruta y verdura later · Sortin
 Carnes file checked: Kg in decimals, 20% lines without barcode, `Requiere confirmar` unreliable · Kg items are always weighed; variance is expected, zero variance is questioned
 (§7.6).
 
+- **Q9 Alertas:** which email(s) receive them; usual truck arrival per hub+área to set each `hora_limite`;
+  which days each área ships (Abarrotes Mon–Sat? Carnes Mon–Fri?); email provider (Resend free tier is enough).
 - **Q8 Fresh Carnes (Tue/Thu):** a fresh file would confirm the same columns; not blocking.
 
 ## 12. Not in v1
