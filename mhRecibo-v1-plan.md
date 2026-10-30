@@ -321,13 +321,31 @@ dropdown never shows quantities.
   Vuelve a contar.**" (the enviado number is NOT shown) → re-enter the count → if it still exceeds, it is
   stored and flagged Sobrante for the summary.
 - Qty > 3× enviado or > 200 pz → extra confirm (typo guard: 120 instead of 12).
-- **Kg lines:** decimals allowed (2 places); weight varies, so the over-count check uses a tolerance:
-  flag only above `enviado × 1.05` (or +0.1 kg, whichever is larger). Typo guard: > 3× enviado or > 50 kg.
+- **Kg lines:** see §7.6. Over-count check only above the scale tolerance. Typo guard: > 3× enviado or > 50 kg.
 - Shortages can't be judged per scan (more boxes may come); they surface in Pendientes and in §6.5.
 - Kg lines: decimals allowed; Pz lines: integers only.
 
+### 7.6 Kg items: weigh everything, and treat "perfect" as suspicious
+Every Kg item must be **weighed at the hub**. Not everyone does it today; the app exists partly to guarantee it.
+CH and MH scales aren't calibrated the same, so **small variance is expected and healthy** — it's proof the item
+was weighed. Because counting is blind, an exact match to two decimals is very unlikely unless the number was
+copied from a label.
+- Card for a Kg line: "**Pésalo en la báscula**", field labelled `kg (báscula)`, 2 decimals.
+- **Scale tolerance** = ±5% of enviado or ±0.10 kg, whichever is larger. Inside it → estado
+  **Completo (variación de báscula)**: shown, not a discrepancy, no acknowledgement needed. Outside it →
+  Faltante/Sobrante like any other line.
+- **Zero-variance check at close.** If the reception has ≥3 Kg lines and **all of them match enviado exactly**
+  (or ≥80% do), a modal before closing:
+  "**¿Se pesaron todos los artículos correctamente? Este recibo se reportará a gerencia sin discrepancias en kg.**"
+  → [Sí, los pesé todos] / [Volver a pesar] (opens a list of the Kg lines to re-weigh).
+  "Sí" closes it, records a `confirmacion` event with `{"kg_sin_variacion": true}`, and the reception carries a
+  **"Kg sin variación"** badge in Recepciones, Admin and the report CSV.
+- Also flagged (badge only, no modal): Kg weights typed as whole numbers on ≥80% of Kg lines (looks like the
+  label's nominal weight, not a scale reading).
+- Admin keeps the history so a hub/receptor that always reports perfect kg is visible.
+
 ### 7.5 Advisory vs blocking
-Blocking modals are allowed **only** in 7.1, 7.2-qty, 7.4 — they stop a wrong number from being stored. They
+Blocking modals are allowed **only** in 7.1, 7.2-qty, 7.4 and the zero-variance check in 7.6 — they stop a wrong number from being stored. They
 never auto-skip, auto-fill or reorder anything.
 
 ---
@@ -348,7 +366,7 @@ never auto-skip, auto-fill or reorder anything.
 ## 9. Report CSV (`reportes/…csv`)
 ```
 Hub, Área, Fecha, Receptor(es), Producto, Código de barras, Kg/Pz, Posición, Armado, Enviado, Recibido,
-Diferencia, Estado, Notas (correcciones / confirmaciones)
+Diferencia, Estado, Notas (correcciones / confirmaciones), Alertas (e.g. Kg sin variación)
 ```
 All cells quoted, CRLF, BOM only on browser download.
 
@@ -382,10 +400,9 @@ directos, so all items are treated alike · lifecycle §6.7 · admin safety net 
 visits · type-ahead with photos for barcode-less items · **expected qty = `Envío (kg o pz)` > 0** (checked on the
 real Contry file) · scope = Abarrotes + Carnes; Fruta y verdura later · Sorting Hub already in the shared project · one reception per hub+área per day · receptor picked from a list
 · summary keeps file order with search/filters/sort · Carnes may arrive before its file → "Empezar sin archivo" ·
-Carnes file checked: Kg in decimals, 20% lines without barcode, `Requiere confirmar` unreliable.
+Carnes file checked: Kg in decimals, 20% lines without barcode, `Requiere confirmar` unreliable · Kg items are always weighed; variance is expected, zero variance is questioned
+(§7.6).
 
-- **Q7 Kg lines at the hub:** do receptors weigh Kg items on a scale, or count packs and trust the label?
-  Default **weigh and type kg** (the system's Recepción for those lines is in kg).
 - **Q8 Fresh Carnes (Tue/Thu):** a fresh file would confirm the same columns; not blocking.
 
 ## 12. Not in v1
