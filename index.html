@@ -1096,7 +1096,7 @@ function openRecibir(data, opts={}){
   S.hub=INI.hub; S.area=INI.area; S.receptor=INI.receptor;
   S.session={ id:data.session_id, fecha:data.session_fecha };
   setEnvio(data);
-  S.events=[]; S.eventUids=new Set(); S.current=null; S.corrigiendo=null; S.staleAsked=false; S.lastId=0; S.closedInfo=null;
+  S.events=[]; S.eventUids=new Set(); S.current=null; S.corrigiendo=null; S.staleAsked=false; S.lastId=0; S.closedInfo=null; S.armado=null;
   buildCatalog();
   const m=latestMirror(S.hub, S.area);
   if(m && m.envio && m.envio.session_id===S.session.id) addEvents(m.events);
@@ -1531,6 +1531,7 @@ function startCorregir(u){
 }
 function cancelCorregir(){ S.corrigiendo=null; renderRecent(); focusScan(); }
 function saveCorregir(){
+  if(S.closedInfo){ toast('Esta recepción ya se cerró'); cancelCorregir(); return; }
   const ev=S.events.find(e=>e.tipo==='scan' && e.detalle && e.detalle.uid===S.corrigiendo); if(!ev) return;
   const kp=kgpzOf(ev), before=scanQtyNow(ev), err=document.getElementById('corr-err');
   const nv=parseQty(document.getElementById('corr-qty').value, kp, true), motivo=document.getElementById('corr-motivo').value;
@@ -1766,7 +1767,7 @@ async function cerrarRecepcion(){
     const deltas=rows.filter(isDelta);
     const ev=makeEvent('cerrar', { detalle:{ reporte:path, envio:S.envio._path, lineas:S.lines.size, recibidas:rows.filter(r=>r.env>0 && r.rec>0).length,
       diferencias:deltas.length, no_esperados:rows.filter(r=>r.estado==='No esperado').length, badges, receptores } });
-    recordEvent(ev); await flushAndWait();
+    recordEvent(ev); S.closedInfo=closedState(); await flushAndWait();
     S.closing=false;
     toast(OUTBOX.length?'Recepción cerrada — se termina de subir al reconectar':'✓ Recepción cerrada', 3500);
     openRecepcion(Object.assign({ ts:ev.ts, fecha:S.session.fecha, receptor:S.receptor }, ev.detalle), 'inicio');
