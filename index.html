@@ -315,7 +315,7 @@ textarea.text-input{min-height:110px;font-size:15px}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'v1 · entregas parciales';
+const APP_VERSION = 'v1 · códigos incorrectos';
 
 /* ════════════════════════════════════════════════════════════════════════════════════
    SUPABASE — shared project with Armado CH + Sorting Hub (plan §3). This app writes ONLY to bucket
@@ -1327,9 +1327,9 @@ async function processScan(raw, metodo){
   if(r && r.product){ await notInEnvio(r.product, m, det); return; }
   // §6.3.3 — unknown barcode
   const v=await showModal({ title:'Código no reconocido', html:`<p>Vuelve a escanear o búscalo por nombre.</p><p style="font-size:12px;color:var(--gray-500)">Código: ${escapeHtml(code)}</p>`,
-    buttons:[{label:'Volver a escanear', value:'again', kind:'primary'}, {label:'🔎 Buscar por nombre', value:'search', kind:'secondary'}]
+    buttons:[{label:'Volver a escanear', value:'again', kind:'primary'}, {label:'🔎 Código incorrecto en sistema · buscar por nombre', value:'search', kind:'secondary'}]
       .concat(S.envio.sinArchivo?[{label:'Registrar este código sin nombre', value:'raw', kind:'secondary'}]:[]) });
-  if(v==='search') openSinCodigo();
+  if(v==='search') codigoIncorrecto({ codigo:code, sistema:null });
   // §6.2b — without a file an unknown code can still be counted; the file names it later (same sku_key)
   if(v==='raw'){ const k=codeKey(code); openCard(sinArchivoProduct({ sku_key:k, producto:'Código '+k, barcode:k }), m, det); }
 }
@@ -1380,8 +1380,10 @@ async function notInEnvio(p, metodo, det){
         +`<div class="res-sub">${pos?escapeHtml(pos.palabra+' '+pos.full):'sin posición'}</div></div><span class="look-cta">Era este otro</span></button>`; }).join('') : '';
   const v=await showModal({ title:'Este producto no viene en el envío.',
     html:`<div class="modal-prod">${imgTag(p.barcode, p.producto, 'thumb')}<div class="res-name">${nameHtml(p.producto)}</div></div>${looksHtml}`,
-    buttons:[{label:'Volver a escanear', value:'again', kind:'primary'}, {label:'Sí, llegó este producto', value:'yes', kind:'danger'}] });
+    buttons:[{label:'Volver a escanear', value:'again', kind:'primary'}, {label:'Sí, llegó este producto', value:'yes', kind:'danger'}]
+      .concat(det && det.codigo && !det.codigo_incorrecto ? [{label:'🔎 Código incorrecto en sistema · buscar por nombre', value:'mal', kind:'secondary'}] : []) });
   if(v==='yes') openCard({ ...p, enEnvio:false }, metodo, det);
+  else if(v==='mal') codigoIncorrecto({ codigo:det.codigo, sistema:p });
   else if(v && v.startsWith('look:')){
     const l=looks[Number(v.slice(5))];
     // The scan is re-attributed to the chosen envío line; detalle keeps what was actually scanned
@@ -1441,6 +1443,7 @@ function renderCard(){
     <input id="qty-input" class="qty-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}">
     <div class="qty-err" id="qty-err"></div>
     <div class="pcard-actions"><button class="btn btn-secondary" onclick="cancelCard()">Cancelar</button><button class="btn btn-primary" onclick="confirmCard()">Registrar</button></div>
+    ${c.det && c.det.codigo && !c.recount ? `<button class="link-btn" onclick="codigoIncorrecto()">¿No es este producto? Código incorrecto en sistema · buscar por nombre</button>` : ''}
   </div>`;
   const q=document.getElementById('qty-input');
   q.value=c.val||''; // background re-renders (sorting loaded, server sync) keep what was typed
@@ -1565,7 +1568,7 @@ function renderRecent(){
   const more=all.length>10 ? `<button class="link-btn" onclick="S.recentAll=!S.recentAll;renderRecent()">${S.recentAll?'Ver solo los últimos 10':`Ver todos los escaneos (${all.length})`}</button>` : '';
   el.innerHTML=scans.map(ev=>{
     const u=ev.detalle&&ev.detalle.uid, kp=kgpzOf(ev), now=scanQtyNow(ev), orig=round2(ev.cantidad), line=S.lines.get(ev.sku_key);
-    const meta=[localHM(new Date(ev.ts)), ev.receptor!==S.receptor?escapeHtml(ev.receptor):'', ev.metodo==='manual'?'sin código':ev.metodo==='camara'?'cámara':'', line?'':'<span style="color:var(--red);font-weight:700">no esperado</span>'].filter(Boolean).join(' · ');
+    const meta=[localHM(new Date(ev.ts)), ev.receptor!==S.receptor?escapeHtml(ev.receptor):'', ev.metodo==='manual'?'sin código':ev.metodo==='codigo_incorrecto'?'<span style="color:var(--orange);font-weight:700">código incorrecto</span>':ev.metodo==='camara'?'cámara':'', line?'':'<span style="color:var(--red);font-weight:700">no esperado</span>'].filter(Boolean).join(' · ');
     const editing=S.corrigiendo===u;
     return `<div class="ritem"><div class="ritem-row">
         ${line?imgTag(line.barcode, line.producto, 'thumb'):imgTag(ev.sku_key.startsWith('name:')?'':ev.sku_key, ev.producto, 'thumb')}
@@ -1614,10 +1617,11 @@ function openSheet(title, html){
 }
 function closeSheet(){
   const s=document.getElementById('sheet'); if(!s.classList.contains('open')) return;
-  s.classList.remove('open'); document.getElementById('sheet-body').innerHTML=''; focusScan();
+  s.classList.remove('open'); document.getElementById('sheet-body').innerHTML=''; S.codigoMal=null; focusScan();
 }
-function openSinCodigo(){
-  openSheet('Buscar producto sin código', `<input id="sc-input" class="text-input" placeholder="Escribe parte del nombre (ej. almen 100)" autocomplete="off" autocorrect="off" spellcheck="false">
+function openSinCodigo(mal){
+  S.codigoMal=mal||null;
+  openSheet(mal?'Código incorrecto en sistema':'Buscar producto sin código', (mal?`<div class="note" style="margin-bottom:10px">El código <b>${escapeHtml(mal.codigo)}</b>${mal.sistema?` aparece en el sistema como <b>${escapeHtml(mal.sistema.producto)}</b>`:' no está en el sistema'}. Busca por nombre el producto que tienes en la mano: se cuenta como ese y el código se reporta a comercial.</div>`:'')+`<input id="sc-input" class="text-input" placeholder="Escribe parte del nombre (ej. almen 100)" autocomplete="off" autocorrect="off" spellcheck="false">
     <div id="sc-results" style="margin-top:10px"><div class="muted">Los productos del envío aparecen primero.</div></div>`);
   const i=document.getElementById('sc-input');
   let t=null; i.addEventListener('input', ()=>{ clearTimeout(t); t=setTimeout(()=>renderSearch(i.value), 120); });
@@ -1649,10 +1653,21 @@ function renderSearch(q){
 }
 async function pickSearch(i){
   const h=_searchHits[i]; if(!h) return;
+  const mal=S.codigoMal;
   closeSheet();
-  if(h.env) openCard({ ...h.p, enEnvio:true }, 'manual');
-  else if(S.envio.sinArchivo) openCard(sinArchivoProduct(h.p), 'manual');
-  else await notInEnvio(h.p, 'manual', {});
+  // Wrong barcode in the system: count the product in hand; the scan keeps what was scanned vs what the system has
+  const det=(mal && codeKey(mal.codigo)!==codeKey(h.p.barcode||'')) ? { codigo:mal.codigo, codigo_incorrecto:{ escaneado:mal.codigo,
+    codigo_sistema:h.p.barcode||'', sistema_dice:mal.sistema?mal.sistema.producto:null, sistema_dice_codigo:mal.sistema?(mal.sistema.barcode||null):null } } : {};
+  const m=mal?'codigo_incorrecto':'manual';
+  if(h.env) openCard({ ...h.p, enEnvio:true }, m, det);
+  else if(S.envio.sinArchivo) openCard(sinArchivoProduct(h.p), m, det);
+  else await notInEnvio(h.p, m, det);
+}
+// §7.3+ "Código incorrecto en sistema": what was scanned doesn't match the product in hand → search by name.
+// From the card (the code points to another product) or from the not-in-envío / unknown-code modals.
+function codigoIncorrecto(mal){
+  if(!mal){ const c=S.current; if(!c || !c.det || !c.det.codigo) return; mal={ codigo:c.det.codigo, sistema:c.p }; S.current=null; renderCard(); }
+  openSinCodigo(mal);
 }
 /* ── §6.2b Revisar ahora: once the file arrives, every check runs over what was scanned without it ── */
 function revisarItems(){
@@ -1938,6 +1953,7 @@ function notasDe(sku, kgpz){
     else if(e.tipo==='confirmacion' && d.revisar) n.push(`Revisado sin archivo (${e.receptor||''})`);
     else if(e.tipo==='scan' && d.reatribuido_de) n.push(`Escaneado como «${d.reatribuido_de.producto}»`);
     else if(e.tipo==='scan' && d.sobrante) n.push('Se registró arriba de lo enviado tras recontar');
+    if(e.tipo==='scan' && d.codigo_incorrecto) n.push(`Código incorrecto en sistema: se escaneó ${d.codigo_incorrecto.escaneado}, el sistema tiene ${d.codigo_incorrecto.codigo_sistema||'(sin código)'}`);
   }
   const r=summaryRows().find(x=>x.sku===sku); if(r && isDelta(r)){ const o=origenDif(r); if(o) n.push(o); }
   return n.join(' · ');
@@ -2168,10 +2184,10 @@ async function admLogin(){
 }
 function admTab(t){ ADM.tab=t; renderAdmin(); }
 async function renderAdmin(){
-  const tabs=[['recep','Recepciones'],['resp','Respaldos'],['recept','Receptores'],['alert',`Alertas${ADM.alertCount?' ('+ADM.alertCount+')':''}`]];
+  const tabs=[['recep','Recepciones'],['resp','Respaldos'],['recept','Receptores'],['codigos','Códigos'],['alert',`Alertas${ADM.alertCount?' ('+ADM.alertCount+')':''}`]];
   document.getElementById('admin-body').innerHTML=`<div class="tabs">${tabs.map(([k,n])=>`<button class="choice ${ADM.tab===k?'sel':''}" onclick="admTab('${k}')">${n}</button>`).join('')}</div><div id="adm-tab"><div class="muted">Cargando…</div></div>`;
   admAlertCount();
-  try{ await ({ recep:admRecepciones, resp:admRespaldos, recept:admReceptores, alert:admAlertas })[ADM.tab](); }
+  try{ await ({ recep:admRecepciones, resp:admRespaldos, recept:admReceptores, codigos:admCodigos, alert:admAlertas })[ADM.tab](); }
   catch(e){ document.getElementById('adm-tab').innerHTML=`<div class="err-box">${isNetErr(e)?'Sin conexión.':'Error: '+escapeHtml(e.message)}</div>`; }
 }
 async function admAlertCount(){
@@ -2229,6 +2245,36 @@ async function admReabrir(i){
   if(v!=='si') return;
   try{ await adminEvent(r, { accion:'reabrir', reporte_anterior:r.cerrada.reporte }); toast('✓ Recepción reabierta'); renderAdmin(); }
   catch(e){ toast('No se pudo reabrir: '+e.message); }
+}
+
+/* ── Códigos incorrectos: scans the receptor re-assigned by name because the barcode didn't match the product
+   ("Código incorrecto en sistema"). Weekly / monthly list, grouped per product + scanned code, for comercial. ── */
+let _admCod=[];
+async function admCodigos(){
+  const dias=ADM.codDias||7, desde=localDateStr(new Date(serverNow().getTime()-dias*86400000));
+  const evs=await pgSelectAll('rec_events', `tipo=eq.scan&fecha=gte.${desde}&detalle->codigo_incorrecto=not.is.null&select=hub,area,fecha,producto,receptor,ts,detalle&order=id.desc`);
+  const by=new Map();
+  for(const e of evs){
+    if(e.hub==='test-hub' && !IS_LOCAL) continue;
+    const d=e.detalle.codigo_incorrecto, k=e.producto+'|'+d.escaneado;
+    let r=by.get(k);
+    if(!r){ r={ producto:e.producto, escaneado:d.escaneado, sistema:d.codigo_sistema||'', dice:d.sistema_dice||'', hubs:new Set(), veces:0, ultima:e.fecha }; by.set(k, r); }
+    r.hubs.add(hubName(e.hub)); r.veces++; if(e.fecha>r.ultima) r.ultima=e.fecha;
+  }
+  _admCod=[...by.values()].sort((a,b)=>b.veces-a.veces || a.producto.localeCompare(b.producto));
+  const sel=`<div class="filters" style="margin-bottom:10px"><select onchange="ADM.codDias=Number(this.value);renderAdmin()">
+    <option value="7" ${dias===7?'selected':''}>Últimos 7 días</option><option value="30" ${dias===30?'selected':''}>Últimos 30 días</option></select></div>`;
+  document.getElementById('adm-tab').innerHTML=`<div class="muted" style="margin-bottom:8px">Productos cuyo código escaneado no coincidió con el sistema; el receptor lo buscó por nombre. Para corregir en Retool con comercial.</div>${sel}`
+    +(_admCod.length ? `<button class="btn btn-secondary btn-block" style="margin-bottom:10px" onclick="admCodigosCsv()">⬇ Descargar CSV para comercial</button>`
+      +_admCod.map(r=>`<div class="adm-row"><div style="display:flex;gap:10px;align-items:center">${imgTag(r.sistema, r.producto, 'thumb')}<b style="flex:1;min-width:0">${nameHtml(r.producto)}</b></div>
+        <div class="muted" style="font-size:13px;margin-top:4px">Escaneado: <b>${escapeHtml(r.escaneado)}</b> · En sistema: <b>${escapeHtml(r.sistema||'sin código')}</b>${r.dice?` · el código escaneado aparece como «${escapeHtml(r.dice)}»`:''}</div>
+        <div class="muted" style="font-size:12px">${r.veces} vez${r.veces===1?'':'es'} · ${escapeHtml([...r.hubs].join(', '))} · última ${fechaLarga(r.ultima)}</div></div>`).join('')
+      : '<div class="empty-hint">Sin códigos incorrectos en este periodo.</div>');
+}
+function admCodigosCsv(){
+  const cols=['Producto','Código escaneado','Código en sistema (Retool)','El código escaneado aparece como','Veces','Hubs','Última fecha'];
+  const body=_admCod.map(r=>[r.producto, r.escaneado, r.sistema, r.dice, r.veces, [...r.hubs].join(', '), r.ultima].map(csvCell).join(','));
+  downloadText(`codigos-incorrectos_${todayStr()}_${ADM.codDias||7}d.csv`, [cols.map(csvCell).join(',')].concat(body).join('\r\n')+'\r\n');
 }
 
 /* ── Respaldos: every uploaded envío file stays in storage; an old one can be made active again ── */

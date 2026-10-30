@@ -75,6 +75,11 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   entrega can't use Corregir (final Resumen Recontar still can). With parciales the stale-file modal is skipped,
   Inicio shows "Recepción parcial", Recepciones/Admin list each entrega, the final report adds `Entrega 1..n`
   columns, and the Apps Script only alerts `sin_cerrar` once the last entrega is older than `dias_gracia`.
+- Código incorrecto en sistema: link on the card (scanned code → another product), button on the not-in-envío and
+  unknown-code modals. Opens the name search (`openSinCodigo(mal)`, `S.codigoMal`); the pick is counted as that
+  product with `metodo:'codigo_incorrecto'` and `detalle.codigo_incorrecto` = { escaneado, codigo_sistema (envío/
+  Retool barcode), sistema_dice, sistema_dice_codigo }. Admin → Códigos groups them (7 / 30 days) with a CSV for
+  comercial. Plain "Sin código" searches are not flagged.
 - Blind count: `esperado` is never rendered on Recibir, Sin código, Pendientes, Canastas or Revisar ahora; it
   appears only in Resumen y cierre and Recepciones.
 - Multi-device: `syncServerEvents()` reads `id=gt.S.lastId` every 15 s while Recibir/Resumen is visible;
