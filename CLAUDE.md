@@ -16,6 +16,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - It only **reads** Armado's `picks` table and `solcitudesarmado/imagedb/*`, `solcitudesarmado/reports/*`.
   Never write, alter or delete anything outside `recibo` / `rec_*`.
 - Sorting positions: read-only from bucket `sorting-hub` in this same project (Sorting Hub migrated here 2026-10-29).
+- Product photos (Masterview image map): read-only from `solcitudesarmado/imagedb/` **and** `sorting-hub/imagedb/`;
+  `loadImageDB` compares both `version.txt` and uses the newest upload, then the bundled `imagedb.json`.
 - New tables need explicit `grant`s in the same SQL that creates them (Supabase change, 2026-10-30).
 - **Local runs write to prod.** Use `hub='test-hub'` or stub write helpers before testing write flows.
 
