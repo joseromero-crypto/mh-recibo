@@ -35,7 +35,8 @@ Extras a web app gives that a sheet can't:
 
 1. **Single `index.html`**, vanilla HTML/CSS/JS, no framework, no build step, no package.json. `sw.js` network-first.
 2. Spanish UI. Phone first (Android Chrome + iPhone Safari), Bluetooth scanner + phone camera.
-3. **Receiver inputs are barcode + quantity** (+ a product pick only when there's no barcode). Everything else is displayed.
+3. **Receptor inputs are barcode + quantity** (+ a product pick only when there's no barcode). Everything else is displayed.
+   **Blind count:** the expected (enviado) quantity is never shown while receiving — only in the final summary.
 4. **No cheap exits.** No bulk "accept all", no one-tap "mark everything received". Closing with
    discrepancies requires reviewing each one.
 5. **Never write to Retool.** The app produces a summary that makes the manual typing fast and exact.
@@ -63,7 +64,7 @@ BUCKET = 'recibo'                         // NEW bucket — keep armado's 'solci
 ARMADO_BUCKET = 'solcitudesarmado'        // read-only from this app
 ```
 
-**Isolation rules (both apps share one database):**
+**Isolation rules (three apps share one project: Armado CH, Sorting Hub, MH Recibo):**
 - Reception owns: bucket `recibo`, tables prefixed `rec_`. It **only reads** `picks`, `solcitudesarmado/imagedb/*`,
   `solcitudesarmado/reports/*`. It never writes, renames or alters anything of Armado's.
 - Any SQL for this app touches only `rec_*` objects.
@@ -108,12 +109,11 @@ create policy recibo_delete on storage.objects for delete to anon using (bucket_
 No UPDATE on `rec_events` — corrections are new `ajuste` rows. The bucket gets UPDATE so upsert works
 (no delete-then-insert gap like armado's bucket).
 
-### 3.2 Sorting positions — read from Sorting Hub's public bucket (cross-project)
-`https://lcxlfhnvukakzybqxacq.supabase.co/storage/v1/object/public/sorting-hub/sorting/{slug}/version.txt`
-then `…/latest.json` (shape: `items: [[producto, barcode, pasillo, estante, nivel, posDentro, temp], …]`).
-Public GET, no key. Cache per hub like Sorting Hub does (`version.txt` first).
-**Later (not v1):** move Sorting Hub into this same project to retire one more Supabase project; when that
-happens only this URL constant changes.
+### 3.2 Sorting positions — same project (Sorting Hub migrated 2026-10-29)
+Sorting Hub now lives in this same project, bucket `sorting-hub` (public). Read
+`sorting-hub/sorting/{slug}/version.txt` then `latest.json`
+(shape: `items: [[producto, barcode, pasillo, estante, nivel, posDentro, temp], …]`). Read-only from here.
+Cache per hub like Sorting Hub does (`version.txt` first). The old `sortinghub` project is retired.
 
 ### 3.3 Image DB
 Read Armado's `solcitudesarmado/imagedb/version.txt` + `latest.json`; fall back to a bundled `imagedb.json`
@@ -157,60 +157,74 @@ Requiere confirmar, …`
 - Wrong-hub guard: none possible from the file alone; the hub is chosen on screen and stamped on the file name.
 
 ### 5.3 Optional enrichment from Armado CH (v1 = display only)
-If `picks` has rows for this hub with `order_date` in the last 3 days, show per line **Armado** (sum of
-`cantidad`, latest ronda) next to **Enviado**. Three numbers on the final summary:
-`Armado (app) · Enviado (sistema) · Recibido`. When they disagree it says *where* the error happened:
+If `picks` has rows for this hub with `order_date` in the last 3 days, the summary (§6.5/6.6) adds **Armado**
+next to **Enviado**: `Armado (app) · Enviado (sistema) · Recibido`. When they disagree it says *where*:
 - Armado ≠ Enviado → typing error registering the salida at CH.
 - Enviado ≠ Recibido and Armado = Recibido → registration error, not a physical one.
 - Armado = Enviado ≠ Recibido → physical loss or reception error.
-Missing armado data → the column just shows "—" (Armado CH may not be in use every day).
+Missing armado data → "—".
+
+### 5.4 Áreas (scope)
+- **Abarrotes** and **Carnes**: in scope, received in this app (today they're separate Google Sheets per hub).
+- **Fruta y verdura**: on hold — future version.
+- **Proveedores directos**: items may appear but are received in the commercial team's own sheet, so they are
+  **not scanned here**. The app must recognize them, keep them out of Pendientes and the deltas, and list them
+  apart ("Recepción en hoja de comercial"). How to identify them in the file: Q8.
 
 ---
 
-## 6. Screens & flows
+## 6. Users, screens & flows
+
+### 6.0 One role: the receptor
+Each hub has **one assigned auxiliar** who does everything: downloads the Envío from the system, uploads it,
+scans, counts, types pieces, answers flags in real time, reviews the summary and types it into the system.
+**No PIN, no encargado/coordinator split** in v1 (like Sorting Hub: anyone with the link). Jose's
+cross-hub view is a later addition (§12).
 
 ### 6.1 Inicio
-Hub picker (remembered in `localStorage` `mr_hub`), receiver name (remembered `mr_receptor`, free text v1).
-Card per open reception for this hub today (from `rec_events` `abrir` without `cerrar`): "Continuar".
+Hub picker (remembered in `localStorage` `mr_hub`) + receptor name (remembered `mr_receptor`).
+After choosing the hub: if there's no reception in progress → the only action is **Subir envío**.
+Open receptions for the hub show "Continuar". (Rules for older orders, re-uploads and daily cleanup: TBD, Q7.)
 
-### 6.2 Cargar envío
-Upload the Envío CSV → validate (§5.2) → store raw + projected in `recibo/envios/…` → write `abrir` event →
-open Recibir. A second phone on the same hub sees the open session and can join it (shared `session_id`).
+### 6.2 Subir envío
+Upload the system export → validate (§5.2) → split by **área** (§5.4) → store raw + projected in
+`recibo/envios/…` → `abrir` event → Recibir. The salida is registered at CH the day before, so the file is
+normally ready before the truck arrives.
 
-### 6.3 Recibir (main screen)
-Top: progress `líneas completas / esperadas`, `piezas recibidas / enviadas`, offline badge.
+### 6.3 Recibir (main screen) — blind
+Top: progress as **products received / products expected** (counts of lines, never quantities), offline badge,
+área tabs if the envío has more than one (Abarrotes / Carnes).
 Scan field (`inputmode="none"`, scanner types + Enter or 300 ms pause auto-submit as in Sorting Hub) + 📷 camera
 + "Sin código" (manual search).
 
 On scan → resolve to a product:
 1. **In the envío** → product card: big photo, name, **presentation highlighted**, Kg/Pz,
    **basket/aisle letter in huge type** (Pasillo from this hub's sorting; full `B-4-6` below),
-   enviado / recibido so far, quantity field (empty, required; Kg with decimals, Pz integers).
+   "ya registraste {n}" if scanned before, quantity field (empty, required). **No enviado number.**
 2. **Not in the envío** → blocking modal (§7.1).
-3. **Unknown barcode** (not in envío, sorting or image DB) → modal: "Código no reconocido — vuelve a escanear
-   o búscalo por nombre". Option "Recibir como no identificado" requires a photo-less note (name typed).
+3. **Unknown barcode** → modal "Código no reconocido — vuelve a escanear o búscalo por nombre".
 
-Confirm → `scan` event (sku, qty, method) → local state + outbox. Each confirm re-checks the guards in §7.
+Confirm → `scan` event → local state + outbox → real-time checks (§7). Flags are answered on the spot.
 
-Below the scan field: **last 10 scans** with "Corregir" (opens an `ajuste` with a reason; never deletes).
+Below the scan field: **last 10 scans** with "Corregir" (an `ajuste` with a reason; never deletes).
+"**Pendientes**" button: products of the envío not scanned yet — photo, name, position, **no quantities** —
+so the receptor can hunt for missing boxes without being told how many.
 
 ### 6.4 Canastas (pre-sort view)
-Received items grouped by aisle letter: `B — 14 productos / 52 pz` … tap → list with photos and full positions.
-Purpose: shelve basket by basket. Read-only.
+Received items grouped by aisle letter: `B — 14 productos` … tap → list with photos and full positions. Read-only.
 
-### 6.5 Revisar y cerrar
-Table of every expected line + every unexpected item, status:
-`Completo · Faltante · Parcial (menos) · Sobrante (más) · No esperado`.
-- Discrepancies listed first. Each one must be acknowledged individually: "Recontar" (goes back to Recibir
-  filtered to that product) or "Confirmo la diferencia". No "confirmar todas".
-- Then "Cerrar recepción" → `cerrar` event + report CSV to `recibo/reportes/…`.
+### 6.5 Resumen y cierre
+Now the expected quantities are revealed: `Producto · Enviado · Recibido · Diferencia · Estado`
+(`Completo · Faltante · Parcial · Sobrante · No esperado`), deltas first and highlighted.
+- Each delta must be answered individually: "Recontar" (back to Recibir on that product) or
+  "Confirmo la diferencia". No "confirmar todas".
+- "Cerrar recepción" → `cerrar` event + report CSV to `recibo/reportes/…`.
 
-### 6.6 Resumen para registrar
-After closing: the list in the **same order as the system's reception screen** (⚠ Q3), big numbers, tick boxes
-(`localStorage` per report, like Armado's registration copilot), filters (solo diferencias / todos), copy-to-clipboard.
-Download CSV with BOM.
-
----
+### 6.6 Recepciones (registration view — lives in the app, like Armado's "Pedidos armados")
+List of this hub's closed receptions. Opening one shows the final summary in the **system's order** (Q3),
+big Recibido numbers, filter/sort (solo diferencias, A-Z), tick boxes per row (`localStorage`), and
+**Descargar CSV**. This is what the receptor uses later to type Recepción into the system — no printing,
+no Google Sheet.
 
 ## 7. Error guards (the point of the app)
 
@@ -234,9 +248,12 @@ lowercase, accents stripped. Precompute families over envío + image DB names.
 Search box. Results show **envío products first** (with photo + "viene en el envío"), then the rest of the
 catalog greyed. Picking a non-envío product → modal 7.1. Picking a product with a sibling → banner 7.2.
 
-### 7.4 Quantity sanity
-- Received total for a line would exceed enviado → confirm "Vas a recibir {x} y se enviaron {y}. ¿Contaste bien?".
-- Qty > 3× enviado or > 200 pz → second confirm (typo guard: 120 instead of 12).
+### 7.4 Quantity sanity (real time, still blind)
+- Cumulative received for a line would **exceed enviado** → modal "**Esta cantidad es mayor a lo enviado.
+  Vuelve a contar.**" (the enviado number is NOT shown) → re-enter the count → if it still exceeds, it is
+  stored and flagged Sobrante for the summary.
+- Qty > 3× enviado or > 200 pz → extra confirm (typo guard: 120 instead of 12).
+- Shortages can't be judged per scan (more boxes may come); they surface in Pendientes and in §6.5.
 - Kg lines: decimals allowed; Pz lines: integers only.
 
 ### 7.5 Advisory vs blocking
@@ -271,7 +288,7 @@ All cells quoted, CRLF, BOM only on browser download.
 
 - **Phase 0 — Scaffold.** `index.html` shell, `sw.js`, `manifest.webmanifest`, `netlify.toml` (copy headers
   from sorting-hub), helpers copied from armado-CH. Run §3.1 SQL (Jose, in the dashboard). Verify: anon can
-  insert/select `rec_events`; GET sorting-hub `version.txt` cross-project works; image DB loads.
+  insert/select `rec_events`; GET `sorting-hub/sorting/{slug}/version.txt` works; image DB loads.
 - **Phase 1 — Envío + scan.** Inicio, Cargar envío, Recibir with in-envío cards, photo, position/basket letter,
   qty, events + outbox.
 - **Phase 2 — Guards.** §7.1–7.4, manual search, families.
@@ -288,18 +305,23 @@ All cells quoted, CRLF, BOM only on browser download.
 
 ## 11. Open questions (defaults in bold until Jose answers)
 
-- **Q1 Expected quantity column:** **`Envío (kg o pz)` > 0** vs `Requiere confirmar = TRUE`. Need a real export
-  in `fixtures/` to confirm.
-- **Q2 Scope:** the sheets also exist for **Carnes** and **Proveedores Directos**. v1 = **Abarrotes (inter-hub
-  from CH) only**; Carnes probably reuses the same flow; Proveedores Directos (compra vs recepción) later.
-- **Q3 Registration order:** what order does the system's reception screen list products in? Default
-  **Posición armado**, as in Armado CH.
-- **Q4 One envío per day per hub, or several?** Default **several allowed** (each upload = its own session).
-- **Q5 Receiver list:** free text (v1 default) vs a managed list like Armado's `assemblers.json`.
-- **Q6 Kg products** (meat, bulk): weighed on reception or trusted as sent? Default **typed weight, decimals**.
+Answered 2026-10-29: one receptor role does everything (no PIN) · blind count with real-time flags, deltas
+revealed in the summary · the receptor downloads and uploads the envío (salida is registered the day before) ·
+same person receives and registers · scope = Abarrotes + Carnes; Fruta y verdura later; Proveedores directos
+not scanned · Sorting Hub already in the shared project.
 
----
+- **Q1 Expected quantity column:** **`Envío (kg o pz)` > 0** vs `Requiere confirmar = TRUE`. Need a real export
+  in `fixtures/`.
+- **Q2 Abarrotes vs Carnes:** one export containing both (split by `Temp`/`Categoría`?) or separate downloads?
+  Same truck/time or separate receptions? Default **one upload, split into área tabs by `Temp`**.
+- **Q3 Registration order:** order of the system's reception screen. Default **Posición armado**.
+- **Q4 One envío per day per hub, or several?** Default **several allowed**.
+- **Q5 Receptor name:** free text (default) vs a managed list.
+- **Q6 Kg products (Carnes):** weighed on reception, decimals. Default **yes**.
+- **Q7 Lifecycle:** older orders, re-uploads, deletes, daily cleanup — **to be discussed** before Phase 1 is final.
+- **Q8 Proveedores directos:** which column identifies them (`Compra` > 0? `Proveedor`? category)?
 
 ## 12. Not in v1
-Metrics dashboard (scans/min, error rate per hub/receiver), photo evidence on discrepancies, expiry checks,
-sorting edits, Retool anything, CH Guadalupe as receiver, migrating Sorting Hub into this project.
+Coordinator/cross-hub view for Jose, PINs, Fruta y verdura, scanning Proveedores directos,
+metrics dashboard (scans/min, error rate per hub/receiver), photo evidence on discrepancies, expiry checks,
+sorting edits, Retool anything, CH Guadalupe as receiver.

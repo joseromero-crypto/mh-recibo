@@ -15,7 +15,7 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - Project `uuqqtksxlgkztenojufm` (Armado CH's). This app owns only bucket `recibo` and tables `rec_*`.
 - It only **reads** Armado's `picks` table and `solcitudesarmado/imagedb/*`, `solcitudesarmado/reports/*`.
   Never write, alter or delete anything outside `recibo` / `rec_*`.
-- Sorting positions: read cross-project from Sorting Hub's public bucket (plan §3.2).
+- Sorting positions: read-only from bucket `sorting-hub` in this same project (Sorting Hub migrated here 2026-10-29).
 - New tables need explicit `grant`s in the same SQL that creates them (Supabase change, 2026-10-30).
 - **Local runs write to prod.** Use `hub='test-hub'` or stub write helpers before testing write flows.
 
