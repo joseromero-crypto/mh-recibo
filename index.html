@@ -169,6 +169,25 @@ mark{background:var(--yellow-light);color:inherit;padding:0 3px;border-radius:4p
 .res-sub{font-size:11px;color:var(--gray-500);margin-top:2px}
 .res-pos{font-size:22px;font-weight:900;color:var(--green-dark);min-width:44px;text-align:center}
 
+/* Resumen / Recepciones */
+.sum-row{background:white;border-radius:var(--radius-sm);box-shadow:var(--shadow-sm);padding:10px;margin-bottom:8px}
+.sum-row.delta{border-left:5px solid var(--orange)}
+.sum-row.acked{border-left:5px solid var(--green)}
+.sum-nums{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px;text-align:center}
+.sum-nums div{background:var(--gray-50);border-radius:6px;padding:6px 2px}
+.sum-nums b{display:block;font-size:20px;font-weight:900}
+.sum-nums span{font-size:11px;color:var(--gray-600)}
+.sum-nums .big b{font-size:28px;color:var(--green-dark)}
+.estado{font-size:11px;font-weight:800;padding:3px 8px;border-radius:12px;white-space:nowrap}
+.estado.ok{background:var(--green-light);color:var(--green-dark)}
+.estado.bad{background:var(--red-light);color:var(--red)}
+.estado.mid{background:var(--orange-light);color:var(--orange)}
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.filters select{padding:8px;font-size:13px;border:2px solid var(--gray-300);border-radius:var(--radius-sm);background:white}
+.chk{width:30px;height:30px;flex-shrink:0;accent-color:var(--green)}
+.sum-row.ticked{opacity:.5}
+.badge-warn{display:inline-block;font-size:11px;font-weight:800;padding:3px 8px;border-radius:12px;background:#EDE7F6;color:#4527A0;margin:2px 4px 2px 0}
+
 /* Modal (only where plan §7.5 / §6.3 / §6.7 allow one) */
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:60;align-items:center;justify-content:center;padding:16px}
 .modal-bg.open{display:flex}
@@ -237,7 +256,20 @@ mark{background:var(--yellow-light);color:inherit;padding:0 3px;border-radius:4p
     <div id="card-area"></div>
     <div class="section-title">Últimos escaneos</div>
     <div id="recent-list" class="rlist"></div>
+    <div id="rec-footer" style="margin-top:20px"></div>
   </div>
+</div>
+
+<!-- ═══════════ RESUMEN Y CIERRE (§6.5) — the expected quantities are revealed here ═══════════ -->
+<div class="screen" id="screen-resumen">
+  <div class="topbar"><button class="back" onclick="backToRecibir()">← Seguir escaneando</button><div class="topbar-title" id="resumen-title"></div></div>
+  <div class="wrap" id="resumen-body"></div>
+</div>
+
+<!-- ═══════════ RECEPCIONES (§6.6) — closed receptions, used to type Recepción into the system ═══════════ -->
+<div class="screen" id="screen-recepciones">
+  <div class="topbar"><button class="back" id="recep-back" onclick="recepBack()">← Inicio</button><div class="topbar-title" id="recep-title"></div></div>
+  <div class="wrap" id="recep-body"></div>
 </div>
 
 <!-- Sheet: Sin código / Pendientes -->
@@ -265,7 +297,7 @@ mark{background:var(--yellow-light);color:inherit;padding:0 3px;border-radius:4p
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'v1 · fase 2';
+const APP_VERSION = 'v1 · fase 3';
 
 /* ════════════════════════════════════════════════════════════════════════════════════
    SUPABASE — shared project with Armado CH + Sorting Hub (plan §3). This app writes ONLY to bucket
@@ -689,7 +721,8 @@ function renderInicio(){
     h+=`</div>`;
   }
   if(INI.hub && INI.area && INI.receptor){
-    h+=`<div class="step"><div class="step-title">4 · Envío de ${escapeHtml(hubName(INI.hub))} · ${areaName(INI.area)}</div>${inicioActionsHtml()}</div>`;
+    h+=`<div class="step"><div class="step-title">4 · Envío de ${escapeHtml(hubName(INI.hub))} · ${areaName(INI.area)}</div>${inicioActionsHtml()}
+      <button class="link-btn" onclick="openRecepciones()">📚 Recepciones cerradas (para registrar en el sistema)</button></div>`;
   }
   b.innerHTML=h;
 }
@@ -743,10 +776,15 @@ async function findActiveEnvio(slug, area){
   return { path, data, closed: await sessionClosedAt(data.session_id) };
 }
 async function sessionClosedAt(sessionId){
-  // A 'cerrar' event (Phase 3) closes the reception. Unreachable → treated as open (never blocks resuming).
+  // A 'cerrar' event closes the reception; a later admin 'reabrir' (§6.8) opens it again.
+  // Unreachable → treated as open (never blocks resuming).
   try{
-    const r=await pgSelect('rec_events', `session_id=eq.${encodeURIComponent(sessionId)}&tipo=eq.cerrar&select=ts&order=id.desc&limit=1`);
-    return r.length ? r[0].ts : null;
+    const r=await pgSelect('rec_events', `session_id=eq.${encodeURIComponent(sessionId)}&tipo=in.(cerrar,admin)&select=ts,tipo,detalle&order=id.desc&limit=20`);
+    for(const e of r){
+      if(e.tipo==='cerrar') return e.ts;
+      if(e.detalle && e.detalle.accion==='reabrir') return null;
+    }
+    return null;
   }catch(_){ return null; }
 }
 async function sessionHasScans(sessionId){
@@ -899,7 +937,9 @@ async function startSinArchivo(){
   if(prev.data && !prev.closed && prev.data.session_fecha===fecha){ toast('Ya hay una recepción abierta hoy: continúala'); refreshActive(); return; }
   const session_id=`${slug}__${area}__${fecha}__${epochMs}`, base=`envios/${slug}/${area}/${fecha}__${epochMs}`;
   const data={ v:1, hub:slug, area, fecha, epochMs, uploadedAt:now.toISOString(), receptor:INI.receptor, sinArchivo:true,
-    sourceFile:'', session_id, session_fecha:fecha, stats:{ lineas:0, kg:0, sinCodigo:0, catalogo:0, renglones:0 }, lines:[], catalogo:[] };
+    sourceFile:'', session_id, session_fecha:fecha, stats:{ lineas:0, kg:0, sinCodigo:0, catalogo:0, renglones:0 }, lines:[],
+    // the previous file's whole catalog names the products (and their Kg/Pz) until today's file arrives
+    catalogo:prev.data ? (prev.data.catalogo||[]).concat((prev.data.lines||[]).map(l=>[l.producto, l.barcode, l.kgpz])) : [] };
   try{ await sbUpload(base+'.json', JSON.stringify(data), 'application/json'); }
   catch(e){ toast(isNetErr(e)?'Sin conexión: intenta de nuevo':'No se pudo empezar ('+e.message+')'); return; }
   data._path=base+'.json';
@@ -950,7 +990,11 @@ async function flushOutbox(){
       NET.ok=true;
     }
   }catch(e){ NET.ok=false; }
-  finally{ _flushing=false; renderNet(); }
+  finally{
+    _flushing=false; renderNet();
+    // the close button depends on an empty outbox
+    if(document.getElementById('screen-resumen').classList.contains('active') && !S.closing) renderResumen();
+  }
 }
 function parkDead(ev, err){
   try{ const d=JSON.parse(localStorage.getItem(DEAD_KEY)||'[]'); d.push({ev, err:String(err&&err.message)}); localStorage.setItem(DEAD_KEY, JSON.stringify(d)); }catch(_){}
@@ -1078,7 +1122,7 @@ function buildCatalog(){
   const cat=new Map(), byCode=new Map();
   const add=(producto, barcode, kgpz)=>{
     const sku=skuKeyOf(barcode, producto); if(!producto || cat.has(sku) || S.lines.has(sku)) return;
-    const c={ sku_key:sku, producto, barcode, kgpz:kgpz||'Pz', _n:normName(producto) };
+    const c={ sku_key:sku, producto, barcode, kgpz:kgpz||'Pz', kgpzKnown:!!kgpz, _n:normName(producto) };
     cat.set(sku, c); if(barcode) byCode.set(codeKey(barcode), c);
   };
   for(const r of (S.envio&&S.envio.catalogo)||[]) add(r[0], r[1], r[2]);
@@ -1106,6 +1150,9 @@ function renderRecibir(){
   if(S.sortStatus==='none') banner+=`<div class="note">${escapeHtml(hubName(S.hub))} todavía no tiene archivo en Sorting Hub: las tarjetas no mostrarán canasta.</div>`;
   else if(S.sortStatus==='err') banner+=`<div class="note">No se pudo cargar el sorting de este hub: las tarjetas no mostrarán canasta.</div>`;
   document.getElementById('rec-banner').innerHTML=banner;
+  document.getElementById('rec-footer').innerHTML = sinArch
+    ? `<div class="muted" style="text-align:center">Para cerrar la recepción, primero sube el archivo del envío.</div>`
+    : `<button class="btn btn-primary btn-block" onclick="openResumen()">✅ Terminé: revisar y cerrar</button>`;
   renderCard(); renderRecent(); renderNet();
 }
 
@@ -1184,8 +1231,11 @@ async function processScan(raw, metodo){
   if(r && r.product){ await notInEnvio(r.product, m, det); return; }
   // §6.3.3 — unknown barcode
   const v=await showModal({ title:'Código no reconocido', html:`<p>Vuelve a escanear o búscalo por nombre.</p><p style="font-size:12px;color:var(--gray-500)">Código: ${escapeHtml(code)}</p>`,
-    buttons:[{label:'Volver a escanear', value:'again', kind:'primary'}, {label:'🔎 Buscar por nombre', value:'search', kind:'secondary'}] });
+    buttons:[{label:'Volver a escanear', value:'again', kind:'primary'}, {label:'🔎 Buscar por nombre', value:'search', kind:'secondary'}]
+      .concat(S.envio.sinArchivo?[{label:'Registrar este código sin nombre', value:'raw', kind:'secondary'}]:[]) });
   if(v==='search') openSinCodigo();
+  // §6.2b — without a file an unknown code can still be counted; the file names it later (same sku_key)
+  if(v==='raw'){ const k=codeKey(code); openCard(sinArchivoProduct({ sku_key:k, producto:'Código '+k, barcode:k }), m, det); }
 }
 function vibrate(ok){ try{ if(navigator.vibrate) navigator.vibrate(ok?70:[60,50,60]); }catch(_){} }
 /* ── Families (§7.2): envío lines grouped by familyKey; built in openRecibir ── */
@@ -1227,14 +1277,14 @@ async function notInEnvio(p, metodo, det){
 
 /* ── Product card ── */
 // §6.2b — without a file the unit isn't known: the receptor picks Pz / Kg on the card
-function sinArchivoProduct(p){ return { ...p, enEnvio:null, kgpz:null, kgpzUnknown:true }; }
+function sinArchivoProduct(p){ return p.kgpzKnown ? { ...p, enEnvio:null } : { ...p, enEnvio:null, kgpz:null, kgpzUnknown:true }; }
 // Recontar (§6.2b Revisar ahora, §6.5): the receptor types the TOTAL counted now; stored as an ajuste
-function openRecount(sku, origen){
+function openRecount(sku, origen, after){
   const l=S.lines.get(sku), ne=S.noEsperados.get(sku);
   const p=l ? { ...l, enEnvio:true } : { sku_key:sku, producto:ne?ne.producto:sku, barcode:sku.startsWith('name:')?'':sku, kgpz:ne?ne.kgpz:'Pz', enEnvio:false };
   if(!document.getElementById('screen-recibir').classList.contains('active')) showScreen('screen-recibir');
   closeSheet();
-  S.current={ p, metodo:'recuento', det:{ recuento:true, origen }, recount:true };
+  S.current={ p, metodo:'recuento', det:{ recuento:true, origen }, recount:true, after };
   renderCard();
   const q=document.getElementById('qty-input'); if(q) setTimeout(()=>q.focus(), 40);
   document.getElementById('card-area').scrollIntoView({ block:'start', behavior:'smooth' });
@@ -1528,6 +1578,269 @@ function openPendientes(){
         <div class="res-pos">${pos?escapeHtml(pos.letra):'—'}</div>${imgTag(l.barcode, l.producto, 'thumb')}
         <div style="flex:1;min-width:0"><div class="res-name">${nameHtml(l.producto)}</div><div class="res-sub">${pos?escapeHtml(pos.full)+' · ':''}${l.kgpz==='Kg'?'Kg':'Pz'}${l.barcode?'':' · sin código'}</div></div></div>`).join('')
     : `<div class="empty-hint">🎉 Ya escaneaste todos los productos del envío.</div>`);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════════════
+   RESUMEN Y CIERRE (§6.5, §7.6, §9) — enviado is revealed only here. Every difference is answered one
+   by one ("Recontar" / "Confirmo la diferencia"); there is no confirm-all (rule 2).
+   ════════════════════════════════════════════════════════════════════════════════════ */
+const ESTADO_CLS={ 'Completo':'ok', 'Completo (variación de báscula)':'ok', 'Faltante':'bad', 'No esperado':'bad', 'Parcial':'mid', 'Sobrante':'mid' };
+function estadoDe(kgpz, env, rec){
+  if(!(rec>0)) return 'Faltante';
+  const d=round2(rec-env);
+  if(d===0) return 'Completo';
+  if(kgpz==='Kg' && Math.abs(d)<=kgTol(env)+1e-9) return 'Completo (variación de báscula)';
+  return d<0 ? 'Parcial' : 'Sobrante';
+}
+function summaryRows(){
+  const rows=[];
+  for(const l of [...S.lines.values()].sort((a,b)=>a.rowIndex-b.rowIndex)){
+    const rec=recibidoDe(l.sku_key);
+    rows.push({ sku:l.sku_key, producto:l.producto, barcode:l.barcode, kgpz:l.kgpz, env:l.esperado, rec, dif:round2(rec-l.esperado), estado:estadoDe(l.kgpz, l.esperado, rec), rowIndex:l.rowIndex });
+  }
+  for(const [sku, ne] of S.noEsperados){
+    const rec=recibidoDe(sku);
+    if(rec>0) rows.push({ sku, producto:ne.producto, barcode:sku.startsWith('name:')?'':sku, kgpz:ne.kgpz, env:0, rec, dif:rec, estado:'No esperado', rowIndex:1e9 });
+  }
+  return rows;
+}
+function isDelta(r){ return ESTADO_CLS[r.estado]!=='ok'; }
+// A confirmation counts only while the received amount is the one that was confirmed
+function ackOf(sku){ let a=null; for(const e of S.events) if(e.tipo==='confirmacion' && e.sku_key===sku && e.detalle && e.detalle.diferencia) a=e; return a; }
+function isAcked(r){ const a=ackOf(r.sku); return !!a && round2(a.detalle.recibido)===r.rec; }
+function kgStats(rows){
+  const kg=(rows||summaryRows()).filter(r=>r.kgpz==='Kg' && r.env>0 && r.rec>0);
+  return { n:kg.length, exact:kg.filter(r=>r.dif===0).length, whole:kg.filter(r=>Number.isInteger(r.rec)).length, rows:kg };
+}
+function kgSinVariacionConfirmado(){ return S.events.some(e=>e.tipo==='confirmacion' && e.detalle && e.detalle.kg_sin_variacion); }
+// §7.6 badges carried by the reception (Recepciones, Admin, report CSV)
+function receptionBadges(rows){
+  const k=kgStats(rows), out=[];
+  if(kgSinVariacionConfirmado()) out.push('Kg sin variación');
+  if(k.n>=3 && k.whole>=0.8*k.n) out.push('Kg en números enteros');
+  return out;
+}
+function receptoresDeSesion(){ const s=new Set(); for(const e of S.events) if(e.receptor && (e.tipo==='scan'||e.tipo==='ajuste')) s.add(e.receptor); if(!s.size && S.receptor) s.add(S.receptor); return [...s]; }
+
+function openResumen(){
+  if(!S.session) return;
+  if(S.envio.sinArchivo){ toast('Sube el archivo del envío antes de cerrar la recepción', 3500); return; }
+  S.current=null; S.corrigiendo=null; closeSheet();
+  document.getElementById('resumen-title').textContent=`${hubName(S.hub)} · ${areaName(S.area)}`;
+  showScreen('screen-resumen'); renderResumen();
+  syncServerEvents().then(()=>{ if(document.getElementById('screen-resumen').classList.contains('active')) renderResumen(); });
+}
+function backToRecibir(){ showScreen('screen-recibir'); renderRecibir(); focusScan(); }
+function sumRowHtml(r, inner){
+  const pos=positionOf(r.barcode, r.producto), u=unitOf(r.kgpz), sign=r.dif>0?'+':'';
+  return `<div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
+      <div class="ritem-meta">${pos?escapeHtml(pos.full)+' · ':''}${r.kgpz}${r.barcode?'':' · sin código'}</div></div>
+      <span class="estado ${ESTADO_CLS[r.estado]}">${escapeHtml(r.estado)}</span></div>
+    <div class="sum-nums"><div><b>${r.env?fmtQty(r.env,r.kgpz):'—'}</b><span>Enviado (${u})</span></div><div class="big"><b>${fmtQty(r.rec,r.kgpz)}</b><span>Recibido (${u})</span></div>
+      <div><b style="color:${r.dif<0?'var(--red)':r.dif>0?'var(--orange)':'inherit'}">${sign}${fmtQty(r.dif,r.kgpz)}</b><span>Diferencia</span></div></div>${inner||''}`;
+}
+function renderResumen(){
+  const el=document.getElementById('resumen-body');
+  const rows=summaryRows(), deltas=rows.filter(isDelta), oks=rows.filter(r=>!isDelta(r));
+  const pend=deltas.filter(r=>!isAcked(r)), rev=revisarItems();
+  // deltas first: unanswered on top, biggest gaps first
+  deltas.sort((a,b)=>(isAcked(a)-isAcked(b)) || Math.abs(b.dif)-Math.abs(a.dif));
+  let h=`<h2>Resumen y cierre</h2><div class="stat-grid">
+    <div class="stat"><div class="stat-n">${S.lines.size}</div><div class="stat-l">productos en el envío</div></div>
+    <div class="stat"><div class="stat-n">${oks.length}</div><div class="stat-l">completos</div></div>
+    <div class="stat"><div class="stat-n">${deltas.length}</div><div class="stat-l">con diferencia</div></div>
+    <div class="stat"><div class="stat-n" style="color:${pend.length?'var(--orange)':'var(--green-dark)'}">${pend.length}</div><div class="stat-l">por confirmar</div></div></div>`;
+  if(OUTBOX.length) h+=`<div class="warn-box">Hay ${OUTBOX.length} registro(s) sin subir. Conéctate a internet para poder cerrar.</div>`;
+  if(rev.length) h+=`<button class="btn btn-warn btn-block" style="margin-bottom:10px" onclick="backToRecibir();openRevisar()">⚠ Revisar ahora · ${rev.length}</button>`;
+  if(deltas.length){
+    h+=`<div class="section-title">Diferencias · ${deltas.length}</div><div class="muted" style="margin-bottom:8px">Contesta cada una: recuenta el producto o confirma la diferencia.</div>`;
+    h+=deltas.map(r=>{ const ok=isAcked(r), a=ackOf(r.sku);
+      return `<div class="sum-row ${ok?'acked':'delta'}">${sumRowHtml(r, ok
+        ? `<div class="ritem-meta" style="margin-top:6px;color:var(--green-dark);font-weight:700">✓ Diferencia confirmada por ${escapeHtml(a.receptor||'')} · <button class="corr-btn" onclick="resumenRecontar('${escapeHtml(r.sku)}')">Recontar</button></div>`
+        : `<div class="pcard-actions" style="grid-template-columns:1fr 1fr"><button class="btn btn-secondary" onclick="resumenRecontar('${escapeHtml(r.sku)}')">🔁 Recontar</button><button class="btn btn-warn" onclick="resumenConfirmo('${escapeHtml(r.sku)}')">Confirmo la diferencia</button></div>`)}</div>`; }).join('');
+  } else h+=`<div class="warn-box ok">🎉 Todo llegó completo.</div>`;
+  if(oks.length) h+=`<details style="margin-top:14px"><summary class="section-title" style="cursor:pointer">Completos · ${oks.length}</summary>${oks.map(r=>`<div class="sum-row">${sumRowHtml(r)}</div>`).join('')}</details>`;
+  const can=!pend.length && !OUTBOX.length && !S.closing;
+  h+=`<button class="btn btn-primary btn-block" style="margin-top:18px" ${can?'':'disabled'} onclick="cerrarRecepcion()">${S.closing?'Cerrando…':pend.length?`Faltan ${pend.length} diferencia(s) por contestar`:OUTBOX.length?'Subiendo registros…':'✅ Cerrar recepción'}</button>`;
+  el.innerHTML=h;
+}
+function resumenRecontar(sku){ openRecount(sku, 'resumen', openResumen); }
+function resumenConfirmo(sku){
+  const r=summaryRows().find(x=>x.sku===sku); if(!r) return;
+  recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:r.producto, cantidad:r.rec,
+    detalle:{ diferencia:true, estado:r.estado, recibido:r.rec, enviado:r.env, kgpz:r.kgpz } }));
+  renderResumen();
+}
+// §7.6 "Volver a pesar": the Kg lines, each with Recontar
+function openRepesar(kgRows){
+  openSheet('Volver a pesar', `<div class="muted" style="margin-bottom:10px">Pesa cada artículo en la báscula y escribe el peso que marca.</div>`
+    +kgRows.map(r=>`<div class="ritem" style="margin-bottom:8px"><div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div></div>
+      <button class="corr-btn" onclick="resumenRecontar('${escapeHtml(r.sku)}')">⚖️ Pesar</button></div></div>`).join(''));
+}
+async function flushAndWait(){ for(let i=0;i<100 && _flushing;i++) await new Promise(r=>setTimeout(r,100)); await flushOutbox(); }
+function fileSafe(s){ return normName(s).replace(/ /g,'-') || 'receptor'; }
+async function cerrarRecepcion(){
+  if(S.closing) return;
+  let rows=summaryRows();
+  if(rows.filter(isDelta).some(r=>!isAcked(r))) return;
+  // §7.6 zero-variance check: ≥3 Kg lines and ≥80% match enviado exactly
+  const k=kgStats(rows);
+  if(k.n>=3 && k.exact>=0.8*k.n && !kgSinVariacionConfirmado()){
+    const v=await showModal({ title:'¿Se pesaron todos los artículos correctamente?',
+      html:'<p>Este recibo se reportará a gerencia sin discrepancias en kg.</p>',
+      buttons:[{label:'Sí, los pesé todos', value:'si', kind:'primary'}, {label:'Volver a pesar', value:'pesar', kind:'secondary'}] });
+    if(v==='pesar'){ openRepesar(k.rows); return; }
+    if(v!=='si') return;
+    recordEvent(makeEvent('confirmacion', { detalle:{ kg_sin_variacion:true, kg_lineas:k.n, kg_exactas:k.exact } }));
+  }
+  S.closing=true; renderResumen();
+  try{
+    await flushAndWait(); if(OUTBOX.length) throw new TypeError('offline');
+    await syncServerEvents(); // scans from other phones
+    rows=summaryRows();
+    if(rows.filter(isDelta).some(r=>!isAcked(r))){ S.closing=false; renderResumen(); toast('Llegaron escaneos de otro teléfono: revisa las diferencias nuevas', 4000); return; }
+    const now=serverNow(), badges=receptionBadges(rows), receptores=receptoresDeSesion();
+    const path=`reportes/${S.hub}/${S.area}/${S.session.fecha}_${localHM(now).replace(':','-')}_${fileSafe(S.receptor)}.csv`;
+    await sbUpload(path, buildReportCsv(rows, badges, receptores), 'text/csv; charset=utf-8');
+    const deltas=rows.filter(isDelta);
+    const ev=makeEvent('cerrar', { detalle:{ reporte:path, envio:S.envio._path, lineas:S.lines.size, recibidas:rows.filter(r=>r.env>0 && r.rec>0).length,
+      diferencias:deltas.length, no_esperados:rows.filter(r=>r.estado==='No esperado').length, badges, receptores } });
+    recordEvent(ev); await flushAndWait();
+    S.closing=false;
+    toast(OUTBOX.length?'Recepción cerrada — se termina de subir al reconectar':'✓ Recepción cerrada', 3500);
+    openRecepcion(Object.assign({ ts:ev.ts, fecha:S.session.fecha, receptor:S.receptor }, ev.detalle), 'inicio');
+  }catch(e){
+    S.closing=false; renderResumen();
+    toast(isNetErr(e)?'Sin conexión: no se pudo cerrar. Intenta de nuevo con internet.':'No se pudo cerrar ('+e.message+')', 4500);
+  }
+}
+/* ── Report CSV (§9): all cells quoted, CRLF; the BOM is added only on browser download ── */
+const REPORT_COLS=['Hub','Área','Fecha','Receptor(es)','Producto','Código de barras','Kg/Pz','Posición','Armado','Enviado','Recibido','Diferencia','Estado','Notas (correcciones / confirmaciones)','Alertas'];
+function csvCell(v){ return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'; }
+function notasDe(sku, kgpz){
+  const n=[];
+  for(const e of S.events){
+    if(e.sku_key!==sku || !e.detalle) continue;
+    const d=e.detalle, u=unitOf(kgpz);
+    if(e.tipo==='ajuste') n.push(`${d.motivo||'Corrección'}: ${fmtQty(d.antes,kgpz)}→${fmtQty(d.despues,kgpz)} ${u} (${e.receptor||''})`);
+    else if(e.tipo==='confirmacion' && d.diferencia) n.push(`Diferencia confirmada con ${fmtQty(d.recibido,kgpz)} ${u} (${e.receptor||''})`);
+    else if(e.tipo==='confirmacion' && d.revisar) n.push(`Revisado sin archivo (${e.receptor||''})`);
+    else if(e.tipo==='scan' && d.reatribuido_de) n.push(`Escaneado como «${d.reatribuido_de.producto}»`);
+    else if(e.tipo==='scan' && d.sobrante) n.push('Se registró arriba de lo enviado tras recontar');
+  }
+  return n.join(' · ');
+}
+function buildReportCsv(rows, badges, receptores){
+  const head=REPORT_COLS.map(csvCell).join(',');
+  const body=rows.map(r=>{ const pos=positionOf(r.barcode, r.producto), arm=armadoDe(r);
+    return [hubName(S.hub), areaName(S.area), S.session.fecha, receptores.join(', '), r.producto, r.barcode, r.kgpz, pos?pos.full:'',
+      arm==null?'—':fmtQty(arm,r.kgpz), r.env?fmtQty(r.env,r.kgpz):'0', fmtQty(r.rec,r.kgpz), fmtQty(r.dif,r.kgpz), r.estado, notasDe(r.sku, r.kgpz), badges.join(' · ')].map(csvCell).join(','); });
+  return [head].concat(body).join('\r\n')+'\r\n';
+}
+// §5.3 Armado enrichment — filled in Phase 5; null = no data ("—")
+function armadoDe(r){ return null; }
+
+/* ════════════════════════════════════════════════════════════════════════════════════
+   RECEPCIONES (§6.6) — this hub+área's closed receptions (last 30 days). Opening one shows the final
+   report with big Recibido numbers, tick boxes, search, filters, sort and Descargar CSV.
+   ════════════════════════════════════════════════════════════════════════════════════ */
+let RV=null; // { info, rows, csv, f:{q,solo,estado,kgpz,pasillo,sort} }
+async function listCerradas(slug, area, days=30){
+  const desde=localDateStr(new Date(serverNow().getTime()-days*86400000));
+  const q=`tipo=in.(cerrar,admin)&fecha=gte.${desde}${slug?`&hub=eq.${encodeURIComponent(slug)}`:''}${area?`&area=eq.${area}`:''}&select=*&order=id.desc`;
+  const evs=await pgSelectAll('rec_events', q);
+  // latest state per session: a later admin "reabrir" hides the close
+  const seen=new Map();
+  for(const e of evs){
+    if(seen.has(e.session_id)) continue;
+    if(e.tipo==='cerrar') seen.set(e.session_id, Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id }, e.detalle||{}));
+    else if(e.detalle && e.detalle.accion==='reabrir') seen.set(e.session_id, null);
+  }
+  return [...seen.values()].filter(Boolean);
+}
+function recepBack(){ goInicio(); }
+async function openRecepciones(){
+  document.getElementById('recep-title').textContent=`${hubName(INI.hub)} · ${areaName(INI.area)}`;
+  const el=document.getElementById('recep-body');
+  el.innerHTML='<h2>Recepciones cerradas</h2><div class="muted">Cargando…</div>';
+  showScreen('screen-recepciones');
+  let list; try{ list=await listCerradas(INI.hub, INI.area); }catch(e){ el.innerHTML='<h2>Recepciones cerradas</h2><div class="err-box">Sin conexión. Intenta de nuevo.</div>'; return; }
+  window._recepList=list;
+  el.innerHTML='<h2>Recepciones cerradas</h2><div class="muted" style="margin-bottom:10px">Últimos 30 días. Ábrela para registrar la recepción en el sistema.</div>'
+    +(list.length?list.map((r,i)=>`<button class="res-item" onclick="openRecepcion(window._recepList[${i}],'lista')"><div style="flex:1">
+      <div class="res-name">${fechaLarga(r.fecha)} · cerrada ${localHM(new Date(r.ts))}</div>
+      <div class="res-sub">${escapeHtml((r.receptores||[r.receptor]).join(', '))} · ${r.lineas||0} productos · ${r.diferencias?`<b style="color:var(--orange)">${r.diferencias} con diferencia</b>`:'sin diferencias'}</div>
+      ${(r.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div><span style="font-size:20px">›</span></button>`).join('')
+      :'<div class="empty-hint">No hay recepciones cerradas en los últimos 30 días.</div>');
+}
+async function verResumenCerrado(){
+  const sid=INI.active && INI.active.data && INI.active.data.session_id; if(!sid) return;
+  try{
+    const r=await pgSelect('rec_events', `session_id=eq.${encodeURIComponent(sid)}&tipo=eq.cerrar&select=*&order=id.desc&limit=1`);
+    if(!r.length){ toast('No se encontró el cierre'); return; }
+    openRecepcion(Object.assign({ ts:r[0].ts, fecha:r[0].fecha, hub:r[0].hub, area:r[0].area, receptor:r[0].receptor, session_id:r[0].session_id }, r[0].detalle), 'inicio');
+  }catch(e){ toast('Sin conexión'); }
+}
+async function openRecepcion(info, from){
+  const el=document.getElementById('recep-body');
+  document.getElementById('recep-title').textContent=`${hubName(info.hub||INI.hub)} · ${areaName(info.area||INI.area)}`;
+  document.getElementById('recep-back').onclick = from==='lista' ? openRecepciones : from==='admin' ? openAdmin : recepBack;
+  document.getElementById('recep-back').textContent = from==='lista' ? '← Recepciones' : from==='admin' ? '← Admin' : '← Inicio';
+  el.innerHTML='<div class="muted">Cargando reporte…</div>'; showScreen('screen-recepciones');
+  let csv; try{ csv=await sbFetch(info.reporte); }catch(e){ el.innerHTML=`<div class="err-box">${isNetErr(e)?'Sin conexión.':'No se encontró el reporte.'} Intenta de nuevo.</div>`; return; }
+  const p=Papa.parse(stripBOM(csv), { header:true, skipEmptyLines:true });
+  const rows=(p.data||[]).map((r,i)=>{ const g=n=>pickCol(r, n)||'';
+    const pos=g('Posición'), kgpz=g('Kg/Pz')==='Kg'?'Kg':'Pz';
+    return { i, producto:g('Producto'), barcode:g('Código de barras'), kgpz, pos, pasillo:(pos.split(/[-·\s]/)[0]||'').trim(), armado:g('Armado'),
+      env:parseNum(g('Enviado')), rec:parseNum(g('Recibido')), dif:parseNum(g('Diferencia')), estado:g('Estado'), notas:g('Notas (correcciones / confirmaciones)'), _n:normName(g('Producto')) }; });
+  let ticks=new Set(); try{ ticks=new Set(JSON.parse(localStorage.getItem('mr_ticks_'+info.reporte)||'[]')); }catch(_){}
+  RV={ info, rows, csv, ticks, f:{ q:'', solo:false, estado:'', kgpz:'', pasillo:'', sort:'archivo' } };
+  renderRecepcion();
+}
+function rvSet(k, v){ RV.f[k]=v; renderRecepcionRows(); }
+function rvTick(i){
+  RV.ticks.has(i)?RV.ticks.delete(i):RV.ticks.add(i);
+  try{ localStorage.setItem('mr_ticks_'+RV.info.reporte, JSON.stringify([...RV.ticks])); }catch(_){}
+  renderRecepcionRows();
+}
+function renderRecepcion(){
+  const I=RV.info, pas=[...new Set(RV.rows.map(r=>r.pasillo).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es',{numeric:true}));
+  const est=[...new Set(RV.rows.map(r=>r.estado))];
+  document.getElementById('recep-body').innerHTML=`<h2>Recepción del ${fechaLarga(I.fecha)}</h2>
+    <div class="info-card">Cerrada a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}<br>
+      ${I.lineas||0} productos · ${I.diferencias?`<b style="color:var(--orange)">${I.diferencias} con diferencia</b>`:'sin diferencias'}${I.no_esperados?` · ${I.no_esperados} no esperado(s)`:''}
+      <div>${(I.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div></div>
+    <button class="btn btn-secondary btn-block" onclick="descargarReporte()">⬇ Descargar CSV</button>
+    <input class="text-input" style="margin-top:12px" placeholder="Buscar producto…" oninput="rvSet('q',this.value)" autocomplete="off">
+    <div class="filters">
+      <select onchange="rvSet('solo',this.value==='1')"><option value="">Todos</option><option value="1">Solo diferencias</option></select>
+      <select onchange="rvSet('estado',this.value)"><option value="">Estado</option>${est.map(e=>`<option>${escapeHtml(e)}</option>`).join('')}</select>
+      <select onchange="rvSet('kgpz',this.value)"><option value="">Kg/Pz</option><option>Kg</option><option>Pz</option></select>
+      <select onchange="rvSet('pasillo',this.value)"><option value="">Pasillo</option>${pas.map(p=>`<option>${escapeHtml(p)}</option>`).join('')}</select>
+      <select onchange="rvSet('sort',this.value)"><option value="archivo">Orden del archivo</option><option value="az">A-Z</option><option value="pasillo">Pasillo</option><option value="dif">Diferencia</option></select>
+    </div>
+    <div class="muted" id="rv-count" style="margin-bottom:8px"></div><div id="rv-rows"></div>`;
+  renderRecepcionRows();
+}
+function renderRecepcionRows(){
+  const f=RV.f, words=normName(f.q).split(' ').filter(Boolean);
+  let rows=RV.rows.filter(r=>(!words.length || words.every(w=>r._n.includes(w)))
+    && (!f.solo || !/^Completo/.test(r.estado)) && (!f.estado || r.estado===f.estado) && (!f.kgpz || r.kgpz===f.kgpz) && (!f.pasillo || r.pasillo===f.pasillo));
+  const cmp={ archivo:(a,b)=>a.i-b.i, az:(a,b)=>a._n.localeCompare(b._n), pasillo:(a,b)=>(a.pos||'~').localeCompare(b.pos||'~','es',{numeric:true})||a.i-b.i, dif:(a,b)=>Math.abs(b.dif)-Math.abs(a.dif)||a.i-b.i }[f.sort];
+  rows=rows.slice().sort(cmp);
+  document.getElementById('rv-count').textContent=`${rows.length} producto(s) · ${RV.ticks.size} de ${RV.rows.length} marcados`;
+  document.getElementById('rv-rows').innerHTML=rows.map(r=>{ const u=unitOf(r.kgpz), on=RV.ticks.has(r.i);
+    return `<div class="sum-row ${on?'ticked':''} ${/^Completo/.test(r.estado)?'':'delta'}"><div class="ritem-row">
+      <input type="checkbox" class="chk" ${on?'checked':''} onchange="rvTick(${r.i})">${imgTag(r.barcode, r.producto, 'thumb')}
+      <div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div><div class="ritem-meta">${escapeHtml(r.barcode||'sin código')}${r.pos?' · '+escapeHtml(r.pos):''}</div></div>
+      <div style="text-align:right"><div style="font-size:30px;font-weight:900;color:var(--green-dark)">${fmtQty(r.rec,r.kgpz)}</div><div class="ritem-meta">${u} recibido</div></div></div>
+      <div class="ritem-meta" style="margin-top:4px">Enviado ${fmtQty(r.env,r.kgpz)}${r.armado&&r.armado!=='—'?' · Armado '+escapeHtml(r.armado):''} · Dif ${r.dif>0?'+':''}${fmtQty(r.dif,r.kgpz)} · <span class="estado ${ESTADO_CLS[r.estado]||'mid'}">${escapeHtml(r.estado)}</span></div>
+      ${r.notas?`<div class="ritem-meta">${escapeHtml(r.notas)}</div>`:''}</div>`; }).join('') || '<div class="empty-hint">Nada coincide con el filtro.</div>';
+}
+function descargarReporte(){
+  const blob=new Blob(['﻿'+RV.csv], { type:'text/csv;charset=utf-8' });
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=RV.info.reporte.split('/').pop();
+  document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 500);
 }
 
 /* ════════════════════════════════════════════════════════════════════════════════════
