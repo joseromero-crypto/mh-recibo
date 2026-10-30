@@ -253,6 +253,7 @@ mark{background:var(--yellow-light);color:inherit;padding:0 3px;border-radius:4p
       <button class="btn btn-secondary" onclick="openSinCodigo()">🔎 Sin código</button>
       <button class="btn btn-secondary" onclick="openPendientes()">📋 Pendientes <span id="pend-count"></span></button>
     </div>
+    <button class="btn btn-secondary btn-block" style="margin:-4px 0 12px;font-size:15px;padding:10px" onclick="openCanastas()">🧺 Canastas (lo recibido por pasillo)</button>
     <div id="card-area"></div>
     <div class="section-title">Últimos escaneos</div>
     <div id="recent-list" class="rlist"></div>
@@ -297,7 +298,7 @@ mark{background:var(--yellow-light);color:inherit;padding:0 3px;border-radius:4p
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'v1 · fase 4';
+const APP_VERSION = 'v1 · fase 5';
 
 /* ════════════════════════════════════════════════════════════════════════════════════
    SUPABASE — shared project with Armado CH + Sorting Hub (plan §3). This app writes ONLY to bucket
@@ -1669,7 +1670,7 @@ function openResumen(){
   S.current=null; S.corrigiendo=null; closeSheet();
   document.getElementById('resumen-title').textContent=`${hubName(S.hub)} · ${areaName(S.area)}`;
   showScreen('screen-resumen'); renderResumen();
-  syncServerEvents().then(()=>{ if(document.getElementById('screen-resumen').classList.contains('active')) renderResumen(); });
+  Promise.all([syncServerEvents(), loadArmado()]).then(()=>{ if(screenActive('screen-resumen')) renderResumen(); });
 }
 function backToRecibir(){ showScreen('screen-recibir'); renderRecibir(); focusScan(); }
 function sumRowHtml(r, inner){
@@ -1677,6 +1678,7 @@ function sumRowHtml(r, inner){
   return `<div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
       <div class="ritem-meta">${pos?escapeHtml(pos.full)+' · ':''}${r.kgpz}${r.barcode?'':' · sin código'}</div></div>
       <span class="estado ${ESTADO_CLS[r.estado]}">${escapeHtml(r.estado)}</span></div>
+    ${(()=>{ const a=armadoDe(r), o=isDelta(r)?origenDif(r):''; return (a!=null?`<div class="ritem-meta" style="margin-top:4px">Armado en CH: <b>${fmtQty(a,r.kgpz)}</b> ${u}</div>`:'')+(o?`<div class="ritem-meta" style="color:#4527A0;font-weight:700">${escapeHtml(o)}</div>`:''); })()}
     <div class="sum-nums"><div><b>${r.env?fmtQty(r.env,r.kgpz):'—'}</b><span>Enviado (${u})</span></div><div class="big"><b>${fmtQty(r.rec,r.kgpz)}</b><span>Recibido (${u})</span></div>
       <div><b style="color:${r.dif<0?'var(--red)':r.dif>0?'var(--orange)':'inherit'}">${sign}${fmtQty(r.dif,r.kgpz)}</b><span>Diferencia</span></div></div>${inner||''}`;
 }
@@ -1769,6 +1771,7 @@ function notasDe(sku, kgpz){
     else if(e.tipo==='scan' && d.reatribuido_de) n.push(`Escaneado como «${d.reatribuido_de.producto}»`);
     else if(e.tipo==='scan' && d.sobrante) n.push('Se registró arriba de lo enviado tras recontar');
   }
+  const r=summaryRows().find(x=>x.sku===sku); if(r && isDelta(r)){ const o=origenDif(r); if(o) n.push(o); }
   return n.join(' · ');
 }
 function buildReportCsv(rows, badges, receptores){
@@ -1778,8 +1781,61 @@ function buildReportCsv(rows, badges, receptores){
       arm==null?'—':fmtQty(arm,r.kgpz), r.env?fmtQty(r.env,r.kgpz):'0', fmtQty(r.rec,r.kgpz), fmtQty(r.dif,r.kgpz), r.estado, notasDe(r.sku, r.kgpz), badges.join(' · ')].map(csvCell).join(','); });
   return [head].concat(body).join('\r\n')+'\r\n';
 }
-// §5.3 Armado enrichment — filled in Phase 5; null = no data ("—")
-function armadoDe(r){ return null; }
+/* ── §5.3 Armado enrichment (display only). Reads Armado's picks (read-only): the newest order_date within
+   3 days of the reception that has rows for this hub. Per sku: latest row per ronda, rondas summed
+   (Armado writes one row per confirm, so a re-confirm repeats the sku). Abarrotes only — Carnes isn't
+   assembled in Armado yet. S.armado: Map sku→qty, or null = no data ("—"). ── */
+const ARMADO_HUB={ 'test-hub':'MH Contry' }; // local tests borrow MH Contry's assembly
+async function loadArmado(){
+  S.armado=null; S.armadoFecha=null;
+  if(S.area!=='abarrotes' || !S.session) return;
+  const hub=ARMADO_HUB[S.hub]||hubName(S.hub), hasta=S.session.fecha;
+  const desde=localDateStr(new Date(Date.parse(hasta+'T12:00:00Z')-3*86400000));
+  try{
+    const rows=await pgSelectAll('picks', `hub=eq.${encodeURIComponent(hub)}&order_date=gte.${desde}&order_date=lte.${hasta}&select=id,sku_key,cantidad,ronda,order_date,unidad`);
+    if(!rows.length) return;
+    const od=rows.reduce((m,r)=>r.order_date>m?r.order_date:m, '');
+    const last=new Map(); // `${sku}|${ronda}` → row with the highest id
+    for(const r of rows){ if(r.order_date!==od) continue; const k=r.sku_key+'|'+r.ronda, p=last.get(k); if(!p || r.id>p.id) last.set(k,r); }
+    const m=new Map();
+    for(const r of last.values()){
+      const sku=String(r.sku_key||'').startsWith('norm:') ? 'name:'+String(r.sku_key).slice(5) : codeKey(r.sku_key);
+      m.set(sku, round2((m.get(sku)||0)+(Number(r.cantidad)||0)));
+    }
+    S.armado=m; S.armadoFecha=od;
+  }catch(_){ S.armado=null; }
+}
+function armadoDe(r){ if(!S.armado) return null; return S.armado.get(r.sku) ?? 0; }
+// Where a difference comes from (§5.3) — only when there is Armado data
+function origenDif(r){
+  const a=armadoDe(r); if(a==null || !r.env) return '';
+  const eq=(x,y)=>Math.abs(x-y)<=(r.kgpz==='Kg'?kgTol(r.env):0);
+  if(!eq(a, r.env)) return `Armado ${fmtQty(a,r.kgpz)} ≠ enviado: error al registrar la salida en CH.`;
+  if(!eq(r.env, r.rec) && eq(a, r.rec)) return 'Coincide con lo armado: error de registro, no físico.';
+  if(!eq(r.env, r.rec)) return 'Armado = enviado ≠ recibido: pérdida física o error de recepción.';
+  return '';
+}
+
+/* ── §6.4 Canastas (pre-sort): what was received, grouped by aisle letter. Read-only. ── */
+function openCanastas(){
+  const groups=new Map();
+  const add=(sku, producto, barcode, kgpz)=>{
+    const rec=recibidoDe(sku); if(!(rec>0)) return;
+    const pos=positionOf(barcode, producto), k=pos?pos.letra:'Sin posición';
+    if(!groups.has(k)) groups.set(k, []);
+    groups.get(k).push({ producto, barcode, kgpz, rec, pos });
+  };
+  for(const l of S.lines.values()) add(l.sku_key, l.producto, l.barcode, l.kgpz);
+  for(const [sku, ne] of S.noEsperados) add(sku, ne.producto, sku.startsWith('name:')?'':sku, ne.kgpz);
+  const keys=[...groups.keys()].sort((a,b)=>a==='Sin posición'?1:b==='Sin posición'?-1:a.localeCompare(b,'es',{numeric:true}));
+  if(!keys.length){ openSheet('Canastas', '<div class="empty-hint">Todavía no hay productos recibidos.</div>'); return; }
+  openSheet('Canastas', `<div class="muted" style="margin-bottom:10px">Lo recibido agrupado por pasillo, para acomodarlo.</div>`
+    +keys.map(k=>{ const it=groups.get(k).sort((a,b)=>(a.pos?a.pos.full:'').localeCompare(b.pos?b.pos.full:'','es',{numeric:true}));
+      return `<details class="info-card" style="padding:10px 12px"><summary style="cursor:pointer;display:flex;align-items:center;gap:10px">
+        <span class="res-pos" style="font-size:28px">${escapeHtml(k==='Sin posición'?'—':k)}</span><b style="flex:1">${escapeHtml(k==='Sin posición'?'Sin posición':(FREEZER_AISLE_RE.test(k)?'Congelador ':'Pasillo ')+k)}</b><span>${it.length} producto${it.length===1?'':'s'}</span></summary>
+        ${it.map(x=>`<div class="ritem-row" style="margin-top:8px">${imgTag(x.barcode, x.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(x.producto)}</div>
+          <div class="ritem-meta">${x.pos?escapeHtml(x.pos.full):'sin posición'}</div></div><div class="ritem-qty">${fmtQty(x.rec,x.kgpz)} <small>${unitOf(x.kgpz)}</small></div></div>`).join('')}</details>`; }).join(''));
+}
 
 /* ════════════════════════════════════════════════════════════════════════════════════
    RECEPCIONES (§6.6) — this hub+área's closed receptions (last 30 days). Opening one shows the final
