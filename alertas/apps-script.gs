@@ -13,7 +13,8 @@
  *     Abarrotes guard: no assembly in Armado CH (picks) on the previous working day (or today) → no alert
  *     (the digest says "sin envío").
  *   - tras_armado (Condesa, Zapopan): last assembly in Armado + dias_gracia days without a reception → alert.
- *   - From 21:00: a reception opened but not closed → "sin_cerrar".
+ *   - From 21:00: a reception opened but not closed → "sin_cerrar". A reception with an entrega parcial closed
+ *     (big shipments received tarima by tarima) only alerts once its last entrega is older than dias_gracia days.
  *   - From 21:00: one digest email for every configured hub+área.
  * Each alert is recorded once in rec_alerts (unique hub+área+fecha+tipo) through the RPC, and emailed once.
  * The anon key is the same public key the web app ships; this script only reads tables and calls the RPCs.
@@ -76,10 +77,11 @@ function ultimoArmado_(hub, hoy){
 }
 // Sessions of the last 7 days with their latest state: open / closed (cerrar) — an admin 'reabrir' reopens
 function sesiones_(hub, area, hoy){
-  const evs = sb_(`rec_events?hub=eq.${enc_(hub)}&area=eq.${area}&fecha=gte.${addDays_(hoy,-7)}&tipo=in.(abrir,reemplazo,cerrar,admin)&select=session_id,fecha,tipo,detalle,ts&order=id.asc`);
+  const evs = sb_(`rec_events?hub=eq.${enc_(hub)}&area=eq.${area}&fecha=gte.${addDays_(hoy,-7)}&tipo=in.(abrir,reemplazo,cerrar,admin,parcial)&select=session_id,fecha,tipo,detalle,ts&order=id.asc`);
   const by = {};
   evs.forEach(e => {
-    const s = by[e.session_id] || (by[e.session_id] = { fecha:e.fecha, cerrada:null });
+    const s = by[e.session_id] || (by[e.session_id] = { fecha:e.fecha, cerrada:null, parciales:0, ultimaParcial:null });
+    if (e.tipo === 'parcial') { s.parciales++; s.ultimaParcial = fmt_(new Date(e.ts), 'yyyy-MM-dd'); }
     if (e.tipo === 'cerrar') s.cerrada = e.detalle || {};
     if (e.tipo === 'admin' && e.detalle && e.detalle.accion === 'reabrir') s.cerrada = null;
   });
@@ -112,7 +114,8 @@ function revisarAlertas(verbose){
       }
     }
     if (hm >= HORA_CIERRE) {
-      const abiertas = sesiones_(c.hub, c.area, hoy).filter(s => !s.cerrada);
+      // an entrega parcial means "the rest arrives later": only stale ones count
+      const abiertas = sesiones_(c.hub, c.area, hoy).filter(s => !s.cerrada && (!s.parciales || daysBetween_(s.ultimaParcial, hoy) > (c.dias_gracia || 3)));
       if (abiertas.length) alerta(c, 'sin_cerrar', hoy, `${nombre}: recepción abierta sin cerrar (desde el ${fechaLarga_(abiertas[0].fecha)}).`);
     }
   });
@@ -131,7 +134,9 @@ function revisarAlertas(verbose){
 function estadoDelDia_(c, hoy, dow){
   const nombre = HUBS[c.hub] + ' — ' + AREAS[c.area];
   if (c.pausado_hasta && c.pausado_hasta >= hoy) return `⏸ ${nombre}: pausado hasta el ${fechaLarga_(c.pausado_hasta)}`;
-  const hoySes = sesiones_(c.hub, c.area, hoy).filter(s => s.fecha === hoy);
+  const ses = sesiones_(c.hub, c.area, hoy), hoySes = ses.filter(s => s.fecha === hoy);
+  const parcial = ses.find(s => !s.cerrada && s.parciales);
+  if (parcial) return `◐ ${nombre}: parcial (${parcial.parciales} entrega${parcial.parciales === 1 ? '' : 's'}, la última el ${fechaLarga_(parcial.ultimaParcial)})`;
   const cerrada = hoySes.find(s => s.cerrada);
   if (cerrada) {
     const d = cerrada.cerrada, badges = (d.badges || []).length ? ' · ' + d.badges.join(' · ') : '';

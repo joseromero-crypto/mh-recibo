@@ -1,5 +1,24 @@
 # MH Recibo — handoff
 
+## 2026-10-30 — entregas parciales
+For hubs that receive a big shipment once every week or two (Condesa, Zapopan; available to every hub).
+- Recibir has **📦 Cerrar entrega parcial (sigo después)** above **✅ Terminé todo: revisar y cerrar**. It lists what
+  was scanned in this tarima (quantities only, still blind), then saves a report for that tarima and keeps the
+  reception open.
+- Next visit (same day or later): Inicio shows "Recepción parcial · N entregas cerradas" → Continuar. No old-file
+  warning. Totals carry over: 5 of 9 received means 4 left, and scanning a product that already arrived complete
+  triggers "mayor a lo enviado".
+- Scans from a closed tarima can't be edited with Corregir; the final summary's Recontar still fixes a total.
+- Final close works as before (each difference answered one by one); the report adds one column per tarima.
+- Recepciones and Admin list each entrega parcial so it can be registered in the system as it arrives.
+- Alert script: an open reception with a partial close doesn't trigger the nightly "sin cerrar" alert until its
+  last entrega is older than the hub's grace days; the digest shows "◐ parcial". **Re-paste
+  `alertas/apps-script.gs` if you already installed it.**
+- Tested on test-hub with the Abarrotes file: tarima 1 = 40 products (aceite 4 of 6, frijoles 30 of 48), closed;
+  next day (simulated) tarima 2 = the rest minus 7 products, plus a duplicate guayaba (blocked) and a Corregir.
+  Final report: aceite 4+2 and frijoles 30+18 Completo, 7 Faltante, every row's tarima columns add up to Recibido.
+  Not tested: two phones closing a tarima at once, the Admin view (no PIN file yet), the Apps Script run.
+
 ## 2026-10-30 — full QA run with the real files (commit `de6bcb5`)
 Two full receptions on `test-hub` with your two fixtures (not your MH Contry test reception, to keep the real hub's
 history clean). Deliberate errors, with a separate record of what should be received, checked against the app.

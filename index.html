@@ -315,7 +315,7 @@ textarea.text-input{min-height:110px;font-size:15px}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'v1 · fase 5b · QA 1';
+const APP_VERSION = 'v1 · entregas parciales';
 
 /* ════════════════════════════════════════════════════════════════════════════════════
    SUPABASE — shared project with Armado CH + Sorting Hub (plan §3). This app writes ONLY to bucket
@@ -765,7 +765,12 @@ function inicioActionsHtml(){
   }
   let info=`<b>Envío cargado el ${fechaLarga(d.fecha)}</b>, ${localHM(new Date(d.uploadedAt))} · ${d.stats.lineas} productos`
     +`<div class="muted" style="font-size:12px;margin-top:2px">${escapeHtml(d.sourceFile||'')}${d.receptor?' · subido por '+escapeHtml(d.receptor):''}</div>`;
-  if(d.session_fecha && d.session_fecha<today && !a.closed) info+=`<div style="margin-top:6px"><span class="tag orange">Recepción abierta desde el ${fechaLarga(d.session_fecha)}</span></div>`;
+  const ps=a.parciales||[];
+  if(ps.length && !a.closed){
+    const u=ps[ps.length-1], ud=localDateStr(new Date(u.ts)), dd=u.detalle||{};
+    info+=`<div style="margin-top:6px"><span class="tag orange">Recepción parcial · ${ps.length} entrega${ps.length===1?'':'s'} cerrada${ps.length===1?'':'s'}</span></div>
+      <div class="muted" style="font-size:13px;margin-top:4px">Última: ${ud===today?'hoy':'el '+fechaLarga(ud)} a las ${localHM(new Date(u.ts))}${dd.lineas?` · ${dd.recibidas_total||0} de ${dd.lineas} productos recibidos`:''}. Continúa con lo que falta.</div>`;
+  } else if(d.session_fecha && d.session_fecha<today && !a.closed) info+=`<div style="margin-top:6px"><span class="tag orange">Recepción abierta desde el ${fechaLarga(d.session_fecha)}</span></div>`;
   if(a.offline) info+=`<div style="margin-top:6px"><span class="tag red">Sin conexión — copia guardada en este teléfono</span></div>`;
   if(a.closed){
     // §6.7 — no scanning against a closed file
@@ -785,7 +790,7 @@ function goInicio(){
   showScreen('screen-inicio'); renderInicio();
   if(INI.receptor) refreshActive();
 }
-function continuarRecepcion(){ const a=INI.active; if(a && a.data) openRecibir(a.data); }
+function continuarRecepcion(){ const a=INI.active; if(a && a.data) openRecibir(a.data, { parciales:(a.parciales||[]).length }); }
 
 /* ── Active envío (§6.7): the newest envios/{slug}/{area}/*.json ── */
 async function findActiveEnvio(slug, area){
@@ -796,7 +801,13 @@ async function findActiveEnvio(slug, area){
   if(!names.length) return {none:true};
   const path=`envios/${slug}/${area}/${names[0]}`;
   const data=JSON.parse(await sbFetch(path)); data._path=path;
-  return { path, data, closed: await sessionClosedAt(data.session_id) };
+  const closed=await sessionClosedAt(data.session_id);
+  return { path, data, closed, parciales: closed ? [] : await sessionParciales(data.session_id) };
+}
+// Entregas parciales already closed in an open reception (Inicio shows them; unreachable → none)
+async function sessionParciales(sessionId){
+  try{ return await pgSelect('rec_events', `session_id=eq.${encodeURIComponent(sessionId)}&tipo=eq.parcial&select=ts,detalle&order=ts.asc`); }
+  catch(_){ return []; }
 }
 async function sessionClosedAt(sessionId){
   // A 'cerrar' event closes the reception; a later admin 'reabrir' (§6.8) opens it again.
@@ -1109,7 +1120,7 @@ function openRecibir(data, opts={}){
   S.hub=INI.hub; S.area=INI.area; S.receptor=INI.receptor;
   S.session={ id:data.session_id, fecha:data.session_fecha };
   setEnvio(data);
-  S.events=[]; S.eventUids=new Set(); S.current=null; S.corrigiendo=null; S.staleAsked=false; S.recentAll=false; S.resumenOrder=new Map(); S.lastId=0; S.closedInfo=null; S.armado=null;
+  S.events=[]; S.eventUids=new Set(); S.current=null; S.corrigiendo=null; S.staleAsked=false; S.recentAll=false; S.resumenOrder=new Map(); S.lastId=0; S.closedInfo=null; S.armado=null; S.conParciales=!!opts.parciales;
   buildCatalog();
   const m=latestMirror(S.hub, S.area);
   if(m && m.envio && m.envio.session_id===S.session.id) addEvents(m.events);
@@ -1129,6 +1140,7 @@ function openRecibir(data, opts={}){
 function staleIgnored(){ try{ return localStorage.getItem('mr_stale_ign_'+S.envio._path)===todayStr(); }catch(_){ return S.staleIgnMem===S.envio._path+todayStr(); } }
 async function staleCheck(){
   if(!S.envio || S.envio.sinArchivo || !(S.envio.fecha<todayStr()) || staleIgnored() || modalOpen()) return true;
+  if(S.conParciales || parciales().length) return true;
   S.staleAsked=true;
   const v=await showModal({ title:`Estás trabajando con el archivo cargado el ${fechaLarga(S.envio.fecha)}.`,
     html:'<p>Carga el archivo de hoy.</p>',
@@ -1155,6 +1167,11 @@ function screenActive(id){ return document.getElementById(id).classList.contains
 // What other phones did: closed the reception, reopened it (admin), or replaced the file
 async function onRemoteEvents(evs){
   for(const e of evs){
+    if(e.tipo==='parcial'){
+      toast(`${e.receptor||'Otro teléfono'} cerró la entrega parcial ${(e.detalle&&e.detalle.entrega)||''}`, 4000);
+      const c=S.corrigiendo && S.events.find(x=>x.detalle && x.detalle.uid===S.corrigiendo);
+      if(c && enEntregaCerrada(c)) S.corrigiendo=null;
+    }
     if(e.tipo==='reemplazo' && e.detalle && e.detalle.envio && e.detalle.envio!==S.envio._path){
       try{
         const data=JSON.parse(await sbFetch(e.detalle.envio)); data._path=e.detalle.envio;
@@ -1206,7 +1223,8 @@ function renderRecibir(){
     document.getElementById('rec-bar').style.width='0%';
     document.getElementById('pend-count').textContent='';
   } else {
-    document.getElementById('rec-progress').innerHTML=`<b>${got}</b> / ${total} productos recibidos`;
+    const np=parciales().length;
+    document.getElementById('rec-progress').innerHTML=`<b>${got}</b> / ${total} productos recibidos${np?` · <span class="tag orange">entrega ${np+1}</span>`:''}`;
     document.getElementById('rec-bar').style.width=(total?Math.round(got*100/total):0)+'%';
     document.getElementById('pend-count').textContent=`(${total-got})`;
   }
@@ -1223,7 +1241,8 @@ function renderRecibir(){
   document.getElementById('rec-banner').innerHTML=banner;
   document.getElementById('rec-footer').innerHTML = S.closedInfo ? '' : sinArch
     ? `<div class="muted" style="text-align:center">Para cerrar la recepción, primero sube el archivo del envío.</div>`
-    : `<button class="btn btn-primary btn-block" onclick="openResumen()">✅ Terminé: revisar y cerrar</button>`;
+    : `<button class="btn btn-secondary btn-block" style="margin-bottom:10px" onclick="openParcial()">📦 Cerrar entrega parcial (sigo después)</button>
+       <button class="btn btn-primary btn-block" onclick="openResumen()">✅ Terminé todo: revisar y cerrar</button>`;
   renderCard(); renderRecent(); renderNet();
 }
 
@@ -1547,7 +1566,7 @@ function renderRecent(){
         ${line?imgTag(line.barcode, line.producto, 'thumb'):imgTag(ev.sku_key.startsWith('name:')?'':ev.sku_key, ev.producto, 'thumb')}
         <div class="ritem-main"><div class="ritem-name">${nameHtml(line?line.producto:ev.producto)}</div><div class="ritem-meta">${meta}</div></div>
         <div><div class="ritem-qty">${now!==orig?`<s>${fmtQty(orig,kp)}</s>`:''}${fmtQty(now,kp)} <small>${unitOf(kp)}</small></div>
-          ${editing?'':`<button class="corr-btn" onclick="startCorregir('${escapeHtml(u)}')">Corregir</button>`}</div>
+          ${editing?'':enEntregaCerrada(ev)?`<div class="ritem-meta">entrega ${entregaDe(ev)} cerrada</div>`:`<button class="corr-btn" onclick="startCorregir('${escapeHtml(u)}')">Corregir</button>`}</div>
       </div>${editing?corrBoxHtml(ev, kp, now):''}</div>`;
   }).join('')+more;
 }
@@ -1569,6 +1588,7 @@ function cancelCorregir(){ S.corrigiendo=null; renderRecent(); focusScan(); }
 function saveCorregir(){
   if(S.closedInfo){ toast('Esta recepción ya se cerró'); cancelCorregir(); return; }
   const ev=S.events.find(e=>e.tipo==='scan' && e.detalle && e.detalle.uid===S.corrigiendo); if(!ev) return;
+  if(enEntregaCerrada(ev)){ toast('Esa entrega ya se cerró: recuenta el producto en «Revisar y cerrar»', 4000); cancelCorregir(); return; }
   const kp=kgpzOf(ev), before=scanQtyNow(ev), err=document.getElementById('corr-err');
   const nv=parseQty(document.getElementById('corr-qty').value, kp, true), motivo=document.getElementById('corr-motivo').value;
   if(nv==null){ err.textContent=kp==='Kg'?'Escribe el peso correcto (hasta 2 decimales, 0 si no era).':'Escribe las piezas correctas (0 si no era este producto).'; return; }
@@ -1805,7 +1825,8 @@ async function cerrarRecepcion(){
     await sbUpload(path, buildReportCsv(rows, badges, receptores), 'text/csv; charset=utf-8');
     const deltas=rows.filter(isDelta);
     const ev=makeEvent('cerrar', { detalle:{ reporte:path, envio:S.envio._path, lineas:S.lines.size, recibidas:rows.filter(r=>r.env>0 && r.rec>0).length,
-      diferencias:deltas.length, no_esperados:rows.filter(r=>r.estado==='No esperado').length, badges, receptores } });
+      diferencias:deltas.length, no_esperados:rows.filter(r=>r.estado==='No esperado').length, badges, receptores,
+      entregas:parciales().length?parciales().length+1:undefined } });
     recordEvent(ev); S.closedInfo=closedState(); await flushAndWait();
     S.closing=false;
     toast(OUTBOX.length?'Recepción cerrada — se termina de subir al reconectar':'✓ Recepción cerrada', 3500);
@@ -1815,6 +1836,90 @@ async function cerrarRecepcion(){
     toast(isNetErr(e)?'Sin conexión: no se pudo cerrar. Intenta de nuevo con internet.':'No se pudo cerrar ('+e.message+')', 4500);
   }
 }
+/* ── Entregas parciales: hubs that get a big shipment (Condesa, Zapopan…) receive it tarima by tarima. Each
+   tarima is closed as a 'parcial' event + its own report; the reception stays open and totals keep adding up,
+   so a line received 5/9 only has 4 left (the over-enviado guard compares the running total). Scans of a
+   closed entrega can't be edited with Corregir; the final Resumen still recounts with an ajuste. ── */
+const tsMs=e=>Date.parse(e.ts);
+function parciales(){ return S.events.filter(e=>e.tipo==='parcial').sort((a,b)=>tsMs(a)-tsMs(b)); }
+// 1-based entrega an event belongs to: one more than the parciales closed before it
+function entregaDe(ev, ps=parciales()){ const t=tsMs(ev); return 1+ps.filter(p=>tsMs(p)<t).length; }
+function enEntregaCerrada(ev){ const ps=parciales(); return ps.length>0 && entregaDe(ev, ps)<=ps.length; }
+// sku → qty per entrega: Map(entrega → Map(sku → qty))
+function porEntrega(){
+  const ps=parciales(), out=new Map();
+  for(const e of S.events){
+    if(e.tipo!=='scan' && e.tipo!=='ajuste') continue;
+    const n=entregaDe(e, ps); if(!out.has(n)) out.set(n, new Map());
+    const m=out.get(n); m.set(e.sku_key, round2((m.get(e.sku_key)||0)+(Number(e.cantidad)||0)));
+  }
+  return out;
+}
+function entregaActualRows(){
+  const n=parciales().length+1, m=porEntrega().get(n)||new Map(), rows=[];
+  for(const [sku, q] of m){
+    if(!q) continue;
+    const l=S.lines.get(sku), ne=S.noEsperados.get(sku);
+    rows.push({ sku, producto:l?l.producto:ne?ne.producto:sku, barcode:l?l.barcode:(sku.startsWith('name:')?'':sku), kgpz:l?l.kgpz:ne?ne.kgpz:'Pz', q, total:recibidoDe(sku), esperado:!!l });
+  }
+  return rows.sort((a,b)=>normName(a.producto).localeCompare(normName(b.producto)));
+}
+function openParcial(){
+  if(!S.session || S.closedInfo) return;
+  if(S.envio.sinArchivo){ toast('Sube el archivo del envío antes de cerrar una entrega', 3500); return; }
+  S.current=null; S.corrigiendo=null;
+  const n=parciales().length+1, rows=entregaActualRows(), total=S.lines.size;
+  let got=0; for(const k of S.lines.keys()) if(recibidoDe(k)>0) got++;
+  if(!rows.length){ toast(n>1?`Todavía no escaneas nada en la entrega ${n}`:'Todavía no hay escaneos'); return; }
+  // Blind: quantities received only, never what was sent
+  openSheet(`Entrega parcial ${n}`, `<div class="muted" style="margin-bottom:10px">Lo que escaneaste en esta entrega (tarima). Al cerrarla queda guardada y la recepción sigue abierta para lo que falta, hoy u otro día.</div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-n">${rows.length}</div><div class="stat-l">productos en esta entrega</div></div>
+      <div class="stat"><div class="stat-n">${got} / ${total}</div><div class="stat-l">del envío ya recibidos</div></div></div>
+    ${OUTBOX.length?`<div class="warn-box">Hay ${OUTBOX.length} registro(s) sin subir. Conéctate a internet para poder cerrar la entrega.</div>`:''}
+    ${rows.map(r=>`<div class="ritem"><div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
+      <div class="ritem-meta">${r.esperado?'':'<span style="color:var(--red);font-weight:700">no esperado</span>'}</div></div>
+      <div class="ritem-qty">${fmtQty(r.q,r.kgpz)} <small>${unitOf(r.kgpz)}</small></div></div></div>`).join('')}
+    <button class="btn btn-primary btn-block" id="parcial-btn" style="margin-top:16px" onclick="cerrarParcial()">📦 Cerrar entrega parcial ${n}</button>
+    <div class="muted" style="margin-top:8px;text-align:center">Cuando llegue lo demás, entra de nuevo y toca «Continuar recepción». Al terminar todo, usa «Terminé todo: revisar y cerrar».</div>`);
+}
+const PARCIAL_COLS=['Hub','Área','Fecha','Entrega','Fecha de entrega','Receptor(es)','Producto','Código de barras','Kg/Pz','Posición','Recibido','Recibido acumulado'];
+function buildParcialCsv(n, hoy, rows, receptores){
+  const head=PARCIAL_COLS.map(csvCell).join(',');
+  const body=rows.map(r=>{ const pos=positionOf(r.barcode, r.producto);
+    return [hubName(S.hub), areaName(S.area), S.session.fecha, n, hoy, receptores.join(', '), r.producto, r.barcode, r.kgpz, pos?pos.full:'',
+      fmtQty(r.q,r.kgpz), fmtQty(r.total,r.kgpz)].map(csvCell).join(','); });
+  return [head].concat(body).join('\r\n')+'\r\n';
+}
+async function cerrarParcial(){
+  if(S.closing || S.closedInfo) return;
+  S.closing=true;
+  const btn=document.getElementById('parcial-btn'); if(btn){ btn.disabled=true; btn.textContent='Cerrando entrega…'; }
+  try{
+    await flushAndWait(); if(OUTBOX.length) throw new TypeError('offline');
+    await syncServerEvents(); // another phone may have scanned or closed this entrega already
+    if(S.closedInfo){ S.closing=false; closeSheet(); renderRecibir(); return; }
+    const n=parciales().length+1, rows=entregaActualRows();
+    if(!rows.length){ S.closing=false; closeSheet(); toast('Otro teléfono ya cerró esta entrega'); renderRecibir(); return; }
+    const now=serverNow(), hoy=localDateStr(now), ps=parciales();
+    const receptores=[...new Set(S.events.filter(e=>(e.tipo==='scan'||e.tipo==='ajuste') && e.receptor && entregaDe(e, ps)===n).map(e=>e.receptor))];
+    if(!receptores.length) receptores.push(S.receptor);
+    const path=`reportes/${S.hub}/${S.area}/${S.session.fecha}_parcial-${n}_${hoy}_${localHM(now).replace(':','-')}_${fileSafe(S.receptor)}.csv`;
+    await sbUpload(path, buildParcialCsv(n, hoy, rows, receptores), 'text/csv; charset=utf-8');
+    let got=0; for(const k of S.lines.keys()) if(recibidoDe(k)>0) got++;
+    const ev=makeEvent('parcial', { detalle:{ entrega:n, reporte:path, envio:S.envio._path, fecha_entrega:hoy, productos:rows.length,
+      recibidas_total:got, lineas:S.lines.size, receptores } });
+    recordEvent(ev); await flushAndWait();
+    S.closing=false; closeSheet();
+    toast(OUTBOX.length?`Entrega ${n} cerrada — se termina de subir al reconectar`:`✓ Entrega parcial ${n} cerrada`, 3500);
+    openRecepcion(Object.assign({ ts:ev.ts, fecha:S.session.fecha, hub:S.hub, area:S.area, session_id:S.session.id, receptor:S.receptor, parcial:true }, ev.detalle), 'inicio');
+  }catch(e){
+    S.closing=false;
+    if(btn){ btn.disabled=false; btn.textContent=`📦 Cerrar entrega parcial ${parciales().length+1}`; }
+    toast(isNetErr(e)?'Sin conexión: no se pudo cerrar la entrega. Intenta de nuevo con internet.':'No se pudo cerrar la entrega ('+e.message+')', 4500);
+  }
+}
+
 /* ── Report CSV (§9): all cells quoted, CRLF; the BOM is added only on browser download ── */
 const REPORT_COLS=['Hub','Área','Fecha','Receptor(es)','Producto','Código de barras','Kg/Pz','Posición','Armado','Enviado','Recibido','Diferencia','Estado','Notas (correcciones / confirmaciones)','Alertas'];
 function csvCell(v){ return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'; }
@@ -1833,10 +1938,13 @@ function notasDe(sku, kgpz){
   return n.join(' · ');
 }
 function buildReportCsv(rows, badges, receptores){
-  const head=REPORT_COLS.map(csvCell).join(',');
+  // With partial closes, one extra column per entrega (what came in each tarima); they add up to Recibido
+  const np=parciales().length, pe=np?porEntrega():null, ent=np?Array.from({length:np+1}, (_,i)=>i+1):[];
+  const head=REPORT_COLS.concat(ent.map(n=>'Entrega '+n)).map(csvCell).join(',');
   const body=rows.map(r=>{ const pos=positionOf(r.barcode, r.producto), arm=armadoDe(r);
     return [hubName(S.hub), areaName(S.area), S.session.fecha, receptores.join(', '), r.producto, r.barcode, r.kgpz, pos?pos.full:'',
-      arm==null?'—':fmtQty(arm,r.kgpz), r.env?fmtQty(r.env,r.kgpz):'0', fmtQty(r.rec,r.kgpz), fmtQty(r.dif,r.kgpz), r.estado, notasDe(r.sku, r.kgpz), badges.join(' · ')].map(csvCell).join(','); });
+      arm==null?'—':fmtQty(arm,r.kgpz), r.env?fmtQty(r.env,r.kgpz):'0', fmtQty(r.rec,r.kgpz), fmtQty(r.dif,r.kgpz), r.estado, notasDe(r.sku, r.kgpz), badges.join(' · ')]
+      .concat(ent.map(n=>fmtQty((pe.get(n)&&pe.get(n).get(r.sku))||0, r.kgpz))).map(csvCell).join(','); });
   return [head].concat(body).join('\r\n')+'\r\n';
 }
 /* ── §5.3 Armado enrichment (display only). Reads Armado's picks (read-only): the newest order_date within
@@ -1903,16 +2011,18 @@ function openCanastas(){
 let RV=null; // { info, rows, csv, f:{q,solo,estado,kgpz,pasillo,sort} }
 async function listCerradas(slug, area, days=30){
   const desde=localDateStr(new Date(serverNow().getTime()-days*86400000));
-  const q=`tipo=in.(cerrar,admin)&fecha=gte.${desde}${slug?`&hub=eq.${encodeURIComponent(slug)}`:''}${area?`&area=eq.${area}`:''}&select=*&order=id.desc`;
+  const q=`tipo=in.(cerrar,admin,parcial)&fecha=gte.${desde}${slug?`&hub=eq.${encodeURIComponent(slug)}`:''}${area?`&area=eq.${area}`:''}&select=*&order=id.desc`;
   const evs=await pgSelectAll('rec_events', q);
   // latest state per session: a later admin "reabrir" hides the close
-  const seen=new Map();
+  const seen=new Map(), parts=[];
   for(const e of evs){
+    // every entrega parcial is listed on its own (it was registered as it arrived), even after the final close
+    if(e.tipo==='parcial'){ parts.push(Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id, parcial:true }, e.detalle||{})); continue; }
     if(seen.has(e.session_id)) continue;
     if(e.tipo==='cerrar') seen.set(e.session_id, Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id }, e.detalle||{}));
     else if(e.detalle && e.detalle.accion==='reabrir') seen.set(e.session_id, null);
   }
-  return [...seen.values()].filter(Boolean);
+  return [...seen.values()].filter(Boolean).concat(parts).sort((a,b)=>Date.parse(b.ts)-Date.parse(a.ts));
 }
 function recepBack(){ goInicio(); }
 async function openRecepciones(){
@@ -1922,10 +2032,12 @@ async function openRecepciones(){
   showScreen('screen-recepciones');
   let list; try{ list=await listCerradas(INI.hub, INI.area); }catch(e){ el.innerHTML='<h2>Recepciones cerradas</h2><div class="err-box">Sin conexión. Intenta de nuevo.</div>'; return; }
   window._recepList=list;
-  el.innerHTML='<h2>Recepciones cerradas</h2><div class="muted" style="margin-bottom:10px">Últimos 30 días. Ábrela para registrar la recepción en el sistema.</div>'
+  el.innerHTML='<h2>Recepciones cerradas</h2><div class="muted" style="margin-bottom:10px">Últimos 30 días, con las entregas parciales. Ábrela para registrar la recepción en el sistema.</div>'
     +(list.length?list.map((r,i)=>`<button class="res-item" onclick="openRecepcion(window._recepList[${i}],'lista')"><div style="flex:1">
-      <div class="res-name">${fechaLarga(r.fecha)} · cerrada ${localHM(new Date(r.ts))}</div>
-      <div class="res-sub">${escapeHtml((r.receptores||[r.receptor]).join(', '))} · ${r.lineas||0} productos · ${r.diferencias?`<b style="color:var(--orange)">${r.diferencias} con diferencia</b>`:'sin diferencias'}</div>
+      ${r.parcial?`<div class="res-name">${fechaLarga(r.fecha)} · <span class="tag orange">entrega parcial ${r.entrega}</span></div>
+      <div class="res-sub">${r.fecha_entrega&&r.fecha_entrega!==r.fecha?fechaLarga(r.fecha_entrega)+', ':''}${localHM(new Date(r.ts))} · ${escapeHtml((r.receptores||[r.receptor]).join(', '))} · ${r.productos||0} productos en esta entrega</div>`
+      :`<div class="res-name">${fechaLarga(r.fecha)} · cerrada ${localHM(new Date(r.ts))}${r.entregas?` · ${r.entregas} entregas`:''}</div>
+      <div class="res-sub">${escapeHtml((r.receptores||[r.receptor]).join(', '))} · ${r.lineas||0} productos · ${r.diferencias?`<b style="color:var(--orange)">${r.diferencias} con diferencia</b>`:'sin diferencias'}</div>`}
       ${(r.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div><span style="font-size:20px">›</span></button>`).join('')
       :'<div class="empty-hint">No hay recepciones cerradas en los últimos 30 días.</div>');
 }
@@ -1948,7 +2060,8 @@ async function openRecepcion(info, from){
   const rows=(p.data||[]).map((r,i)=>{ const g=n=>pickCol(r, n)||'';
     const pos=g('Posición'), kgpz=g('Kg/Pz')==='Kg'?'Kg':'Pz';
     return { i, producto:g('Producto'), barcode:g('Código de barras'), kgpz, pos, pasillo:(pos.split(/[-·\s]/)[0]||'').trim(), armado:g('Armado'),
-      env:parseNum(g('Enviado')), rec:parseNum(g('Recibido')), dif:parseNum(g('Diferencia')), estado:g('Estado'), notas:g('Notas (correcciones / confirmaciones)'), _n:normName(g('Producto')) }; });
+      env:parseNum(g('Enviado')), rec:parseNum(g('Recibido')), dif:parseNum(g('Diferencia')), estado:info.parcial?'Entrega '+info.entrega:g('Estado'),
+      acum:info.parcial?parseNum(g('Recibido acumulado')):null, notas:g('Notas (correcciones / confirmaciones)'), _n:normName(g('Producto')) }; });
   let ticks=new Set(); try{ ticks=new Set(JSON.parse(localStorage.getItem('mr_ticks_'+info.reporte)||'[]')); }catch(_){}
   RV={ info, rows, csv, ticks, f:{ q:'', solo:false, estado:'', kgpz:'', pasillo:'', sort:'archivo' } };
   renderRecepcion();
@@ -1964,15 +2077,20 @@ function rvTick(i){
 function renderRecepcion(){
   const I=RV.info, pas=[...new Set(RV.rows.map(r=>r.pasillo).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es',{numeric:true}));
   const est=[...new Set(RV.rows.map(r=>r.estado))];
-  document.getElementById('recep-body').innerHTML=`<h2>Recepción del ${fechaLarga(I.fecha)}</h2>
-    <div class="info-card">Cerrada a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}<br>
+  const P=!!I.parcial;
+  document.getElementById('recep-body').innerHTML=(P?`<h2>Entrega parcial ${I.entrega} · recepción del ${fechaLarga(I.fecha)}</h2>
+    <div class="info-card">Cerrada ${I.fecha_entrega&&I.fecha_entrega!==I.fecha?'el '+fechaLarga(I.fecha_entrega)+' ':''}a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}<br>
+      ${I.productos||0} productos en esta entrega · ${I.recibidas_total||0} de ${I.lineas||0} del envío recibidos hasta aquí
+      <div class="muted" style="margin-top:4px">Lo que falta se recibe en la siguiente entrega; las diferencias se revisan al cerrar toda la recepción.</div></div>`
+    :`<h2>Recepción del ${fechaLarga(I.fecha)}</h2>
+    <div class="info-card">Cerrada a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}${I.entregas?` · en ${I.entregas} entregas`:''}<br>
       ${I.lineas||0} productos · ${I.diferencias?`<b style="color:var(--orange)">${I.diferencias} con diferencia</b>`:'sin diferencias'}${I.no_esperados?` · ${I.no_esperados} no esperado(s)`:''}
-      <div>${(I.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div></div>
+      <div>${(I.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div></div>`)+`
     <button class="btn btn-secondary btn-block" onclick="descargarReporte()">⬇ Descargar CSV</button>
     <input class="text-input" style="margin-top:12px" placeholder="Buscar producto…" oninput="rvSet('q',this.value)" autocomplete="off">
     <div class="filters">
-      <select onchange="rvSet('solo',this.value==='1')"><option value="">Todos</option><option value="1">Solo diferencias</option></select>
-      <select onchange="rvSet('estado',this.value)"><option value="">Estado</option>${est.map(e=>`<option>${escapeHtml(e)}</option>`).join('')}</select>
+      ${P?'':`<select onchange="rvSet('solo',this.value==='1')"><option value="">Todos</option><option value="1">Solo diferencias</option></select>
+      <select onchange="rvSet('estado',this.value)"><option value="">Estado</option>${est.map(e=>`<option>${escapeHtml(e)}</option>`).join('')}</select>`}
       <select onchange="rvSet('kgpz',this.value)"><option value="">Kg/Pz</option><option>Kg</option><option>Pz</option></select>
       <select onchange="rvSet('pasillo',this.value)"><option value="">Pasillo</option>${pas.map(p=>`<option>${escapeHtml(p)}</option>`).join('')}</select>
       <select onchange="rvSet('sort',this.value)"><option value="archivo">Orden del archivo</option><option value="az">A-Z</option><option value="pasillo">Pasillo</option><option value="dif">Diferencia</option></select>
@@ -1988,11 +2106,11 @@ function renderRecepcionRows(){
   rows=rows.slice().sort(cmp);
   document.getElementById('rv-count').textContent=`${rows.length} producto(s) · ${RV.ticks.size} de ${RV.rows.length} marcados`;
   document.getElementById('rv-rows').innerHTML=rows.map(r=>{ const u=unitOf(r.kgpz), on=RV.ticks.has(r.i);
-    return `<div class="sum-row ${on?'ticked':''} ${/^Completo/.test(r.estado)?'':'delta'}"><div class="ritem-row">
+    return `<div class="sum-row ${on?'ticked':''} ${r.acum!=null||/^Completo/.test(r.estado)?'':'delta'}"><div class="ritem-row">
       <input type="checkbox" class="chk" ${on?'checked':''} onchange="rvTick(${r.i})">${imgTag(r.barcode, r.producto, 'thumb')}
       <div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div><div class="ritem-meta">${escapeHtml(r.barcode||'sin código')}${r.pos?' · '+escapeHtml(r.pos):''}</div></div>
       <div style="text-align:right"><div style="font-size:30px;font-weight:900;color:var(--green-dark)">${fmtQty(r.rec,r.kgpz)}</div><div class="ritem-meta">${u} recibido</div></div></div>
-      <div class="ritem-meta" style="margin-top:4px">Enviado ${fmtQty(r.env,r.kgpz)}${r.armado&&r.armado!=='—'?' · Armado '+escapeHtml(r.armado):''} · Dif ${r.dif>0?'+':''}${fmtQty(r.dif,r.kgpz)} · <span class="estado ${ESTADO_CLS[r.estado]||'mid'}">${escapeHtml(r.estado)}</span></div>
+      ${r.acum!=null?`<div class="ritem-meta" style="margin-top:4px">Acumulado en la recepción: ${fmtQty(r.acum,r.kgpz)} ${u}</div>`:`<div class="ritem-meta" style="margin-top:4px">Enviado ${fmtQty(r.env,r.kgpz)}${r.armado&&r.armado!=='—'?' · Armado '+escapeHtml(r.armado):''} · Dif ${r.dif>0?'+':''}${fmtQty(r.dif,r.kgpz)} · <span class="estado ${ESTADO_CLS[r.estado]||'mid'}">${escapeHtml(r.estado)}</span></div>`}
       ${r.notas?`<div class="ritem-meta">${escapeHtml(r.notas)}</div>`:''}</div>`; }).join('') || '<div class="empty-hint">Nada coincide con el filtro.</div>';
 }
 function descargarReporte(){
@@ -2067,28 +2185,30 @@ function hubSelectHtml(id, val, withAll){
 let _admRecep=[];
 async function admRecepciones(){
   const desde=localDateStr(new Date(serverNow().getTime()-14*86400000));
-  const evs=await pgSelectAll('rec_events', `tipo=in.(abrir,reemplazo,cerrar,admin)&fecha=gte.${desde}&select=id,session_id,hub,area,fecha,tipo,receptor,detalle,ts`);
+  const evs=await pgSelectAll('rec_events', `tipo=in.(abrir,reemplazo,cerrar,admin,parcial)&fecha=gte.${desde}&select=id,session_id,hub,area,fecha,tipo,receptor,detalle,ts`);
   const by=new Map();
   for(const e of evs){
     if(e.hub==='test-hub' && !IS_LOCAL) continue;
     let r=by.get(e.session_id);
-    if(!r){ r={ session_id:e.session_id, hub:e.hub, area:e.area, fecha:e.fecha, abierta:e.ts, receptores:new Set(), cerrada:null, sinArchivo:false, envio:null }; by.set(e.session_id, r); }
+    if(!r){ r={ session_id:e.session_id, hub:e.hub, area:e.area, fecha:e.fecha, abierta:e.ts, receptores:new Set(), cerrada:null, sinArchivo:false, envio:null, parciales:[] }; by.set(e.session_id, r); }
     if(e.receptor && e.receptor!=='Admin') r.receptores.add(e.receptor);
     const d=e.detalle||{};
     if(e.tipo==='abrir' || e.tipo==='reemplazo'){ if(d.envio) r.envio=d.envio; if(d.sin_archivo) r.sinArchivo=true; if(d.tras_sin_archivo) r.sinArchivo=false; }
     if(e.tipo==='cerrar') r.cerrada=Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id }, d);
     if(e.tipo==='admin' && d.accion==='reabrir') r.cerrada=null;
+    if(e.tipo==='parcial') r.parciales.push(Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id, parcial:true }, d));
   }
   _admRecep=[...by.values()].sort((a,b)=>b.fecha.localeCompare(a.fecha) || a.hub.localeCompare(b.hub) || a.area.localeCompare(b.area));
   let h='<div class="muted" style="margin-bottom:8px">Últimos 14 días. Una recepción abierta se reconstruye sola desde los eventos al abrirla en cualquier teléfono (Continuar recepción).</div>', day='';
   _admRecep.forEach((r,i)=>{
     if(r.fecha!==day){ day=r.fecha; h+=`<div class="section-title">${fechaLarga(day)}</div>`; }
     const c=r.cerrada;
-    h+=`<div class="adm-row"><b>${escapeHtml(hubName(r.hub))} · ${areaName(r.area)}</b> — ${c?`<span class="tag green">✓ cerrada ${localHM(new Date(c.ts))}</span>`:`<span class="tag orange">abierta desde ${localHM(new Date(r.abierta))}</span>`}${r.sinArchivo?' <span class="tag red">sin archivo</span>':''}
+    h+=`<div class="adm-row"><b>${escapeHtml(hubName(r.hub))} · ${areaName(r.area)}</b> — ${c?`<span class="tag green">✓ cerrada ${localHM(new Date(c.ts))}</span>`:`<span class="tag orange">abierta desde ${localHM(new Date(r.abierta))}</span>`}${r.sinArchivo?' <span class="tag red">sin archivo</span>':''}${r.parciales.length?` <span class="tag orange">${r.parciales.length} entrega${r.parciales.length===1?'':'s'} parcial${r.parciales.length===1?'':'es'}</span>`:''}
       <div class="muted" style="font-size:12px">${escapeHtml([...r.receptores].join(', ')||'—')}${c?` · ${c.lineas||0} productos · ${c.diferencias||0} con diferencia`:''}</div>
       ${c?(c.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join(''):''}
       <div class="btns">${c?`<button class="btn btn-secondary" onclick="openRecepcion(_admRecep[${i}].cerrada,'admin')">Ver</button>
-        <button class="btn btn-secondary" onclick="admDescargar(${i})">⬇ CSV</button><button class="btn btn-warn" onclick="admReabrir(${i})">Reabrir</button>`:''}</div></div>`;
+        <button class="btn btn-secondary" onclick="admDescargar(${i})">⬇ CSV</button><button class="btn btn-warn" onclick="admReabrir(${i})">Reabrir</button>`:''}
+        ${r.parciales.map((p,j)=>`<button class="btn btn-secondary" onclick="openRecepcion(_admRecep[${i}].parciales[${j}],'admin')">Entrega ${p.entrega}</button>`).join('')}</div></div>`;
   });
   document.getElementById('adm-tab').innerHTML=h||'<div class="empty-hint">Sin recepciones.</div>';
 }

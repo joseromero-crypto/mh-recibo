@@ -61,12 +61,20 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   `ajuste` (Corregir: `ref`=scan uid; Recontar: `recuento:true`, `origen`, antes/despues = totals),
   `confirmacion` (`diferencia:true` + `recibido` — valid only while recibido is unchanged; `revisar`;
   `kg_sin_variacion`), `cerrar` (detalle: reporte path, lineas, diferencias, badges, receptores), `admin`
-  (`accion`: `reabrir` | `restaurar`). Closed = latest of cerrar vs admin reabrir (`closedState`, `sessionClosedAt`,
+  (`accion`: `reabrir` | `restaurar`), `parcial` (entrega parcial: `entrega` n, `reporte`, `productos`,
+  `recibidas_total`, `fecha_entrega`). Closed = latest of cerrar vs admin reabrir (`closedState`, `sessionClosedAt`,
   `listCerradas` all apply the same rule).
 - Guards live in `guardQty(card, qty)`, in this order: typo (>3× enviado, or >200 pz / >50 kg AND >1.5× enviado;
   Corregir is primary); over-enviado (Kg: beyond ±max(5%, 0.10 kg)) → "Vuelve a contar" once, then stored with
   `sobrante`; sibling qty>1 confirm (Pz only). Hermanos = `isSibling`: same familyKey, or same first word and
   (one name contains the other | one word swapped). Resumen order is frozen in `S.resumenOrder` on open (rule 2).
+- Entregas parciales (any hub; built for Condesa/Zapopan, which get a big shipment tarima by tarima): "Cerrar
+  entrega parcial" writes `reportes/{hub}/{area}/{session_fecha}_parcial-{n}_{hoy}_{HH-MM}_{receptor}.csv` + a
+  `parcial` event; the session stays open. An event's entrega = 1 + parciales with an earlier ts (`entregaDe`).
+  Totals keep adding up (a 5/9 line has 4 left; the over-enviado guard uses the running total). Scans of a closed
+  entrega can't use Corregir (final Resumen Recontar still can). With parciales the stale-file modal is skipped,
+  Inicio shows "Recepción parcial", Recepciones/Admin list each entrega, the final report adds `Entrega 1..n`
+  columns, and the Apps Script only alerts `sin_cerrar` once the last entrega is older than `dias_gracia`.
 - Blind count: `esperado` is never rendered on Recibir, Sin código, Pendientes, Canastas or Revisar ahora; it
   appears only in Resumen y cierre and Recepciones.
 - Multi-device: `syncServerEvents()` reads `id=gt.S.lastId` every 15 s while Recibir/Resumen is visible;
