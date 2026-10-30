@@ -48,7 +48,10 @@ Extras a web app gives that a sheet can't:
    `bcMatch`, `normHeader`/`pickCol`, `sbReq` (8 in flight + 429 backoff), `serverNow`/TZ, image DB lookup.
    Never edit the armado-CH or sorting-hub repos from here.
 9. Real business exports go in `fixtures/` (gitignored). The GitHub repo may be public.
-10. **Jose pushes with GitHub Desktop.** Commit locally and stop; never `git push` from the terminal.
+10. **Nothing is remembered between visits.** No saved hub, área, name or last page in `localStorage`; the app
+   always opens on Inicio. (State that protects work — outbox, local mirror of scans — is fine; it never decides
+   which page opens.)
+11. **Jose pushes with GitHub Desktop.** Commit locally and stop; never `git push` from the terminal.
 
 ---
 
@@ -82,7 +85,7 @@ create table public.rec_events (
   hub         text not null,          -- slug, e.g. 'mh-contry'
   area        text not null,          -- 'abarrotes' | 'carnes'
   fecha       date not null,          -- reception day (America/Monterrey)
-  tipo        text not null,          -- 'abrir'|'scan'|'ajuste'|'confirmacion'|'cerrar'
+  tipo        text not null,          -- 'abrir'|'scan'|'ajuste'|'confirmacion'|'reemplazo'|'cerrar'|'admin'
   sku_key     text,                   -- bcKey(barcode) or 'name:'+normalized name when no barcode
   producto    text,
   cantidad    numeric,                -- signed for 'ajuste' (−2 = removed 2)
@@ -129,7 +132,8 @@ Read with `imgUrl()`/`imgName()` helpers that accept both the `{url,name}` and p
 |---|---|---|
 | `envios/{slug}/{area}/{fecha}__{epochMs}.csv` | upload of the Envío export (raw, verbatim) | session load, audit |
 | `envios/{slug}/{area}/{fecha}__{epochMs}.json` | same upload, projected rows (§5.2) | phones joining the session |
-| `reportes/{slug}/{area}/{fecha}_{HH-MM}_{receptor}.csv` | cerrar recepción | coordinator / Jose |
+| `reportes/{slug}/{area}/{fecha}_{HH-MM}_{receptor}.csv` | cerrar recepción | Recepciones, Admin |
+| `config/admin_pin.txt` | by hand in the dashboard | Admin login |
 
 `{slug}`: `mh-contry`, `mh-cumbres`, `mh-guadalupe`, `mh-san-nicolas`, `mh-avicola`, `mh-zapopan`, `mh-condesa`
 (same as Armado CH and Sorting Hub). CH Guadalupe is not a receiving hub in v1.
@@ -147,15 +151,23 @@ Envío (nro. de unidades), Actualización envío, Envío (peso neto o piezas por
 Envío registrado por, Recepción (kg o pz), Recepción - Envío (#), Recepción - Envío (%), Envío (kg o pz),
 Requiere confirmar, …`
 
-### 5.2 Parsing
-- PapaParse `header:true, dynamicTyping:false`; strip BOM; headers matched with `normHeader`/`pickCol`.
-- **Required:** `Producto`, `Código de barras`, `Kg/Pz`, `Envío (kg o pz)` (fallback `Envío (nro. de unidades)`).
-  Missing → block upload with a clear message.
-- **Expected lines** = rows with `Envío (kg o pz) > 0` (⚠ open question Q1: or `Requiere confirmar = TRUE`?).
-- Keep per line: `producto, barcode (cleanBC), sku_key, kgpz, esperado, envio_ts, envio_por`.
-- Sanity: 0 expected lines → block ("¿Es el archivo de envío correcto?"). `Actualización envío` dates
-  older than 3 days → warning (stale file).
-- Wrong-hub guard: none possible from the file alone; the hub is chosen on screen and stamped on the file name.
+### 5.2 Parsing (verified on a real file: MH Contry Abarrotes, 2026-10-29, `fixtures/envio_mh-contry_abarrotes_2026-10-29.csv`)
+The export is the **whole catalog** (3,747 rows); only a few lines are this shipment.
+- PapaParse `header:true, dynamicTyping:false`; strip BOM (the first header arrives as `\ufeffProducto`);
+  headers matched with `normHeader`/`pickCol`.
+- **Required:** `Producto`, `Código de barras`, `Kg/Pz`, `Envío (kg o pz)`. Missing → block the upload.
+- **Expected lines = `Envío (kg o pz)` > 0.** In the sample this is exactly the same set as
+  `Requiere confirmar = TRUE` (105 lines, 732 pz); use `Envío (kg o pz)` and, if the two ever disagree, show a
+  warning at upload listing the rows that differ.
+- `Envío (nro. de unidades)` equals `Envío (kg o pz)` for Pz items; for Kg items the expected amount is
+  `Envío (kg o pz)` (weight).
+- Keep per line: `rowIndex` (file order), `producto`, `barcode` (cleanBC; may be empty — 1 of 105 in the sample),
+  `sku_key`, `kgpz`, `esperado`, `actualizacion_envio`, `envio_registrado_por`, `posicion_armado`.
+- Ignore `Recepción (kg o pz)` and the other Recepción columns — they may already hold values from other
+  receptions (13 rows in the sample) and aren't this shipment's count.
+- Sanity: 0 expected lines → block ("¿Es el archivo de envío correcto?"). Newest `Actualización envío` more than
+  2 days old → confirm "¿Es el envío correcto?".
+- The file's `Posición armado` is CH's position, not the hub's; the hub position always comes from Sorting Hub.
 
 ### 5.3 Optional enrichment from Armado CH (v1 = display only)
 If `picks` has rows for this hub with `order_date` in the last 3 days, the summary (§6.5/6.6) adds **Armado**
@@ -182,8 +194,7 @@ scans, counts, types pieces, answers flags in real time, reviews the summary and
 cross-hub view is a later addition (§12).
 
 ### 6.1 Inicio
-Hub picker (remembered `mr_hub`) → **área: Abarrotes | Carnes** (remembered `mr_area`) → receptor name
-(remembered `mr_receptor`). Then the hub+área's **active envío** (§6.7): "Continuar recepción" if one exists,
+Always starts here, every visit: hub → **área: Abarrotes | Carnes** → receptor name (nothing pre-selected). Then the hub+área's **active envío** (§6.7): "Continuar recepción" if one exists,
 and always "Subir envío". A hub+área with no file yet can only "Subir envío".
 
 ### 6.2 Subir envío
@@ -229,6 +240,9 @@ system — no printing, no Google Sheet.
 ### 6.7 Lifecycle: active file, stale warning, re-uploads, deletes
 - **One active envío per hub+área** = the newest upload. It stays active until a new file is uploaded —
   no automatic expiry, no daily wipe.
+- **Already received.** If the active file's reception is already closed, opening the hub+área shows
+  "**El archivo cargado ya se recibió el {d} de {mes}.**" → [Ver resumen] / [Subir envío]. No scanning against a
+  closed file.
 - **Stale warning.** On opening Recibir and again at the first scan of the day, if the active file was uploaded
   on an earlier day (America/Monterrey), a modal: "**Estás trabajando con el archivo cargado el {d} de {mes}.
   Carga el archivo de hoy.**" → [Cargar archivo de hoy] / [Ignorar]. Ignorar is remembered for that file for
@@ -241,6 +255,16 @@ system — no printing, no Google Sheet.
   "Primero cerrar la recepción actual" (goes to its Resumen y cierre). No option discards scans.
 - **Deletes:** the receptor can't delete anything. Old files and reports stay in storage as history;
   `rec_events` is never deleted. Pruning (e.g. raw envíos older than 90 days) can come later if storage grows.
+
+### 6.8 Admin (safety net, PIN — like Armado's coordinator)
+Only for Jose / whoever he gives the PIN. PIN read from `recibo/config/admin_pin.txt` (edited by hand in the
+dashboard), cached for the session only.
+- **Recepciones**: every hub+área, open and closed, by day.
+- **Respaldos / restore**: every replaced envío file (still in storage) can be made active again; a closed
+  reception can be **reopened**; a reception can be **rebuilt from `rec_events`** if a phone's local copy is lost.
+  Every admin action is itself an event (`tipo='admin'`, with who/what in `detalle`), so it can be undone too.
+- **Descargas**: any reception's report CSV.
+- No hard deletes here either in v1.
 
 ## 7. Error guards (the point of the app)
 
@@ -260,9 +284,13 @@ lowercase, accents stripped. Precompute families over envío + image DB names.
   "**¿Revisaste pieza por pieza que las {n} son {presentación}?**" → "Sí, todas" / "Voy a revisar".
   (Not shown for products without siblings — no friction where there's no risk.)
 
-### 7.3 Manual entry (no barcode)
-Search box. Results show **envío products first** (with photo + "viene en el envío"), then the rest of the
-catalog greyed. Picking a non-envío product → modal 7.1. Picking a product with a sibling → banner 7.2.
+### 7.3 Manual entry (no barcode) — type-ahead with photos
+"Sin código" opens a text field. As the receptor types, a dropdown shows matching products, **each with its
+photo**, name and presentation, matched accent/case-insensitively on every word typed ("almen 100" finds
+"Almendras enchiladas Calii 100g"). **Envío products first** (marked "viene en el envío"), then the rest of the
+catalog greyed. Tapping one opens the same product card as a scan (method `manual`).
+Picking a non-envío product → modal 7.1. Picking a product with a sibling → banner 7.2. Still blind: the
+dropdown never shows quantities.
 
 ### 7.4 Quantity sanity (real time, still blind)
 - Cumulative received for a line would **exceed enviado** → modal "**Esta cantidad es mayor a lo enviado.
@@ -282,7 +310,7 @@ never auto-skip, auto-fill or reorder anything.
 
 - **Source of truth = `rec_events`.** Session state is rebuilt by folding events (`scan` + `ajuste`).
   Lesson from Armado's Sept 2026 partial loss: never depend on a single saved snapshot.
-- Local mirror in `localStorage` `mr_session_{slug}_{fecha}` (events + envío projection), wrapped in try/catch.
+- Local mirror in `localStorage` `mr_session_{slug}_{area}_{fecha}` (events + envío projection), wrapped in try/catch.
 - **Outbox** `mr_outbox` for events that didn't land; flush on reconnect/foreground; badge with pending count.
 - Multi-device: phones on the same session poll `rec_events?session_id=eq…&id=gt.{last}` every 15 s while
   Recibir is open. Totals = everyone's scans.
@@ -321,20 +349,24 @@ All cells quoted, CRLF, BOM only on browser download.
 
 ## 11. Open questions (defaults in bold until Jose answers)
 
-Answered 2026-10-29: one receptor role does everything (no PIN) · blind count with real-time flags, deltas
-revealed in the summary · the receptor downloads and uploads the envío (salida is registered the day before) ·
-same person receives and registers · Abarrotes and Carnes are separate receptions chosen after the hub ·
-no column identifies Proveedores directos, so all items are treated alike · lifecycle = newest upload stays
-active, stale-file warning with Ignorar, re-upload keeps scans, no deletes (§6.7) · scope = Abarrotes + Carnes; Fruta y verdura later · Sorting Hub already in the shared project.
+Answered 2026-10-29: one receptor role does everything (no PIN for receptors) · blind count with real-time flags,
+deltas revealed in the summary · the receptor downloads and uploads the envío · same person receives and
+registers · Abarrotes and Carnes are separate receptions chosen after the hub · no column identifies Proveedores
+directos, so all items are treated alike · lifecycle §6.7 · admin safety net §6.8 · nothing remembered between
+visits · type-ahead with photos for barcode-less items · **expected qty = `Envío (kg o pz)` > 0** (checked on the
+real Contry file) · scope = Abarrotes + Carnes; Fruta y verdura later · Sorting Hub already in the shared project.
 
-- **Q1 Expected quantity column:** **`Envío (kg o pz)` > 0** vs `Requiere confirmar = TRUE`. Need a real export
-  in `fixtures/`.
-- **Q3 Registration order:** order of the system's reception screen. Default **Posición armado**.
-- **Q4 One envío per day per hub, or several?** Default **several allowed**.
-- **Q5 Receptor name:** free text (default) vs a managed list.
-- **Q6 Kg products (Carnes):** weighed on reception, decimals. Default **yes**.
+- **Q3 Typing order:** when the receptor types the reception into the system, is the product list there in the
+  same order as the downloaded file? Default **yes — the summary keeps the file's row order** (plus A-Z / solo
+  diferencias filters).
+- **Q4 Two shipments the same day:** can one hub get two Abarrotes (or two Carnes) shipments in one day?
+  Default **yes, allowed** — each upload is its own reception.
+- **Q5 Receptor name:** typed each time, or picked from a short list per hub? Default **picked from a list**
+  (managed in Admin), since nothing is remembered and typing a name every visit invites typos.
+- **Q6 Carnes:** need a real Carnes export in `fixtures/` to confirm columns and that Kg items carry weight in
+  `Envío (kg o pz)`. Default: Kg lines take a **typed weight with decimals**.
 
 ## 12. Not in v1
-Coordinator/cross-hub view for Jose, PINs, Fruta y verdura,
+Metrics, Fruta y verdura,
 metrics dashboard (scans/min, error rate per hub/receiver), photo evidence on discrepancies, expiry checks,
 sorting edits, Retool anything, CH Guadalupe as receiver.

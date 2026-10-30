@@ -22,6 +22,7 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 ## Rules that must survive any change
 1. Receiver inputs: barcode + quantity (product pick only when there's no barcode).
 2. No cheap exits: no bulk accept / confirm-all. Discrepancies acknowledged one by one.
+7. Nothing remembered between visits: always open on Inicio (no saved hub/área/name/page).
 3. Blocking modals only where plan §7.5 allows them.
 4. `rec_events` is append-only and the source of truth; corrections are `ajuste` rows.
 5. Dates via `serverNow()` + America/Monterrey helpers — never the device clock.
