@@ -37,6 +37,147 @@ button{font:inherit;color:inherit}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(120px);background:var(--gray-900);color:white;padding:12px 18px;border-radius:24px;font-size:14px;font-weight:600;max-width:calc(100% - 32px);box-shadow:var(--shadow-md);transition:transform .25s;z-index:100;text-align:center}
 .toast.show{transform:translateX(-50%) translateY(0)}
 .app-ver{text-align:center;font-size:11px;color:var(--gray-400);margin-top:24px}
+.muted{color:var(--gray-600);font-size:14px;line-height:1.4}
+h2{font-size:20px;font-weight:800;margin:4px 0 8px}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;border-radius:var(--radius-sm);padding:14px 16px;font-size:16px;font-weight:700;cursor:pointer;text-align:center;min-height:48px}
+.btn:disabled{opacity:.45;cursor:default}
+.btn-block{display:flex;width:100%}
+.btn-primary{background:var(--green);color:white}
+.btn-primary:active{background:var(--green-dark)}
+.btn-secondary{background:white;color:var(--gray-900);border:2px solid var(--gray-300)}
+.btn-danger{background:var(--red);color:white}
+.btn-warn{background:var(--orange);color:white}
+.link-btn{background:none;border:none;color:var(--green-dark);font-size:14px;font-weight:700;text-decoration:underline;cursor:pointer;padding:10px;display:block;margin:4px auto 0}
+.stack{display:flex;flex-direction:column;gap:10px}
+
+/* INICIO (§6.1) */
+.step{margin-top:18px}
+.step-title{font-size:12px;font-weight:800;color:var(--gray-600);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.choice-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.choice{background:white;border:2px solid transparent;border-radius:var(--radius);padding:14px 12px;font-size:15px;font-weight:700;text-align:left;cursor:pointer;box-shadow:var(--shadow-sm);min-height:52px}
+.choice.sel{border-color:var(--green);background:var(--green-light)}
+.choice.big{font-size:18px;text-align:center;padding:18px 12px}
+.text-input{width:100%;padding:14px;font-size:16px;border:2px solid var(--gray-300);border-radius:var(--radius-sm);outline:none;background:white}
+.text-input:focus{border-color:var(--green)}
+.note{background:var(--yellow-light);border:1px solid var(--yellow);border-radius:var(--radius-sm);padding:10px 12px;font-size:13px;margin-bottom:10px;color:var(--gray-700)}
+.info-card{background:white;border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:14px 16px;margin-bottom:12px;font-size:14px;line-height:1.45}
+.info-card b{font-weight:800}
+.tag{display:inline-block;font-size:11px;font-weight:800;padding:3px 8px;border-radius:12px;background:var(--gray-200);color:var(--gray-700);vertical-align:middle}
+.tag.orange{background:var(--orange-light);color:var(--orange)}
+.tag.green{background:var(--green-light);color:var(--green-dark)}
+.tag.red{background:var(--red-light);color:var(--red)}
+
+/* Top bar (Subir) */
+.topbar{background:white;display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--gray-200);position:sticky;top:0;z-index:5}
+.back{background:none;border:none;font-size:15px;font-weight:700;color:var(--green-dark);padding:8px 6px;cursor:pointer;white-space:nowrap}
+.topbar-title{font-weight:800;font-size:15px;flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.err-box{background:var(--red-light);border:1px solid var(--red);color:var(--red);border-radius:var(--radius-sm);padding:12px;font-size:14px;margin:12px 0;line-height:1.4}
+.warn-box{background:var(--orange-light);border:1px solid var(--orange);border-radius:var(--radius-sm);padding:12px;font-size:14px;margin:12px 0;line-height:1.4}
+.warn-box .btn{margin-top:10px}
+.warn-box.ok{background:var(--green-light);border-color:var(--green)}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.stat{background:var(--gray-50);border-radius:var(--radius-sm);padding:10px}
+.stat-n{font-size:22px;font-weight:900}
+.stat-l{font-size:12px;color:var(--gray-600)}
+
+/* RECIBIR (§6.3) */
+.rec-head{background:white;padding:8px 12px 10px;border-bottom:1px solid var(--gray-200);position:sticky;top:0;z-index:5}
+.rec-head-top{display:flex;align-items:center;gap:8px}
+.rec-title{flex:1;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rec-sub{display:flex;justify-content:space-between;font-size:13px;color:var(--gray-600);margin:4px 2px 6px}
+.rec-sub b{color:var(--gray-900)}
+.progress{height:6px;background:var(--gray-200);border-radius:3px;overflow:hidden}
+.progress>div{height:100%;background:var(--green);width:0;transition:width .3s}
+.net-badge{font-size:11px;font-weight:800;padding:4px 8px;border-radius:12px;white-space:nowrap}
+.net-badge.ok{background:var(--green-light);color:var(--green-dark)}
+.net-badge.pend{background:var(--orange-light);color:var(--orange)}
+.net-badge.off{background:var(--red-light);color:var(--red)}
+.scan-row{display:flex;gap:8px;margin:4px 0 8px}
+.scan-input{flex:1;min-width:0;padding:14px;font-size:16px;border:2px solid var(--gray-300);border-radius:var(--radius-sm);outline:none;background:white}
+.scan-input:focus{border-color:var(--green)}
+.icon-btn{width:52px;flex-shrink:0;border:2px solid var(--gray-300);background:white;border-radius:var(--radius-sm);font-size:20px;cursor:pointer}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.row2 .btn{font-size:15px;padding:12px 8px}
+.empty-hint{color:var(--gray-500);font-size:14px;text-align:center;padding:28px 16px}
+.section-title{font-size:12px;font-weight:800;color:var(--gray-600);text-transform:uppercase;letter-spacing:.5px;margin:18px 0 8px}
+
+/* Product card */
+.pcard{background:white;border-radius:var(--radius);box-shadow:var(--shadow-md);padding:16px;margin-bottom:12px;border:3px solid var(--green)}
+.pcard.noesp{border-color:var(--red)}
+.pcard-top{display:flex;gap:12px;align-items:flex-start}
+.pcard-img{width:132px;height:132px;object-fit:contain;flex-shrink:0;border-radius:var(--radius-sm);background:var(--gray-50)}
+.pcard-noimg{width:132px;height:132px;flex-shrink:0;border-radius:var(--radius-sm);background:var(--gray-100);display:grid;place-items:center;font-size:44px}
+.basket{flex:1;text-align:center;min-width:0}
+.basket-l{font-size:11px;font-weight:800;color:var(--gray-600);text-transform:uppercase;letter-spacing:.5px}
+.basket-letter{font-size:84px;line-height:1;font-weight:900;color:var(--green-dark);word-break:break-all}
+.basket-letter.long{font-size:56px}
+.basket-pos{font-size:15px;font-weight:700;color:var(--gray-700);margin-top:2px}
+.basket-none{font-size:13px;color:var(--gray-500);padding-top:30px}
+.pcard-name{font-size:18px;font-weight:800;line-height:1.25;margin:12px 0 6px}
+mark{background:var(--yellow-light);color:inherit;padding:0 3px;border-radius:4px;box-shadow:inset 0 -2px 0 var(--yellow)}
+.pcard-name mark{font-size:22px;font-weight:900}
+.pcard-tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.pres-chip{font-size:16px;font-weight:900;background:var(--yellow-light);border:2px solid var(--yellow);border-radius:8px;padding:3px 10px}
+.unit-chip{font-size:14px;font-weight:800;background:var(--gray-200);border-radius:8px;padding:5px 10px}
+.unit-chip.kg{background:#E3F2FD;color:#1565C0}
+.banner{border-radius:var(--radius-sm);padding:10px 12px;font-size:14px;font-weight:700;margin-bottom:10px}
+.banner.red{background:var(--red-light);color:var(--red)}
+.banner.blue{background:#E3F2FD;color:#1565C0;font-size:16px}
+.banner.gray{background:var(--gray-100);color:var(--gray-700);font-weight:600}
+.qty-label{font-size:13px;font-weight:800;color:var(--gray-700);margin-bottom:6px;display:block}
+.qty-input{width:100%;font-size:32px;font-weight:900;padding:10px 14px;border:3px solid var(--gray-300);border-radius:var(--radius-sm);outline:none;text-align:center}
+.qty-input:focus{border-color:var(--green)}
+.qty-err{color:var(--red);font-size:13px;font-weight:700;min-height:18px;margin-top:4px}
+.pcard-actions{display:grid;grid-template-columns:1fr 2fr;gap:8px;margin-top:8px}
+
+/* Recent scans */
+.rlist{display:flex;flex-direction:column;gap:6px}
+.ritem{background:white;border-radius:var(--radius-sm);box-shadow:var(--shadow-sm);padding:8px 10px}
+.ritem-row{display:flex;gap:10px;align-items:center}
+.thumb{width:44px;height:44px;object-fit:contain;flex-shrink:0;border-radius:6px;background:var(--gray-50)}
+.thumb-none{width:44px;height:44px;flex-shrink:0;border-radius:6px;background:var(--gray-100);display:grid;place-items:center;font-size:18px}
+.ritem-main{flex:1;min-width:0}
+.ritem-name{font-size:13px;font-weight:700;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.ritem-meta{font-size:11px;color:var(--gray-500);margin-top:2px}
+.ritem-qty{font-size:20px;font-weight:900;text-align:right;white-space:nowrap}
+.ritem-qty s{font-size:13px;color:var(--gray-500);font-weight:600;margin-right:4px}
+.ritem-qty small{font-size:11px;color:var(--gray-500);font-weight:700}
+.corr-btn{background:none;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;font-weight:700;padding:6px 8px;cursor:pointer;color:var(--gray-700)}
+.corr-box{border-top:1px solid var(--gray-200);margin-top:8px;padding-top:8px}
+.corr-box .text-input{font-size:20px;font-weight:800;text-align:center;padding:10px}
+.corr-box select{width:100%;padding:10px;font-size:15px;border:2px solid var(--gray-300);border-radius:var(--radius-sm);background:white;margin-top:6px}
+
+/* Sheets (user-opened full-screen panels — not blocking modals) */
+.sheet{display:none;position:fixed;inset:0;background:var(--gray-100);z-index:40;flex-direction:column}
+.sheet.open{display:flex}
+.sheet-head{background:white;display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--gray-200)}
+.sheet-title{flex:1;font-weight:800;font-size:16px}
+.sheet-body{flex:1;overflow-y:auto;padding:12px 16px 40px;max-width:480px;width:100%;margin:0 auto}
+.res-item{display:flex;gap:10px;align-items:center;background:white;border:none;border-radius:var(--radius-sm);box-shadow:var(--shadow-sm);padding:8px 10px;width:100%;text-align:left;cursor:pointer;margin-bottom:6px}
+.res-item.grey{opacity:.55;background:var(--gray-50)}
+.res-name{font-size:14px;font-weight:700;line-height:1.25}
+.res-sub{font-size:11px;color:var(--gray-500);margin-top:2px}
+.res-pos{font-size:22px;font-weight:900;color:var(--green-dark);min-width:44px;text-align:center}
+
+/* Modal (only where plan §7.5 / §6.3 / §6.7 allow one) */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:60;align-items:center;justify-content:center;padding:16px}
+.modal-bg.open{display:flex}
+.modal{background:white;border-radius:var(--radius);padding:20px;width:100%;max-width:420px;max-height:90dvh;overflow-y:auto;box-shadow:var(--shadow-md)}
+.modal-title{font-size:19px;font-weight:900;margin-bottom:10px;line-height:1.3}
+.modal p{font-size:15px;line-height:1.4;margin-bottom:10px;color:var(--gray-700)}
+.modal-actions{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+.modal-prod{display:flex;gap:12px;align-items:center;background:var(--gray-50);border-radius:var(--radius-sm);padding:10px;margin:8px 0}
+.modal-prod img,.modal-prod .thumb-none{width:72px;height:72px;object-fit:contain;flex-shrink:0}
+
+/* Camera (copied from sorting-hub) */
+.camera-overlay{display:none;position:fixed;inset:0;background:black;z-index:70;flex-direction:column}
+.camera-overlay.open{display:flex}
+.camera-overlay video{flex:1;width:100%;height:100%;object-fit:cover;background:black}
+.camera-controls{position:absolute;top:16px;left:0;right:0;display:flex;justify-content:space-between;padding:0 16px;z-index:2}
+.camera-btn{width:48px;height:48px;border-radius:50%;background:rgba(0,0,0,.55);color:white;border:none;font-size:20px;cursor:pointer}
+.camera-hint{position:absolute;bottom:32px;left:0;right:0;text-align:center;color:white;font-size:14px;padding:0 24px;z-index:2}
 </style>
 </head>
 <body>
@@ -52,12 +193,71 @@ button{font:inherit;color:inherit}
   </div>
 </div>
 
+<!-- ═══════════ SUBIR ENVÍO (§6.2) ═══════════ -->
+<div class="screen" id="screen-subir">
+  <div class="topbar"><button class="back" onclick="goInicio()">← Inicio</button><div class="topbar-title" id="subir-title"></div></div>
+  <div class="wrap">
+    <h2>Subir envío</h2>
+    <p class="muted">Descarga del sistema la exportación de <b>Envío</b> de este hub y área (archivo CSV) y elígela aquí.</p>
+    <label class="btn btn-primary btn-block" style="margin-top:14px">📄 Elegir archivo CSV<input type="file" id="envio-file" accept=".csv,text/csv" onchange="onEnvioFile(this)" hidden></label>
+    <div id="subir-result"></div>
+  </div>
+</div>
+
+<!-- ═══════════ RECIBIR (§6.3) — blind count ═══════════ -->
+<div class="screen" id="screen-recibir">
+  <div class="rec-head">
+    <div class="rec-head-top">
+      <button class="back" onclick="leaveRecibir()">← Inicio</button>
+      <div class="rec-title"><b id="rec-hub"></b> · <span id="rec-area"></span></div>
+      <span class="net-badge" id="net-badge"></span>
+    </div>
+    <div class="rec-sub"><span id="rec-progress"></span><span id="rec-receptor"></span></div>
+    <div class="progress"><div id="rec-bar"></div></div>
+  </div>
+  <div class="wrap">
+    <div id="rec-banner"></div>
+    <div class="scan-row">
+      <input type="text" id="scan-input" class="scan-input" inputmode="none" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Escanea un código…">
+      <button class="icon-btn" id="kb-toggle" onclick="toggleKeyboard()" title="Escribir el código">⌨</button>
+      <button class="icon-btn" onclick="openCamera()" title="Escanear con la cámara">📷</button>
+    </div>
+    <div class="row2">
+      <button class="btn btn-secondary" onclick="openSinCodigo()">🔎 Sin código</button>
+      <button class="btn btn-secondary" onclick="openPendientes()">📋 Pendientes <span id="pend-count"></span></button>
+    </div>
+    <div id="card-area"></div>
+    <div class="section-title">Últimos escaneos</div>
+    <div id="recent-list" class="rlist"></div>
+  </div>
+</div>
+
+<!-- Sheet: Sin código / Pendientes -->
+<div class="sheet" id="sheet">
+  <div class="sheet-head"><div class="sheet-title" id="sheet-title"></div><button class="back" onclick="closeSheet()">Cerrar ✕</button></div>
+  <div class="sheet-body" id="sheet-body"></div>
+</div>
+
+<!-- Modal -->
+<div class="modal-bg" id="modal-bg"><div class="modal"><div id="modal-body"></div><div class="modal-actions" id="modal-actions"></div></div></div>
+
+<!-- Camera (copied from sorting-hub) -->
+<div class="camera-overlay" id="camera-overlay">
+  <video id="camera-video" autoplay playsinline muted style="display:none"></video>
+  <div id="camera-html5-container" style="display:none;width:100%;height:100%"></div>
+  <div class="camera-controls">
+    <button class="camera-btn" id="camera-torch-btn" style="display:none" onclick="toggleTorch()">🔦</button>
+    <button class="camera-btn" onclick="closeCamera()">✕</button>
+  </div>
+  <div class="camera-hint" id="camera-hint"></div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'v1 · fase 0';
+const APP_VERSION = 'v1 · fase 1';
 
 /* ════════════════════════════════════════════════════════════════════════════════════
    SUPABASE — shared project with Armado CH + Sorting Hub (plan §3). This app writes ONLY to bucket
@@ -327,15 +527,891 @@ function showScreen(id){
   window.scrollTo(0,0);
 }
 
+/* ════════════════════════════════════════════════════════════════════════════════════
+   SMALL HELPERS (ours)
+   ════════════════════════════════════════════════════════════════════════════════════ */
+// device_id identifies the phone in rec_events. It never decides which page opens (rule 7).
+const DEVICE_ID=(()=>{ try{ let d=localStorage.getItem('mr_device_id'); if(!d){ d='d'+Math.random().toString(36).slice(2,10); localStorage.setItem('mr_device_id',d); } return d; }catch(_){ return 'd-nostorage'; } })();
+function newUid(){ return DEVICE_ID+'-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7); }
+function normKgPz(v){ return /^kg$/i.test(String(v||'').trim()) ? 'Kg' : 'Pz'; }
+function unitOf(kgpz){ return kgpz==='Kg' ? 'kg' : 'pz'; }
+function round2(n){ return Math.round(Number(n)*100)/100; }
+function fmtQty(n, kgpz){ return kgpz==='Kg' ? round2(n).toFixed(2) : String(Math.round(Number(n))); }
+// Export numbers: "24.6", "1,234.5", "3,5" → Number; empty → 0; garbage → NaN
+function parseNum(v){
+  let s=String(v==null?'':v).trim().replace(/\s/g,''); if(!s) return 0;
+  if(/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) s=s.replace(/,/g,''); else s=s.replace(',','.');
+  const n=Number(s); return isFinite(n) ? n : NaN;
+}
+// Presentation = the last size/weight/count token of the name ("500g", "1kg", "150pz", "(4pz de 60g)")
+const PRES_RE=/\(\s*\d+\s*(?:pz|pzs|piezas)\b[^)]*\)|\d+(?:[.,]\d+)?\s?(?:kg|gr|g|mg|ml|lt|l|oz|pzs|pz|piezas)(?![a-z])/gi;
+function presentacion(name){
+  const s=String(name||''); let m, last=null; PRES_RE.lastIndex=0;
+  while((m=PRES_RE.exec(s))) last={i:m.index, t:m[0]};
+  return last;
+}
+function nameHtml(name){
+  const s=String(name||''), p=presentacion(s);
+  if(!p) return escapeHtml(s);
+  return escapeHtml(s.slice(0,p.i))+'<mark>'+escapeHtml(p.t)+'</mark>'+escapeHtml(s.slice(p.i+p.t.length));
+}
+function imgTag(barcode, producto, cls){
+  const u=getImgUrl(barcode, producto);
+  return u ? `<img class="${cls}" src="${escapeHtml(u)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'${cls==='thumb'?'thumb-none':'pcard-noimg'}',textContent:'📦'}))">`
+           : `<div class="${cls==='thumb'?'thumb-none':'pcard-noimg'}">📦</div>`;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════════════
+   SORTING POSITIONS (plan §3.2) — read-only from bucket sorting-hub, cached per hub like Sorting Hub does.
+   items: [[producto, barcode, pasillo, estante, nivel, posDentro, temp], …]
+   ════════════════════════════════════════════════════════════════════════════════════ */
+S.sortBC=new Map(); S.sortName=new Map(); S.sortStatus='loading'; S.sortUpdatedAt=null;
+async function loadSorting(slug){
+  const src=SORTING_SLUG[slug]||slug, CK='mr_sorting_'+src;
+  let cached=null; try{ cached=JSON.parse(localStorage.getItem(CK)||'null'); }catch(_){}
+  let data=null, status='ok';
+  try{
+    const r=await fetch(`${SB_URL}/storage/v1/object/public/${SORTING_BUCKET}/sorting/${src}/version.txt`,{cache:'no-store'});
+    if(r.ok){
+      const v=(await r.text()).trim();
+      if(cached && cached.v===v) data=cached.data;
+      else{
+        data=await (await sbPublic(`sorting/${src}/latest.json`, SORTING_BUCKET)).json();
+        try{
+          for(const k of Object.keys(localStorage)) if(k.startsWith('mr_sorting_') && k!==CK) localStorage.removeItem(k);
+          localStorage.setItem(CK, JSON.stringify({v, data}));
+        }catch(_){}
+      }
+    } else if(r.status===400 || r.status===404){ status='none'; } // this hub never published a sorting file
+    else { data=cached&&cached.data; status=data?'offline':'err'; }
+  }catch(_){ data=cached&&cached.data; status=data?'offline':'err'; }
+  const bc=new Map(), nm=new Map();
+  for(const it of (data&&data.items)||[]){
+    const k=codeKey(it[1]); if(k && !bc.has(k)) bc.set(k,it);
+    const n=normName(it[0]); if(n && !nm.has(n)) nm.set(n,it);
+  }
+  S.sortBC=bc; S.sortName=nm; S.sortStatus=status; S.sortUpdatedAt=data&&data.updatedAt;
+}
+// B01–B16 are freezer aisles (Sorting Hub §12.1)
+const FREEZER_AISLE_RE=/^B\d{2}$/;
+function positionOf(barcode, producto){
+  const it=S.sortBC.get(codeKey(barcode)) || S.sortName.get(normName(producto));
+  if(!it) return null;
+  const pasillo=String(it[2]||'').trim().toUpperCase(), estante=String(it[3]||'').trim(), nivel=String(it[4]||'').trim(), dentro=String(it[5]||'').trim();
+  if(!pasillo) return null;
+  return { letra:pasillo, full:[pasillo,estante,nivel].filter(Boolean).join('-')+(dentro?` · ${dentro}`:''),
+           palabra: FREEZER_AISLE_RE.test(pasillo)?'Congelador':'Canasta' };
+}
+
+/* ════════════════════════════════════════════════════════════════════════════════════
+   MODAL — only where the plan allows one (§6.3 unknown code, §6.7 re-upload, §7.1, §7.2-qty, §7.4, §7.6).
+   Blocking: no backdrop dismiss.
+   ════════════════════════════════════════════════════════════════════════════════════ */
+let _modalResolve=null;
+function showModal({title, html='', buttons, cancel=false}){
+  return new Promise(res=>{
+    _modalResolve=res;
+    document.getElementById('modal-body').innerHTML=(title?`<div class="modal-title">${escapeHtml(title)}</div>`:'')+html;
+    const act=document.getElementById('modal-actions');
+    act.innerHTML=buttons.map((b,i)=>`<button class="btn btn-${b.kind||'secondary'} btn-block" data-i="${i}">${escapeHtml(b.label)}</button>`).join('')
+      +(cancel?`<button class="link-btn" data-cancel="1">Cancelar</button>`:'');
+    act.querySelectorAll('button').forEach(btn=>btn.onclick=()=>{
+      const v=btn.dataset.cancel?null:buttons[Number(btn.dataset.i)].value;
+      document.getElementById('modal-bg').classList.remove('open'); _modalResolve=null; res(v);
+      setTimeout(focusScan,30);
+    });
+    document.activeElement && document.activeElement.blur && document.activeElement.blur();
+    document.getElementById('modal-bg').classList.add('open');
+  });
+}
+function modalOpen(){ return document.getElementById('modal-bg').classList.contains('open'); }
+
+/* ════════════════════════════════════════════════════════════════════════════════════
+   INICIO (§6.1) — hub → área → receptor, nothing pre-selected, nothing stored (rule 7).
+   ════════════════════════════════════════════════════════════════════════════════════ */
+const INI={ hub:null, area:null, receptor:null, active:undefined }; // memory only
+let RECEPTORES; // undefined = loading · null = no config file yet · 'offline' · { slug: [names] }
+let _activeTok=0;
+async function loadReceptores(){
+  try{ RECEPTORES=JSON.parse(await sbFetch('config/receptores.json')); }
+  catch(e){ RECEPTORES = isNetErr(e) ? 'offline' : null; }
+  if(document.getElementById('screen-inicio').classList.contains('active')) renderInicio();
+}
+function receptoresDeHub(slug){ return (RECEPTORES && typeof RECEPTORES==='object' && Array.isArray(RECEPTORES[slug])) ? RECEPTORES[slug] : null; }
+function iniPick(k, v){
+  INI[k]=v;
+  if(k==='hub'){ INI.area=null; INI.receptor=null; }
+  if(k==='area'){ INI.receptor=null; }
+  INI.active=undefined;
+  renderInicio();
+  if(INI.receptor) refreshActive();
+  const steps=document.querySelectorAll('#inicio-body .step'); const last=steps[steps.length-1];
+  if(last) setTimeout(()=>last.scrollIntoView({behavior:'smooth', block:'nearest'}),30);
+}
+function iniPickReceptor(i){ iniPick('receptor', receptoresDeHub(INI.hub)[i]); }
+function iniFreeName(){
+  const v=String(document.getElementById('free-name').value||'').trim().replace(/\s+/g,' ');
+  if(v.length<2){ toast('Escribe tu nombre'); return; }
+  iniPick('receptor', v);
+}
+function renderInicio(){
+  const b=document.getElementById('inicio-body'); if(!b) return;
+  let h=`<div class="step"><div class="step-title">1 · Hub</div><div class="choice-grid">`
+    +HUBS.map(x=>`<button class="choice ${INI.hub===x.slug?'sel':''}" onclick="iniPick('hub','${x.slug}')">${escapeHtml(x.name)}</button>`).join('')+`</div></div>`;
+  if(INI.hub){
+    h+=`<div class="step"><div class="step-title">2 · Área</div><div class="choice-grid">`
+      +AREAS.map(a=>`<button class="choice big ${INI.area===a.id?'sel':''}" onclick="iniPick('area','${a.id}')">${a.name}</button>`).join('')+`</div></div>`;
+  }
+  if(INI.hub && INI.area){
+    h+=`<div class="step"><div class="step-title">3 · ¿Quién recibe?</div>`;
+    const list=receptoresDeHub(INI.hub);
+    if(RECEPTORES===undefined) h+=`<div class="muted">Cargando receptores…</div>`;
+    else if(list && list.length){
+      h+=`<div class="choice-grid">`+list.map((n,i)=>`<button class="choice ${INI.receptor===n?'sel':''}" onclick="iniPickReceptor(${i})">${escapeHtml(n)}</button>`).join('')+`</div>`;
+    } else {
+      // Temporary until Admin → Receptores writes recibo/config/receptores.json (§6.8)
+      h+=`<div class="note">${RECEPTORES==='offline'?'Sin conexión para cargar la lista de receptores.':'Aún no hay lista de receptores para este hub.'} Escribe tu nombre (temporal).</div>`
+        +`<div style="display:flex;gap:8px"><input id="free-name" class="text-input" placeholder="Tu nombre" autocomplete="off" value="${escapeHtml(INI.receptor||'')}" onkeydown="if(event.key==='Enter')iniFreeName()"><button class="btn btn-primary" onclick="iniFreeName()">OK</button></div>`;
+    }
+    h+=`</div>`;
+  }
+  if(INI.hub && INI.area && INI.receptor){
+    h+=`<div class="step"><div class="step-title">4 · Envío de ${escapeHtml(hubName(INI.hub))} · ${areaName(INI.area)}</div>${inicioActionsHtml()}</div>`;
+  }
+  b.innerHTML=h;
+}
+function inicioActionsHtml(){
+  const a=INI.active;
+  const subir=`<button class="btn btn-secondary btn-block" onclick="openSubir()">📄 Subir envío</button>`;
+  if(a===undefined) return `<div class="muted">Buscando el envío activo…</div>`;
+  if(a.offline && !a.data) return `<div class="warn-box">Sin conexión. Conéctate a internet para cargar el envío.</div><button class="btn btn-secondary btn-block" onclick="refreshActive()">Reintentar</button>`;
+  if(a.none) return `<div class="info-card">Todavía no hay un envío cargado para este hub y área.</div><button class="btn btn-primary btn-block" onclick="openSubir()">📄 Subir envío</button>`;
+  const d=a.data, today=todayStr();
+  let info=`<b>Envío cargado el ${fechaLarga(d.fecha)}</b>, ${localHM(new Date(d.uploadedAt))} · ${d.stats.lineas} productos`
+    +`<div class="muted" style="font-size:12px;margin-top:2px">${escapeHtml(d.sourceFile||'')}${d.receptor?' · subido por '+escapeHtml(d.receptor):''}</div>`;
+  if(d.session_fecha && d.session_fecha<today && !a.closed) info+=`<div style="margin-top:6px"><span class="tag orange">Recepción abierta desde el ${fechaLarga(d.session_fecha)}</span></div>`;
+  if(a.offline) info+=`<div style="margin-top:6px"><span class="tag red">Sin conexión — copia guardada en este teléfono</span></div>`;
+  if(a.closed){
+    // §6.7 — no scanning against a closed file. (Ver resumen arrives with Phase 3.)
+    return `<div class="info-card"><b>El archivo cargado ya se recibió el ${fechaLarga(localDateStr(new Date(a.closed)))}.</b></div>`+subir.replace('btn-secondary','btn-primary');
+  }
+  return `<div class="info-card">${info}</div><div class="stack"><button class="btn btn-primary btn-block" onclick="continuarRecepcion()">▶ Continuar recepción</button>${a.offline?'':subir}</div>`;
+}
+async function refreshActive(){
+  const tok=++_activeTok; INI.active=undefined; renderInicio();
+  let res; try{ res=await findActiveEnvio(INI.hub, INI.area); }catch(e){ res={offline:true}; }
+  if(tok!==_activeTok) return;
+  INI.active=res; renderInicio();
+}
+function goInicio(){
+  closeCamera(); closeSheet();
+  showScreen('screen-inicio'); renderInicio();
+  if(INI.receptor) refreshActive();
+}
+function continuarRecepcion(){ const a=INI.active; if(a && a.data) openRecibir(a.data); }
+
+/* ── Active envío (§6.7): the newest envios/{slug}/{area}/*.json ── */
+async function findActiveEnvio(slug, area){
+  let items;
+  try{ items=await sbList(`envios/${slug}/${area}/`); }
+  catch(e){ const m=latestMirror(slug, area); return m ? {offline:true, data:m.envio} : {offline:true}; }
+  const names=(items||[]).map(o=>o.name).filter(n=>/\.json$/.test(n)).sort().reverse();
+  if(!names.length) return {none:true};
+  const path=`envios/${slug}/${area}/${names[0]}`;
+  const data=JSON.parse(await sbFetch(path)); data._path=path;
+  return { path, data, closed: await sessionClosedAt(data.session_id) };
+}
+async function sessionClosedAt(sessionId){
+  // A 'cerrar' event (Phase 3) closes the reception. Unreachable → treated as open (never blocks resuming).
+  try{
+    const r=await pgSelect('rec_events', `session_id=eq.${encodeURIComponent(sessionId)}&tipo=eq.cerrar&select=ts&order=id.desc&limit=1`);
+    return r.length ? r[0].ts : null;
+  }catch(_){ return null; }
+}
+async function sessionHasScans(sessionId){
+  if(OUTBOX.some(e=>e.session_id===sessionId && e.tipo==='scan')) return true;
+  const r=await pgSelect('rec_events', `session_id=eq.${encodeURIComponent(sessionId)}&tipo=eq.scan&select=id&limit=1`);
+  return r.length>0;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════════════
+   SUBIR ENVÍO (§5.2, §6.2)
+   ════════════════════════════════════════════════════════════════════════════════════ */
+let SUBIR=null; // { file, parsed, acks:Set, busy, error }
+function openSubir(){
+  SUBIR=null;
+  document.getElementById('subir-title').textContent=`${hubName(INI.hub)} · ${areaName(INI.area)}`;
+  document.getElementById('subir-result').innerHTML='';
+  document.getElementById('envio-file').value='';
+  showScreen('screen-subir');
+}
+async function onEnvioFile(input){
+  const file=input.files && input.files[0]; if(!file) return;
+  let text; try{ text=await file.text(); }catch(e){ text=''; }
+  SUBIR={ file, parsed:parseEnvio(text), acks:new Set(), busy:false, error:null };
+  renderSubir();
+}
+// §5.2 — verified on both fixtures (Abarrotes 105 lines / Carnes 132 lines, 26 Kg)
+function parseEnvio(text){
+  const out={ errors:[], warnings:[], lines:[], catalogo:[], stats:null, newestEnvio:null };
+  const p=Papa.parse(stripBOM(String(text||'')), { header:true, dynamicTyping:false, skipEmptyLines:true });
+  const fields=(p.meta && p.meta.fields)||[];
+  const col=name=>fields.find(f=>normHeader(stripBOM(f))===normHeader(name));
+  const C={ producto:col('Producto'), barcode:col('Código de barras'), kgpz:col('Kg/Pz'), envio:col('Envío (kg o pz)'),
+            temp:col('Temp'), categoria:col('Categoría'), act:col('Actualización envío'), por:col('Envío registrado por'),
+            reqConf:col('Requiere confirmar') };
+  const missing=[['Producto',C.producto],['Código de barras',C.barcode],['Kg/Pz',C.kgpz],['Envío (kg o pz)',C.envio]].filter(x=>!x[1]).map(x=>x[0]);
+  if(missing.length){
+    out.errors.push(`Al archivo le falta${missing.length>1?'n las columnas':' la columna'} ${missing.map(m=>`«${m}»`).join(', ')}. ¿Es la exportación de Envío del sistema?`);
+    return out;
+  }
+  const bySku=new Map(); let badNums=0, dupes=0;
+  (p.data||[]).forEach((r, rowIndex)=>{
+    const producto=String(r[C.producto]||'').trim(); if(!producto) return;
+    const barcode=cleanBC(r[C.barcode]).replace(/\s+/g,'');
+    const kgpz=normKgPz(r[C.kgpz]);
+    const esperado=parseNum(r[C.envio]);
+    if(isNaN(esperado)){ badNums++; return; }
+    const sku_key=skuKeyOf(barcode, producto);
+    if(!(esperado>0)){ out.catalogo.push([producto, barcode, kgpz]); return; }
+    if(bySku.has(sku_key)){ // same product on two lines — counted together (never seen in real files)
+      const l=bySku.get(sku_key); l.esperado=round2(l.esperado+esperado); dupes++; return;
+    }
+    const line={ rowIndex, producto, barcode, sku_key, kgpz, esperado:round2(esperado),
+      temp:String(C.temp?r[C.temp]||'':'').trim(), categoria:String(C.categoria?r[C.categoria]||'':'').trim(),
+      actualizacion_envio:String(C.act?r[C.act]||'':'').trim(), envio_registrado_por:String(C.por?r[C.por]||'':'').trim(),
+      _reqConf:C.reqConf?String(r[C.reqConf]||'').trim().toLowerCase():'' };
+    bySku.set(sku_key, line); out.lines.push(line);
+  });
+  if(!out.lines.length){
+    out.errors.push('El archivo no trae ningún producto con «Envío (kg o pz)» mayor a 0. ¿Es el envío de este hub?');
+    return out;
+  }
+  if(badNums) out.errors.push(`${badNums} renglón(es) tienen un número de envío que no se puede leer. Descarga el archivo otra vez.`);
+  // Requiere confirmar flips to FALSE once the reception is registered in the system — a hint, never a filter.
+  if(C.reqConf && out.lines.every(l=>l._reqConf==='false'))
+    out.warnings.push({ id:'confirmado', html:'<b>Este envío parece ya confirmado en el sistema.</b> ¿Es el archivo correcto?' });
+  let newest=null;
+  for(const l of out.lines){ const t=Date.parse(l.actualizacion_envio); if(!isNaN(t) && (newest===null || t>newest)) newest=t; }
+  if(newest!==null){
+    out.newestEnvio=new Date(newest).toISOString();
+    const age=daysBetween(localDateStr(new Date(newest)), todayStr());
+    if(age>2) out.warnings.push({ id:'viejo', html:`<b>El envío del archivo se registró el ${fechaLarga(localDateStr(new Date(newest)))}</b> (hace ${age} días). ¿Es el envío correcto?` });
+  }
+  if(dupes) out.warnings.push({ id:'dupes', html:`${dupes} producto(s) aparecen en más de un renglón; se van a recibir juntos.` });
+  out.lines.forEach(l=>delete l._reqConf);
+  out.stats={ lineas:out.lines.length, kg:out.lines.filter(l=>l.kgpz==='Kg').length,
+              sinCodigo:out.lines.filter(l=>!l.barcode).length, catalogo:out.catalogo.length, renglones:(p.data||[]).length };
+  return out;
+}
+function renderSubir(){
+  const el=document.getElementById('subir-result'); if(!SUBIR){ el.innerHTML=''; return; }
+  const P=SUBIR.parsed;
+  let h=`<div class="info-card" style="margin-top:14px"><b>${escapeHtml(SUBIR.file.name)}</b></div>`;
+  if(P.errors.length){ el.innerHTML=h+P.errors.map(e=>`<div class="err-box">${escapeHtml(e)}</div>`).join(''); return; }
+  const s=P.stats, reg=P.newestEnvio?new Date(P.newestEnvio):null;
+  // Line counts only — the blind count never shows quantities (§2.3)
+  h+=`<div class="stat-grid">
+      <div class="stat"><div class="stat-n">${s.lineas}</div><div class="stat-l">productos en el envío</div></div>
+      <div class="stat"><div class="stat-n">${s.kg}</div><div class="stat-l">se pesan (Kg)</div></div>
+      <div class="stat"><div class="stat-n">${s.sinCodigo}</div><div class="stat-l">sin código de barras</div></div>
+      <div class="stat"><div class="stat-n">${reg?fechaLarga(localDateStr(reg)).replace(/ de /,' '):'—'}</div><div class="stat-l">envío registrado${reg?' · '+localHM(reg):''}</div></div>
+    </div>`;
+  for(const w of P.warnings){
+    const ok=SUBIR.acks.has(w.id);
+    h+=`<div class="warn-box ${ok?'ok':''}">${w.html}${ok?'<div style="margin-top:6px;font-weight:700">✓ Confirmado</div>'
+      :`<button class="btn btn-warn btn-block" onclick="SUBIR.acks.add('${w.id}');renderSubir()">Sí, es el archivo correcto</button>`}</div>`;
+  }
+  if(SUBIR.error) h+=`<div class="err-box">${escapeHtml(SUBIR.error)}</div>`;
+  const ready=P.warnings.every(w=>SUBIR.acks.has(w.id)) && !SUBIR.busy;
+  h+=`<button class="btn btn-primary btn-block" style="margin-top:12px" ${ready?'':'disabled'} onclick="startUpload()">${SUBIR.busy?'Subiendo…':'Cargar envío y empezar a recibir'}</button>`;
+  el.innerHTML=h;
+}
+async function startUpload(){
+  if(!SUBIR || SUBIR.busy) return;
+  SUBIR.busy=true; SUBIR.error=null; renderSubir();
+  try{ await doUpload(); }
+  catch(e){ SUBIR.error=(isNetErr(e)?'Sin conexión: no se pudo subir el archivo. ':'No se pudo subir el archivo ('+e.message+'). ')+'Intenta de nuevo.'; }
+  if(SUBIR){ SUBIR.busy=false; renderSubir(); }
+}
+async function doUpload(){
+  const P=SUBIR.parsed, slug=INI.hub, area=INI.area;
+  const now=serverNow(), epochMs=now.getTime(), fecha=localDateStr(now);
+  // §6.7 — does this file belong to the reception already open for this hub+área?
+  const prev=await findActiveEnvio(slug, area);
+  if(prev.offline) throw new TypeError('offline');
+  let reuse=false;
+  if(prev.data && !prev.closed){
+    if(await sessionHasScans(prev.data.session_id)){
+      const v=await showModal({ title:'Esta recepción ya tiene productos escaneados',
+        html:`<p>Lo escaneado es conteo físico: se conserva y se vuelve a comparar contra el archivo nuevo.</p>`,
+        buttons:[{label:'Reemplazar el archivo y conservar lo escaneado', value:'replace', kind:'primary'},
+                 {label:'Primero cerrar la recepción actual', value:'close', kind:'secondary'}], cancel:true });
+      if(v==='close'){ SUBIR=null; openRecibir(prev.data); return; } // Resumen y cierre lands in Phase 3
+      if(v!=='replace') return;
+      reuse=true;
+    } else if(prev.data.session_fecha===fecha) reuse=true; // same day, nothing scanned → simply replaces
+  }
+  const session_id = reuse ? prev.data.session_id : `${slug}__${area}__${fecha}__${epochMs}`;
+  const session_fecha = reuse ? prev.data.session_fecha : fecha;
+  const base=`envios/${slug}/${area}/${fecha}__${epochMs}`;
+  const data={ v:1, hub:slug, area, fecha, epochMs, uploadedAt:now.toISOString(), receptor:INI.receptor,
+    sourceFile:SUBIR.file.name, csvPath:base+'.csv', session_id, session_fecha,
+    stats:P.stats, newestEnvio:P.newestEnvio, lines:P.lines, catalogo:P.catalogo };
+  await sbUpload(base+'.csv', SUBIR.file, 'text/csv; charset=utf-8'); // raw, verbatim
+  await sbUpload(base+'.json', JSON.stringify(data), 'application/json'); // written last: its presence makes it active
+  data._path=base+'.json';
+  const fileName=SUBIR.file.name; SUBIR=null;
+  openRecibir(data);
+  recordEvent(makeEvent(reuse?'reemplazo':'abrir', { detalle:{ envio:base+'.json', csv:base+'.csv', archivo:fileName,
+    lineas:P.stats.lineas, anterior:reuse?prev.path:undefined } }));
+  toast(reuse?'✓ Archivo reemplazado — lo escaneado se conserva':'✓ Envío cargado. Empieza a escanear.');
+}
+
+/* ════════════════════════════════════════════════════════════════════════════════════
+   EVENTS + OUTBOX (§8) — rec_events is append-only and the source of truth. Every event carries a
+   client uid (detalle.uid) so a retried insert or the local mirror never double-counts.
+   ════════════════════════════════════════════════════════════════════════════════════ */
+const OUTBOX_KEY='mr_outbox', DEAD_KEY='mr_outbox_failed';
+let OUTBOX=(()=>{ try{ return JSON.parse(localStorage.getItem(OUTBOX_KEY)||'[]'); }catch(_){ return []; } })();
+let _outboxPersisted=true;
+function saveOutbox(){ try{ localStorage.setItem(OUTBOX_KEY, JSON.stringify(OUTBOX)); _outboxPersisted=true; }catch(_){ _outboxPersisted=false; } }
+const NET={ ok:true };
+function makeEvent(tipo, f={}){
+  return { session_id:S.session.id, hub:S.hub, area:S.area, fecha:S.session.fecha, tipo,
+    sku_key:f.sku_key??null, producto:f.producto??null, cantidad:f.cantidad??null, metodo:f.metodo??null,
+    detalle:Object.assign({ uid:newUid() }, f.detalle||{}), receptor:S.receptor, device_id:DEVICE_ID,
+    ts:serverNow().toISOString() };
+}
+function recordEvent(ev){
+  OUTBOX.push(ev); saveOutbox();
+  if(!_outboxPersisted) toast('⚠ La memoria del teléfono está llena: no cierres la app hasta que se suba todo', 5000);
+  addEvents([ev]); saveMirror();
+  flushOutbox();
+}
+let _flushing=false;
+async function flushOutbox(){
+  if(_flushing || !OUTBOX.length){ renderNet(); return; }
+  _flushing=true; renderNet();
+  try{
+    while(OUTBOX.length){
+      const batch=OUTBOX.slice(0,100);
+      try{ await pgInsert('rec_events', batch); }
+      catch(e){
+        if(isNetErr(e)) throw e;
+        // A row the server rejects must not block every scan behind it: retry one by one, park the bad ones.
+        for(const ev of batch){
+          try{ await pgInsert('rec_events', [ev]); }
+          catch(e2){ if(isNetErr(e2)) throw e2; parkDead(ev, e2); }
+        }
+      }
+      const sent=new Set(batch.map(e=>e.detalle.uid));
+      OUTBOX=OUTBOX.filter(e=>!sent.has(e.detalle.uid)); saveOutbox();
+      NET.ok=true;
+    }
+  }catch(e){ NET.ok=false; }
+  finally{ _flushing=false; renderNet(); }
+}
+function parkDead(ev, err){
+  try{ const d=JSON.parse(localStorage.getItem(DEAD_KEY)||'[]'); d.push({ev, err:String(err&&err.message)}); localStorage.setItem(DEAD_KEY, JSON.stringify(d)); }catch(_){}
+  console.error('rec_events rechazó un evento', ev, err);
+}
+function renderNet(){
+  const el=document.getElementById('net-badge'); if(!el) return;
+  const n=OUTBOX.length, off=!NET.ok || navigator.onLine===false;
+  if(n){ el.className='net-badge '+(off?'off':'pend'); el.textContent=(off?'Sin conexión · ':'Subiendo · ')+n; }
+  else if(off){ el.className='net-badge off'; el.textContent='Sin conexión'; }
+  else { el.className='net-badge ok'; el.textContent='✓ Guardado'; }
+}
+window.addEventListener('online', ()=>{ NET.ok=true; flushOutbox(); });
+window.addEventListener('offline', renderNet);
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') flushOutbox(); });
+setInterval(()=>{ if(OUTBOX.length) flushOutbox(); }, 15000);
+
+/* ── Local mirror (§8): mr_session_{slug}_{area}_{fecha} = { envio, events }. Protects work; never picks a page. ── */
+function mirrorPrefix(slug, area){ return `mr_session_${slug}_${area}_`; }
+let _mirrorT=null;
+function saveMirror(){
+  clearTimeout(_mirrorT);
+  _mirrorT=setTimeout(()=>{
+    if(!S.session) return;
+    const pre=mirrorPrefix(S.hub, S.area), key=pre+S.session.fecha;
+    try{
+      for(const k of Object.keys(localStorage)) if(k.startsWith(pre) && k!==key) localStorage.removeItem(k);
+      localStorage.setItem(key, JSON.stringify({ envio:S.envio, events:S.events }));
+    }catch(_){}
+  }, 300);
+}
+function latestMirror(slug, area){
+  try{
+    const pre=mirrorPrefix(slug, area);
+    const keys=Object.keys(localStorage).filter(k=>k.startsWith(pre)).sort();
+    if(!keys.length) return null;
+    const m=JSON.parse(localStorage.getItem(keys[keys.length-1])||'null');
+    return m && m.envio ? m : null;
+  }catch(_){ return null; }
+}
+
+/* ── Fold (§8): session state = scans + ajustes summed per sku_key. ── */
+function addEvents(evs){
+  let added=false;
+  for(const e of evs||[]){
+    const u=(e.detalle&&e.detalle.uid) || ('id'+e.id);
+    if(S.eventUids.has(u)) continue;
+    S.eventUids.add(u); S.events.push(e); added=true;
+  }
+  if(added){ S.events.sort((a,b)=>String(a.ts).localeCompare(String(b.ts))); fold(); }
+  return added;
+}
+function fold(){
+  const rec=new Map(), adj=new Map(), noEsp=new Map();
+  for(const e of S.events){
+    if(e.tipo!=='scan' && e.tipo!=='ajuste') continue;
+    const q=Number(e.cantidad)||0;
+    rec.set(e.sku_key, round2((rec.get(e.sku_key)||0)+q));
+    if(e.tipo==='ajuste' && e.detalle && e.detalle.ref) adj.set(e.detalle.ref, round2((adj.get(e.detalle.ref)||0)+q));
+    if(e.tipo==='scan' && !S.lines.has(e.sku_key) && !noEsp.has(e.sku_key))
+      noEsp.set(e.sku_key, { producto:e.producto, kgpz:(e.detalle&&e.detalle.kgpz)||'Pz' });
+  }
+  S.recibido=rec; S.adjByRef=adj; S.noEsperados=noEsp; // noEsperados feed the Phase 3 summary
+}
+function recibidoDe(sku){ return S.recibido.get(sku)||0; }
+
+/* ════════════════════════════════════════════════════════════════════════════════════
+   RECIBIR (§6.3) — blind: the enviado number is never rendered on this screen.
+   ════════════════════════════════════════════════════════════════════════════════════ */
+Object.assign(S, { hub:null, area:null, receptor:null, envio:null, session:null, lines:new Map(), catalog:new Map(),
+  catByCode:new Map(), events:[], eventUids:new Set(), recibido:new Map(), adjByRef:new Map(), noEsperados:new Map(),
+  current:null, corrigiendo:null });
+function openRecibir(data){
+  S.hub=INI.hub; S.area=INI.area; S.receptor=INI.receptor;
+  S.envio=data; S.session={ id:data.session_id, fecha:data.session_fecha };
+  S.lines=new Map(data.lines.map(l=>[l.sku_key, Object.assign(l, { _n:normName(l.producto) })]));
+  S.events=[]; S.eventUids=new Set(); S.current=null; S.corrigiendo=null;
+  buildCatalog();
+  const m=latestMirror(S.hub, S.area);
+  if(m && m.envio && m.envio.session_id===S.session.id) addEvents(m.events);
+  addEvents(OUTBOX.filter(e=>e.session_id===S.session.id));
+  fold();
+  document.getElementById('rec-hub').textContent=hubName(S.hub);
+  document.getElementById('rec-area').textContent=areaName(S.area);
+  document.getElementById('rec-receptor').textContent='👤 '+S.receptor;
+  showScreen('screen-recibir');
+  renderRecibir(); focusScan();
+  loadSorting(S.hub).then(()=>{ buildCatalog(); renderRecibir(); });
+  syncServerEvents();
+  flushOutbox();
+}
+async function syncServerEvents(){
+  // Phase 4 adds the 15 s poll (id=gt.last) for other phones; here: one full read on open.
+  const sid=S.session.id;
+  try{
+    const rows=await pgSelectAll('rec_events', `session_id=eq.${encodeURIComponent(sid)}&select=*`);
+    if(!S.session || S.session.id!==sid) return;
+    if(addEvents(rows)){ saveMirror(); renderRecibir(); }
+  }catch(_){ NET.ok=false; renderNet(); }
+}
+function leaveRecibir(){ S.current=null; flushOutbox(); goInicio(); }
+
+// Catalog = every product we can name: the file's non-envío rows + this hub's sorting. Used by
+// "Sin código" (§7.3) and to name a scanned barcode that isn't in the envío (§7.1).
+function buildCatalog(){
+  const cat=new Map(), byCode=new Map();
+  const add=(producto, barcode, kgpz)=>{
+    const sku=skuKeyOf(barcode, producto); if(!producto || cat.has(sku) || S.lines.has(sku)) return;
+    const c={ sku_key:sku, producto, barcode, kgpz:kgpz||'Pz', _n:normName(producto) };
+    cat.set(sku, c); if(barcode) byCode.set(codeKey(barcode), c);
+  };
+  for(const r of (S.envio&&S.envio.catalogo)||[]) add(r[0], r[1], r[2]);
+  for(const it of S.sortBC.values()) add(String(it[0]||'').trim(), cleanBC(it[1]), null);
+  S.catalog=cat; S.catByCode=byCode;
+}
+function renderRecibir(){
+  const total=S.lines.size; let got=0;
+  for(const k of S.lines.keys()) if(recibidoDe(k)>0) got++;
+  document.getElementById('rec-progress').innerHTML=`<b>${got}</b> / ${total} productos recibidos`;
+  document.getElementById('rec-bar').style.width=(total?Math.round(got*100/total):0)+'%';
+  document.getElementById('pend-count').textContent=`(${total-got})`;
+  let banner='';
+  if(S.sortStatus==='none') banner=`<div class="note">${escapeHtml(hubName(S.hub))} todavía no tiene archivo en Sorting Hub: las tarjetas no mostrarán canasta.</div>`;
+  else if(S.sortStatus==='err') banner=`<div class="note">No se pudo cargar el sorting de este hub: las tarjetas no mostrarán canasta.</div>`;
+  document.getElementById('rec-banner').innerHTML=banner;
+  renderCard(); renderRecent(); renderNet();
+}
+
+/* ── Scan input wiring (copied from sorting-hub): Enter, or a 300 ms pause, submits. ── */
+const SCAN_AUTO_SUBMIT_MS=300;
+let _scanT=null, _lastScan={ code:'', time:0 };
+function stripScanArtifacts(raw){ return String(raw||'').replace(/[\r\n\t\x1d]/g,'').trim(); }
+function extractEmbeddedGTIN(digitsOnly){ // GS1-128: a long scan may embed a 14-digit GTIN after AI "01"
+  if(digitsOnly.length<=14) return null;
+  const idx=digitsOnly.indexOf('01'); if(idx===-1) return null;
+  const gtin=digitsOnly.slice(idx+2, idx+16);
+  return gtin.length===14 ? gtin : null;
+}
+const scanEl=document.getElementById('scan-input');
+scanEl.addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); clearTimeout(_scanT); const v=scanEl.value; scanEl.value=''; processScan(v, scanMetodo()); }
+});
+scanEl.addEventListener('input', ()=>{
+  clearTimeout(_scanT); const v=scanEl.value; if(!v) return;
+  // Typing by hand (keyboard toggled on) waits for Enter; a scanner's burst auto-submits on the pause.
+  if(scanEl.getAttribute('inputmode')!=='none') return;
+  _scanT=setTimeout(()=>{ scanEl.value=''; processScan(v, 'scanner'); }, SCAN_AUTO_SUBMIT_MS);
+});
+scanEl.addEventListener('blur', ()=>setTimeout(()=>{ if(document.activeElement===document.body) focusScan(); }, 60));
+document.getElementById('screen-recibir').addEventListener('click', e=>{
+  if(!e.target.closest('button, a, input, select, label, textarea')) focusScan();
+});
+function scanMetodo(){ return scanEl.getAttribute('inputmode')==='none' ? 'scanner' : 'teclado'; }
+function toggleKeyboard(){
+  const on=scanEl.getAttribute('inputmode')==='none';
+  scanEl.setAttribute('inputmode', on?'numeric':'none');
+  document.getElementById('kb-toggle').style.borderColor=on?'var(--green)':'';
+  scanEl.placeholder=on?'Escribe el código y pulsa Enter':'Escanea un código…';
+  scanEl.blur(); setTimeout(()=>scanEl.focus(), 30);
+}
+function overlayOpen(){ return modalOpen() || document.getElementById('sheet').classList.contains('open') || document.getElementById('camera-overlay').classList.contains('open'); }
+// The scan field gets focus back unless something the receptor is typing into is open.
+function focusScan(){
+  const go=()=>{
+    if(!document.getElementById('screen-recibir').classList.contains('active') || overlayOpen() || S.corrigiendo) return;
+    if(S.current){ const q=document.getElementById('qty-input'); if(q && document.activeElement!==q) q.focus(); return; }
+    if(document.activeElement!==scanEl) scanEl.focus();
+  };
+  go(); setTimeout(go, 30);
+}
+
+/* ── Resolve a code to a product (§6.3) ── */
+function resolveCode(raw){
+  const k=codeKey(raw); if(!k) return null;
+  if(S.lines.has(k)) return { line:S.lines.get(k) };
+  const known=S.catByCode.get(k) || (()=>{ const n=imgName(S.imgDb[k]); return n ? { sku_key:k, producto:n, barcode:k, kgpz:'Pz' } : null; })();
+  if(known){
+    // A barcode the export left blank on an envío line: same product name → that line.
+    const byName=S.lines.get('name:'+normName(known.producto));
+    if(byName) return { line:byName };
+    return { product:known };
+  }
+  return null;
+}
+async function processScan(raw, metodo){
+  const code=stripScanArtifacts(raw); if(!code || overlayOpen()) return;
+  if(code.length<4){ toast('Escaneo incompleto — vuelve a escanear'); return; } // no real barcode is this short
+  const now=Date.now();
+  if(code===_lastScan.code && now-_lastScan.time<1500) return; // debounce a double trigger
+  _lastScan={ code, time:now };
+  let r=resolveCode(code);
+  if(!r){ const g=extractEmbeddedGTIN(code.replace(/\D/g,'')); if(g) r=resolveCode(g); }
+  const det={ codigo:code, teclado:metodo==='teclado'||undefined };
+  const m=metodo==='teclado' ? 'scanner' : metodo;
+  if(r && r.line){ vibrate(true); openCard({ ...r.line, enEnvio:true }, m, det); return; }
+  vibrate(false);
+  if(r && r.product){ await notInEnvio(r.product, m, det); return; }
+  // §6.3.3 — unknown barcode
+  const v=await showModal({ title:'Código no reconocido', html:`<p>Vuelve a escanear o búscalo por nombre.</p><p style="font-size:12px;color:var(--gray-500)">Código: ${escapeHtml(code)}</p>`,
+    buttons:[{label:'Volver a escanear', value:'again', kind:'primary'}, {label:'🔎 Buscar por nombre', value:'search', kind:'secondary'}] });
+  if(v==='search') openSinCodigo();
+}
+function vibrate(ok){ try{ if(navigator.vibrate) navigator.vibrate(ok?70:[60,50,60]); }catch(_){} }
+// §7.1 — not in the envío. Phase 2 adds up to 3 look-alikes from the envío ("Era este otro").
+async function notInEnvio(p, metodo, det){
+  const v=await showModal({ title:'Este producto no viene en el envío.',
+    html:`<div class="modal-prod">${imgTag(p.barcode, p.producto, 'thumb')}<div class="res-name">${nameHtml(p.producto)}</div></div>`,
+    buttons:[{label:'Volver a escanear', value:'again', kind:'primary'}, {label:'Sí, llegó este producto', value:'yes', kind:'danger'}] });
+  if(v==='yes') openCard({ ...p, enEnvio:false }, metodo, det);
+}
+
+/* ── Product card ── */
+function openCard(p, metodo, det={}){
+  const prev=S.current;
+  if(prev && prev.p.sku_key!==p.sku_key) toast(`No se registró «${prev.p.producto}» (sin cantidad)`, 3000);
+  S.current={ p, metodo, det };
+  renderCard();
+  const q=document.getElementById('qty-input'); if(q) setTimeout(()=>q.focus(), 40);
+  document.getElementById('card-area').scrollIntoView({ block:'start', behavior:'smooth' });
+}
+function cancelCard(){ S.current=null; renderCard(); focusScan(); }
+function renderCard(){
+  const el=document.getElementById('card-area');
+  const c=S.current;
+  if(!c){ el.innerHTML=S.events.some(e=>e.tipo==='scan')?'':'<div class="empty-hint">Escanea el primer producto para empezar.</div>'; return; }
+  const p=c.p, kg=p.kgpz==='Kg', pos=positionOf(p.barcode, p.producto), pres=presentacion(p.producto), ya=recibidoDe(p.sku_key);
+  const hadFocus=document.activeElement && document.activeElement.id==='qty-input';
+  el.innerHTML=`<div class="pcard ${p.enEnvio?'':'noesp'}">
+    ${p.enEnvio?'':'<div class="banner red">No viene en el envío — se registra como <b>No esperado</b></div>'}
+    <div class="pcard-top">
+      ${imgTag(p.barcode, p.producto, 'pcard-img')}
+      <div class="basket">${pos
+        ? `<div class="basket-l">${pos.palabra}</div><div class="basket-letter ${pos.letra.length>2?'long':''}">${escapeHtml(pos.letra)}</div><div class="basket-pos">${escapeHtml(pos.full)}</div>`
+        : `<div class="basket-none">Sin posición en el sorting de ${escapeHtml(hubName(S.hub))}</div>`}</div>
+    </div>
+    <div class="pcard-name">${nameHtml(p.producto)}</div>
+    <div class="pcard-tags">${pres?`<span class="pres-chip">${escapeHtml(pres.t)}</span>`:''}<span class="unit-chip ${kg?'kg':''}">${kg?'Kg':'Pz'}</span>${p.barcode?'':'<span class="tag">sin código</span>'}</div>
+    <div id="sibling-slot"></div>
+    ${ya>0?`<div class="banner gray">Ya registraste ${fmtQty(ya,p.kgpz)} ${unitOf(p.kgpz)} de este producto.</div>`:''}
+    ${kg?'<div class="banner blue">⚖️ Pésalo en la báscula</div>':''}
+    <label class="qty-label" for="qty-input">${kg?'kg (báscula)':'Piezas contadas'}</label>
+    <input id="qty-input" class="qty-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}">
+    <div class="qty-err" id="qty-err"></div>
+    <div class="pcard-actions"><button class="btn btn-secondary" onclick="cancelCard()">Cancelar</button><button class="btn btn-primary" onclick="confirmCard()">Registrar</button></div>
+  </div>`;
+  const q=document.getElementById('qty-input');
+  q.value=c.val||''; // background re-renders (sorting loaded, server sync) keep what was typed
+  wireQtyInput(q);
+  if(hadFocus) q.focus();
+}
+// A scanner burst that lands in the quantity field is a new scan, not a quantity.
+let _qtyScanT=null;
+function wireQtyInput(q){
+  q.addEventListener('keydown', e=>{
+    if(e.key!=='Enter') return;
+    e.preventDefault(); clearTimeout(_qtyScanT);
+    if(/^\d{8,}$/.test(q.value.trim())){ const v=q.value; q.value=''; S.current=null; renderCard(); processScan(v,'scanner'); return; }
+    confirmCard();
+  });
+  q.addEventListener('input', ()=>{
+    if(S.current) S.current.val=q.value;
+    document.getElementById('qty-err').textContent='';
+    clearTimeout(_qtyScanT);
+    if(/^\d{8,}$/.test(q.value.trim())) _qtyScanT=setTimeout(()=>{ const v=q.value; q.value=''; S.current=null; renderCard(); processScan(v,'scanner'); }, SCAN_AUTO_SUBMIT_MS);
+  });
+}
+// Pz: whole pieces · Kg: up to 2 decimals (§7.4). allowZero for corrections.
+function parseQty(raw, kgpz, allowZero=false){
+  const s=String(raw||'').trim().replace(',','.');
+  if(kgpz==='Kg' ? !/^\d+(\.\d{1,2})?$/.test(s) && !/^\.\d{1,2}$/.test(s) : !/^\d+$/.test(s)) return null;
+  const n=round2(Number(s));
+  return (n>0 || (allowZero && n===0)) ? n : null;
+}
+// Phase 2 slots in here: §7.2 "¿Revisaste pieza por pieza…?" and §7.4 over-enviado / typo guards.
+async function guardQty(p, qty){ return true; }
+async function confirmCard(){
+  const c=S.current; if(!c || c.busy) return;
+  const q=document.getElementById('qty-input'), err=document.getElementById('qty-err');
+  const qty=parseQty(q.value, c.p.kgpz);
+  if(qty==null){
+    err.textContent=c.p.kgpz==='Kg' ? 'Escribe el peso de la báscula (hasta 2 decimales).' : 'Escribe las piezas contadas (número entero).';
+    q.focus(); return;
+  }
+  c.busy=true;
+  const ok=await guardQty(c.p, qty);
+  c.busy=false;
+  if(!ok){ q.focus(); q.select(); return; }
+  recordEvent(makeEvent('scan', { sku_key:c.p.sku_key, producto:c.p.producto, cantidad:qty, metodo:c.metodo,
+    detalle:Object.assign({ esperado:c.p.enEnvio, kgpz:c.p.kgpz }, c.det) }));
+  S.current=null;
+  renderRecibir();
+  toast(`✓ ${fmtQty(qty,c.p.kgpz)} ${unitOf(c.p.kgpz)} · ${c.p.producto}`);
+  focusScan();
+}
+
+/* ── Últimos 10 escaneos + Corregir (ajuste event, never a delete — rule 4) ── */
+const MOTIVOS=['Conté mal','Escaneé el producto equivocado','Lo registré dos veces','Otro'];
+function scanQtyNow(ev){ return round2((Number(ev.cantidad)||0)+(S.adjByRef.get(ev.detalle&&ev.detalle.uid)||0)); }
+function kgpzOf(ev){ const l=S.lines.get(ev.sku_key); return l ? l.kgpz : ((ev.detalle&&ev.detalle.kgpz)||'Pz'); }
+function renderRecent(){
+  const el=document.getElementById('recent-list');
+  const scans=S.events.filter(e=>e.tipo==='scan').slice(-10).reverse();
+  if(!scans.length){ el.innerHTML='<div class="muted" style="font-size:13px">Todavía no hay escaneos.</div>'; return; }
+  el.innerHTML=scans.map(ev=>{
+    const u=ev.detalle&&ev.detalle.uid, kp=kgpzOf(ev), now=scanQtyNow(ev), orig=round2(ev.cantidad), line=S.lines.get(ev.sku_key);
+    const meta=[localHM(new Date(ev.ts)), ev.receptor!==S.receptor?escapeHtml(ev.receptor):'', ev.metodo==='manual'?'sin código':ev.metodo==='camara'?'cámara':'', line?'':'<span style="color:var(--red);font-weight:700">no esperado</span>'].filter(Boolean).join(' · ');
+    const editing=S.corrigiendo===u;
+    return `<div class="ritem"><div class="ritem-row">
+        ${line?imgTag(line.barcode, line.producto, 'thumb'):imgTag(ev.sku_key.startsWith('name:')?'':ev.sku_key, ev.producto, 'thumb')}
+        <div class="ritem-main"><div class="ritem-name">${nameHtml(ev.producto)}</div><div class="ritem-meta">${meta}</div></div>
+        <div><div class="ritem-qty">${now!==orig?`<s>${fmtQty(orig,kp)}</s>`:''}${fmtQty(now,kp)} <small>${unitOf(kp)}</small></div>
+          ${editing?'':`<button class="corr-btn" onclick="startCorregir('${escapeHtml(u)}')">Corregir</button>`}</div>
+      </div>${editing?corrBoxHtml(ev, kp, now):''}</div>`;
+  }).join('');
+}
+function corrBoxHtml(ev, kp, now){
+  return `<div class="corr-box">
+    <label class="qty-label">Cantidad correcta de este escaneo (${unitOf(kp)}) — registraste ${fmtQty(now,kp)}</label>
+    <input id="corr-qty" class="text-input" type="text" inputmode="${kp==='Kg'?'decimal':'numeric'}" autocomplete="off" placeholder="${kp==='Kg'?'0.00':'0'}">
+    <select id="corr-motivo"><option value="">Motivo…</option>${MOTIVOS.map(m=>`<option>${m}</option>`).join('')}</select>
+    <div class="qty-err" id="corr-err"></div>
+    <div class="pcard-actions"><button class="btn btn-secondary" onclick="cancelCorregir()">Cancelar</button><button class="btn btn-primary" onclick="saveCorregir()">Guardar corrección</button></div>
+  </div>`;
+}
+function startCorregir(u){
+  if(S.current) cancelCard();
+  S.corrigiendo=u; renderRecent();
+  const i=document.getElementById('corr-qty'); if(i) setTimeout(()=>i.focus(),40);
+}
+function cancelCorregir(){ S.corrigiendo=null; renderRecent(); focusScan(); }
+function saveCorregir(){
+  const ev=S.events.find(e=>e.tipo==='scan' && e.detalle && e.detalle.uid===S.corrigiendo); if(!ev) return;
+  const kp=kgpzOf(ev), before=scanQtyNow(ev), err=document.getElementById('corr-err');
+  const nv=parseQty(document.getElementById('corr-qty').value, kp, true), motivo=document.getElementById('corr-motivo').value;
+  if(nv==null){ err.textContent=kp==='Kg'?'Escribe el peso correcto (hasta 2 decimales, 0 si no era).':'Escribe las piezas correctas (0 si no era este producto).'; return; }
+  if(nv===before){ err.textContent='Es la misma cantidad que ya tenía.'; return; }
+  if(!motivo){ err.textContent='Elige el motivo.'; return; }
+  recordEvent(makeEvent('ajuste', { sku_key:ev.sku_key, producto:ev.producto, cantidad:round2(nv-before), metodo:ev.metodo,
+    detalle:{ ref:ev.detalle.uid, antes:before, despues:nv, motivo, kgpz:kp } }));
+  S.corrigiendo=null; renderRecibir();
+  toast(`✓ Corregido: ${fmtQty(before,kp)} → ${fmtQty(nv,kp)} ${unitOf(kp)}`);
+  focusScan();
+}
+
+/* ── Sheets: Sin código (§7.3) and Pendientes (§6.3) ── */
+function openSheet(title, html){
+  document.getElementById('sheet-title').textContent=title;
+  document.getElementById('sheet-body').innerHTML=html;
+  document.getElementById('sheet').classList.add('open');
+}
+function closeSheet(){
+  const s=document.getElementById('sheet'); if(!s.classList.contains('open')) return;
+  s.classList.remove('open'); document.getElementById('sheet-body').innerHTML=''; focusScan();
+}
+function openSinCodigo(){
+  openSheet('Buscar producto sin código', `<input id="sc-input" class="text-input" placeholder="Escribe parte del nombre (ej. almen 100)" autocomplete="off" autocorrect="off" spellcheck="false">
+    <div id="sc-results" style="margin-top:10px"><div class="muted">Los productos del envío aparecen primero.</div></div>`);
+  const i=document.getElementById('sc-input');
+  let t=null; i.addEventListener('input', ()=>{ clearTimeout(t); t=setTimeout(()=>renderSearch(i.value), 120); });
+  setTimeout(()=>i.focus(), 60);
+}
+let _searchHits=[];
+function searchProducts(q){
+  const words=normName(q).split(' ').filter(Boolean); if(!words.length) return [];
+  const hit=n=>words.every(w=>n.includes(w));
+  const inEnv=[], rest=[];
+  for(const l of S.lines.values()) if(hit(l._n)) inEnv.push(l);
+  for(const c of S.catalog.values()) if(hit(c._n) && !S.lines.has('name:'+c._n)) rest.push(c);
+  const byName=(a,b)=>a._n.localeCompare(b._n);
+  inEnv.sort(byName); rest.sort(byName);
+  return inEnv.map(l=>({ p:l, env:true })).concat(rest.slice(0, Math.max(10, 40-inEnv.length)).map(c=>({ p:c, env:false })));
+}
+function renderSearch(q){
+  const el=document.getElementById('sc-results'); if(!el) return;
+  _searchHits=searchProducts(q);
+  if(!String(q).trim()){ el.innerHTML='<div class="muted">Los productos del envío aparecen primero.</div>'; return; }
+  if(!_searchHits.length){ el.innerHTML='<div class="muted">Sin resultados. Prueba con menos letras o otra palabra.</div>'; return; }
+  // Still blind: never a quantity here
+  el.innerHTML=_searchHits.map((h,i)=>{
+    const pos=positionOf(h.p.barcode, h.p.producto);
+    return `<button class="res-item ${h.env?'':'grey'}" onclick="pickSearch(${i})">${imgTag(h.p.barcode, h.p.producto, 'thumb')}
+      <div style="flex:1;min-width:0"><div class="res-name">${nameHtml(h.p.producto)}</div>
+      <div class="res-sub">${h.env?'<span class="tag green">viene en el envío</span> ':'no viene en el envío · '}${h.p.kgpz==='Kg'?'Kg':'Pz'}${pos?' · '+escapeHtml(pos.full):''}</div></div></button>`;
+  }).join('');
+}
+async function pickSearch(i){
+  const h=_searchHits[i]; if(!h) return;
+  closeSheet();
+  if(h.env) openCard({ ...h.p, enEnvio:true }, 'manual');
+  else await notInEnvio(h.p, 'manual', {});
+}
+function openPendientes(){
+  const pend=[...S.lines.values()].filter(l=>!(recibidoDe(l.sku_key)>0)).map(l=>({ l, pos:positionOf(l.barcode, l.producto) }));
+  pend.sort((a,b)=>(a.pos?a.pos.full:'~').localeCompare(b.pos?b.pos.full:'~', 'es', {numeric:true}) || a.l._n.localeCompare(b.l._n));
+  // Products only — no quantities (blind), so the receptor hunts for boxes without being told how many.
+  openSheet(`Pendientes · ${pend.length}`, pend.length
+    ? `<div class="muted" style="margin-bottom:10px">Productos del envío que aún no escaneas.</div>`+pend.map(({l,pos})=>`<div class="res-item" style="cursor:default">
+        <div class="res-pos">${pos?escapeHtml(pos.letra):'—'}</div>${imgTag(l.barcode, l.producto, 'thumb')}
+        <div style="flex:1;min-width:0"><div class="res-name">${nameHtml(l.producto)}</div><div class="res-sub">${pos?escapeHtml(pos.full)+' · ':''}${l.kgpz==='Kg'?'Kg':'Pz'}${l.barcode?'':' · sin código'}</div></div></div>`).join('')
+    : `<div class="empty-hint">🎉 Ya escaneaste todos los productos del envío.</div>`);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════════════
+   CAMERA (copied from sorting-hub — BarcodeDetector, html5-qrcode fallback)
+   ════════════════════════════════════════════════════════════════════════════════════ */
+const CAMERA_FORMATS_NATIVE=['ean_13','ean_8','upc_a','upc_e','code_128'];
+let _cameraStream=null, _cameraRAF=null, _cameraDetecting=false, _html5Qrcode=null, _html5QrcodeLoaded=false;
+let _activeTrack=null, _torchMode=null, _torchOn=false, _cameraSession=0;
+function loadHtml5Qrcode(){
+  if(_html5QrcodeLoaded) return Promise.resolve();
+  return new Promise((resolve, reject)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js';
+    s.onload=()=>{ _html5QrcodeLoaded=true; resolve(); };
+    s.onerror=()=>reject(new Error('load-failed'));
+    document.head.appendChild(s);
+  });
+}
+function showCameraError(e){
+  const hint=document.getElementById('camera-hint'), name=e && e.name;
+  if(name==='NotAllowedError' || name==='PermissionDeniedError') hint.textContent='Permite la cámara en la configuración del navegador.';
+  else if(name==='NotFoundError' || name==='DevicesNotFoundError') hint.textContent='No se encontró una cámara en este dispositivo.';
+  else if(name==='NotSupportedError') hint.textContent='Este navegador no soporta la cámara aquí. Usa el escáner o el teclado.';
+  else hint.textContent='No se pudo abrir la cámara. Intenta de nuevo.';
+}
+function setTorchAvailability(caps){ document.getElementById('camera-torch-btn').style.display=(caps && caps.torch)?'inline-block':'none'; _torchOn=false; }
+async function toggleTorch(){
+  _torchOn=!_torchOn;
+  try{
+    if(_torchMode==='native' && _activeTrack) await _activeTrack.applyConstraints({ advanced:[{ torch:_torchOn }] });
+    else if(_torchMode==='html5qrcode' && _html5Qrcode) await _html5Qrcode.applyVideoConstraints({ advanced:[{ torch:_torchOn }] });
+  }catch(_){ _torchOn=!_torchOn; }
+}
+function onCameraDetect(code){ closeCamera(); processScan(code, 'camara'); }
+async function openCamera(){
+  const session=++_cameraSession;
+  document.getElementById('camera-hint').textContent='';
+  document.getElementById('camera-overlay').classList.add('open');
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ showCameraError({ name:'NotSupportedError' }); return; }
+  if('BarcodeDetector' in window) await startNativeDetector(session); else await startHtml5Qrcode(session);
+}
+async function startNativeDetector(session){
+  try{
+    const detector=new BarcodeDetector({ formats:CAMERA_FORMATS_NATIVE });
+    const stream=await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
+    if(session!==_cameraSession){ stream.getTracks().forEach(t=>t.stop()); return; }
+    _cameraStream=stream;
+    const video=document.getElementById('camera-video');
+    video.style.display='block'; video.srcObject=_cameraStream; await video.play();
+    _activeTrack=_cameraStream.getVideoTracks()[0]; _torchMode='native';
+    try{ setTorchAvailability(_activeTrack.getCapabilities()); }catch(_){ setTorchAvailability(null); }
+    _cameraDetecting=true;
+    const loop=async()=>{
+      if(!_cameraDetecting || session!==_cameraSession) return;
+      try{ const codes=await detector.detect(video); if(codes && codes.length){ onCameraDetect(codes[0].rawValue); return; } }catch(_){}
+      _cameraRAF=requestAnimationFrame(loop);
+    };
+    loop();
+  }catch(e){ if(session===_cameraSession) showCameraError(e); }
+}
+async function startHtml5Qrcode(session){
+  try{
+    await loadHtml5Qrcode();
+    if(session!==_cameraSession) return;
+    document.getElementById('camera-html5-container').style.display='block';
+    const F=Html5QrcodeSupportedFormats;
+    const instance=new Html5Qrcode('camera-html5-container', { formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128], verbose:false });
+    await instance.start({ facingMode:'environment' }, { fps:10, qrbox:{ width:280, height:140 } }, t=>onCameraDetect(t), ()=>{});
+    if(session!==_cameraSession){ instance.stop().catch(()=>{}).finally(()=>{ try{ instance.clear(); }catch(_){} }); return; }
+    _html5Qrcode=instance; _torchMode='html5qrcode';
+    try{ setTorchAvailability(_html5Qrcode.getRunningTrackCapabilities()); }catch(_){ setTorchAvailability(null); }
+  }catch(e){ if(session===_cameraSession) showCameraError(e); }
+}
+function closeCamera(){
+  _cameraSession++;
+  const ov=document.getElementById('camera-overlay'), wasOpen=ov.classList.contains('open');
+  ov.classList.remove('open');
+  document.getElementById('camera-hint').textContent='';
+  _cameraDetecting=false;
+  if(_cameraRAF){ cancelAnimationFrame(_cameraRAF); _cameraRAF=null; }
+  if(_cameraStream){ _cameraStream.getTracks().forEach(t=>t.stop()); _cameraStream=null; }
+  const video=document.getElementById('camera-video'); video.srcObject=null; video.style.display='none';
+  if(_html5Qrcode){ const inst=_html5Qrcode; _html5Qrcode=null; inst.stop().catch(()=>{}).finally(()=>{ try{ inst.clear(); }catch(_){} }); }
+  document.getElementById('camera-html5-container').style.display='none';
+  document.getElementById('camera-torch-btn').style.display='none';
+  _activeTrack=null; _torchMode=null; _torchOn=false;
+  if(wasOpen) focusScan();
+}
+
 /* ── BOOT ── */
 function registerServiceWorker(){
   if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
 }
 async function boot(){
-  document.getElementById('app-ver').textContent=APP_VERSION;
+  document.getElementById('app-ver').textContent=APP_VERSION+(IS_LOCAL?' · local (escribe en producción: usa Test hub)':'');
   registerServiceWorker();
+  renderInicio(); // always Inicio, nothing pre-selected (rule 7)
+  loadReceptores();
   await Promise.all([syncClock(), loadImageDB()]);
-  if(typeof renderInicio==='function') renderInicio();
+  _imgMemo.clear();
+  flushOutbox(); // events left over from an earlier visit
 }
 boot();
 </script>
