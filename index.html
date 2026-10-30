@@ -315,7 +315,7 @@ textarea.text-input{min-height:110px;font-size:15px}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'v1 · borrar envío';
+const APP_VERSION = 'v1 · borrar envío 2';
 
 /* ════════════════════════════════════════════════════════════════════════════════════
    SUPABASE — shared project with Armado CH + Sorting Hub (plan §3). This app writes ONLY to bucket
@@ -807,7 +807,8 @@ function goInicio(){
   if(INI.receptor) refreshActive();
 }
 // Borrar envío: a file uploaded by mistake (wrong hub, a test). Typed "borrar" confirms. The reception's events stay
-// (append-only) and an admin 'borrar' event ends it; the .json/.csv are removed, so the previous file becomes active.
+// (append-only) and an admin 'borrar' event ends it; the .json/.csv are removed and Inicio shows no envío (an older
+// file never comes back on its own; Admin → Respaldos can restore one).
 async function borrarEnvio(){
   const a=INI.active; if(!a || !a.data || a.closed || a.offline) return;
   const d=a.data;
@@ -845,6 +846,9 @@ async function findActiveEnvio(slug, area){
   if(!names.length) return {none:true};
   const path=`envios/${slug}/${area}/${names[0]}`;
   const data=JSON.parse(await sbFetch(path)); data._path=path;
+  // Borrar envío: after a delete, an older file must not come back as active — show nothing until a new upload
+  const del=await pgSelect('rec_events', `hub=eq.${encodeURIComponent(slug)}&area=eq.${area}&tipo=eq.admin&detalle->>accion=eq.borrar&select=ts&order=id.desc&limit=1`);
+  if(del.length && Date.parse(del[0].ts)>Date.parse(data.uploadedAt)) return {none:true};
   const closed=await sessionClosedAt(data.session_id);
   return { path, data, closed, parciales: closed ? [] : await sessionParciales(data.session_id) };
 }

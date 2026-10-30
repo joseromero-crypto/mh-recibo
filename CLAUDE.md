@@ -81,8 +81,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   Retool barcode), sistema_dice, sistema_dice_codigo }. Admin → Códigos groups them (7 / 30 days) with a CSV for
   comercial. Plain "Sin código" searches are not flagged.
 - Borrar envío (Inicio, open reception only): typed "borrar" confirms. Appends `admin` {accion:'borrar', escaneos}
-  (events stay — append-only), then deletes that envío's .json/.csv (`sbDeleteEnvio` only accepts `envios/…`), so the
-  previous file becomes active. closedState/sessionClosedAt/listCerradas/Admin/Apps Script treat it as ended.
+  (events stay — append-only), then deletes that envío's .json/.csv (`sbDeleteEnvio` only accepts `envios/…`).
+  `findActiveEnvio` returns none when a `borrar` is newer than the newest file, so an older file never reappears. closedState/sessionClosedAt/listCerradas/Admin/Apps Script treat it as ended.
 - Blind count: `esperado` is never rendered on Recibir, Sin código, Pendientes, Canastas or Revisar ahora; it
   appears only in Resumen y cierre and Recepciones.
 - Multi-device: `syncServerEvents()` reads `id=gt.S.lastId` every 15 s while Recibir/Resumen is visible;
