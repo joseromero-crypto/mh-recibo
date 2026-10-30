@@ -1,4 +1,46 @@
-# MH Recibo — overnight handoff (2026-10-29 → 30)
+# MH Recibo — handoff
+
+## 2026-10-30 — full QA run with the real files (commit `de6bcb5`)
+Two full receptions on `test-hub` with your two fixtures (not your MH Contry test reception, to keep the real hub's
+history clean). Deliberate errors, with a separate record of what should be received, checked against the app.
+- **Abarrotes (105 lines, 732 pz):**
+  - Errors put in on purpose: 5 lines missing; 2 short by one; 2 with an extra piece (counted twice); a 720-for-72
+    typo; a 200-for-20 confirmed then recounted; the wrong jam flavor scanned and moved with "Era este otro"; an
+    Oreo that's not in the envío recorded as No esperado; an unknown code; a 2-digit code; the barcodeless
+    Hojarascas found by search; a double trigger; a scanner burst into the quantity field; a found box recounted
+    in the summary.
+  - Result: Recibido matched on all 106 rows of the report.
+- **Carnes (132 lines, 26 Kg, 26 without barcode):**
+  - Errors put in on purpose: every Kg line weighed with ±1–3% scale variance; one 15% short; one 12% over
+    (counted twice); a 10× typo; a comma decimal; a 3-decimal entry; a decimal typed for a Pz item; 3 Pz lines
+    missing; two weighings for one line.
+  - Result: matched on all 132 rows. 19 lines came out "Completo (variación de báscula)", 5 exact, 1 Parcial,
+    1 Sobrante.
+- Every barcodeless Carnes product is in the top 5 search results after typing 2 words.
+
+**Fixed:**
+- 40 for 4: the "mayor a lo enviado" check ran before the typo check, so "¿Seguro que son 40?" never showed.
+  The typo check now runs first, and its primary button is Corregir.
+- "Empezar sin archivo" is off (`SIN_ARCHIVO_ENABLED = false`). The code is kept for emergencies.
+- "Primero cerrar" opened the summary under the old-file pop-up (a loop) and dropped the chosen file. After
+  closing it now offers "Ahora carga el archivo nuevo".
+- Summary: answered rows moved away, so tapping one spot over and over confirmed everything (rule 2). The order
+  now stays fixed while the summary is open.
+- Hermanos: the plan's rule (same name, other size) found **0** pairs in the real Abarrotes file. It now also
+  catches variants and flavors of the same product type (same first word): frijoles normal vs bajos en grasa,
+  mermelada higo/fresa, molida 95/5 vs 98/2, camarón 41/50 vs 16/20, tortillas azul/amarillo, tamal carne/frijol…
+  That's 4 pairs in Abarrotes and 16 in Carnes, all real mix-up risks.
+- A 65.11 kg line triggered "¿Seguro?" on a correct 63.81 kg weighing. The 50 kg / 200 pz limits now apply only
+  when the number is also more than 1.5× what was sent.
+- Armado explanation for a Sobrante said "pérdida física". It now says "llegó de más".
+- Corregir only reached the last 10 scans. A "Ver todos los escaneos" link was added.
+- A scanner burst into the quantity field now warns "No se registró «X»" for the product left open.
+
+**Still not tested:** a real phone, a Bluetooth scanner, the camera, the Apps Script.
+
+---
+
+# Overnight handoff (2026-10-29 → 30)
 
 Phases 2, 3, 4, 5 and 5b are built, each tested on `test-hub` at localhost (phone width) and committed.
 **Nothing is pushed** — push from GitHub Desktop when you're happy (Netlify deploys `main`).
@@ -34,7 +76,7 @@ Phases 2, 3, 4, 5 and 5b are built, each tested on `test-hub` at localhost (phon
   over is stored and flagged Sobrante. Kg only counts as over beyond ±max(5%, 0.10 kg). Typo guard above 3× or
   200 pz / 50 kg. Enviado is never shown.
 - §6.7 stale-file modal, on opening Recibir and at the first scan. Ignorar lasts for that file for the rest of the day.
-- §6.2b **Empezar sin archivo**. Cards still show photo and basket. Products are named from the previous file's
+- §6.2b **Empezar sin archivo** (switched off on 2026-10-30, see above). Cards still show photo and basket. Products are named from the previous file's
   catalog; an unknown code can be counted as "Código {n}"; the unit (Pz/Kg) is picked on the card when unknown.
   Uploading the file later reuses the same reception and opens **Revisar ahora** (not in the envío / above
   enviado / has a sibling), where each item is "Recontar" or "Confirmo".

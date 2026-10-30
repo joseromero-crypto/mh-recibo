@@ -29,7 +29,9 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 6. Never write to Retool.
 
 ## Status (2026-10-30)
-- **Phases 0–5b built and tested on test-hub** (localhost, phone width). Phase 6 (real-device QA at MH Contry next to
+- **Phases 0–5b built; full QA run with both real files passed (see HANDOFF.md)**. "Empezar sin archivo" is
+  switched off (`SIN_ARCHIVO_ENABLED`) on Jose's request: receptors must upload before scanning.
+- Phases 0–5b were tested on test-hub (localhost, phone width). Phase 6 (real-device QA at MH Contry next to
   the Google Sheet) is the next step and needs people + phones. See `HANDOFF.md` for the overnight session log.
 - **Jose must still:** run `sql/v1-alerts-rpc.sql`; create `recibo/config/admin_pin.txt` (Admin is locked until
   then); fill Admin → Receptores; paste `alertas/apps-script.gs` into script.google.com (`probar`, then `instalar`)
@@ -61,8 +63,10 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   `kg_sin_variacion`), `cerrar` (detalle: reporte path, lineas, diferencias, badges, receptores), `admin`
   (`accion`: `reabrir` | `restaurar`). Closed = latest of cerrar vs admin reabrir (`closedState`, `sessionClosedAt`,
   `listCerradas` all apply the same rule).
-- Guards live in `guardQty(card, qty)`: over-enviado (Kg: beyond ±max(5%, 0.10 kg)) → "Vuelve a contar" once, then
-  stored with `sobrante`; typo guard (>3× or >200 pz / >50 kg); sibling qty>1 confirm (Pz only).
+- Guards live in `guardQty(card, qty)`, in this order: typo (>3× enviado, or >200 pz / >50 kg AND >1.5× enviado;
+  Corregir is primary); over-enviado (Kg: beyond ±max(5%, 0.10 kg)) → "Vuelve a contar" once, then stored with
+  `sobrante`; sibling qty>1 confirm (Pz only). Hermanos = `isSibling`: same familyKey, or same first word and
+  (one name contains the other | one word swapped). Resumen order is frozen in `S.resumenOrder` on open (rule 2).
 - Blind count: `esperado` is never rendered on Recibir, Sin código, Pendientes, Canastas or Revisar ahora; it
   appears only in Resumen y cierre and Recepciones.
 - Multi-device: `syncServerEvents()` reads `id=gt.S.lastId` every 15 s while Recibir/Resumen is visible;
