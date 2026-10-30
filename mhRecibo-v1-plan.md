@@ -72,7 +72,7 @@ ARMADO_BUCKET = 'solcitudesarmado'        // read-only from this app
   `solcitudesarmado/reports/*`. It never writes, renames or alters anything of Armado's.
 - Any SQL for this app touches only `rec_*` objects.
 
-### 3.1 SQL to run once (Supabase SQL editor, Armado CH project)
+### 3.1 SQL to run once (Supabase SQL editor, Armado CH project) — consolidated in `sql/v1-setup.sql`
 
 > Since 2026-10-30 Supabase no longer auto-grants Data API access to new `public` tables — the `grant`s
 > below are required or every call returns `permission denied`.
