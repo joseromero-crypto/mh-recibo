@@ -303,21 +303,51 @@ What is checked (all America/Monterrey):
 2. **End of day (21:00):** reception opened but not closed → "recepción abierta sin cerrar".
 3. **Daily digest (21:00), one email for all active hubs:** each hub+área ✓ recibido (líneas, diferencias,
    "Kg sin variación" badge) / ⚠ abierta sin cerrar / ✗ sin recepción / ⏸ pausado.
-- Abarrotes false alarm guard: if Armado CH has no assembly for that hub for the day's shipment, skip alert 1
-  ("sin envío"). Carnes has no Armado data → relies on the switch / pause.
+- **"Sin envío" guard (Abarrotes):** Abarrotes is assembled the **previous working day** — Monday's reception was
+  assembled on **Saturday**. Before alert 1, look in Armado CH (`picks` / `reports/`) for an assembly of that hub
+  with `order_date` = previous working day (skip Sunday). None → no alert, digest shows "sin envío".
+- **Carnes** is not assembled in Armado CH yet (planned). Until then it relies on the switch / pause; when Carnes
+  moves into Armado, the same guard applies (same-day assembly).
+- **Irregular hubs (Condesa, Zapopan — one reception every 1–2 weeks):** mode `tras_armado` instead of a daily
+  deadline: when Armado shows an assembly finished for them, expect a reception within `dias_gracia` (default 3)
+  days; otherwise alert "envío armado el {fecha} sin recepción".
+
+**Default schedule (from Jose, 2026-10-29).** `hora_limite` = end of the arrival window + ~1–2 h.
+
+| Hub | Área | Días | Llegada | Alerta si nada a las |
+|---|---|---|---|---|
+| MH Contry | Abarrotes | Lun–Sáb | 9–11 h | 12:30 |
+| MH Cumbres | Abarrotes | Lun–Sáb | 9–11 h | 12:30 |
+| MH San Nicolás | Abarrotes | Lun–Sáb | 9–11 h | 12:30 |
+| MH Guadalupe | Abarrotes | Lun–Sáb | noche anterior (comparte almacén con CH), desde 6 h | 9:00 |
+| MH Avícola | Abarrotes | Lun–Sáb | ~15 h | 17:00 |
+| MH Contry | Carnes | Lun–Vie | ~15 h | 17:00 |
+| MH Cumbres | Carnes | Lun–Vie | ~15 h | 17:00 |
+| MH San Nicolás | Carnes | Lun–Vie | ~13 h | 15:00 |
+| MH Avícola | Carnes | Lun–Vie | ~15 h | 17:00 |
+| MH Guadalupe | Carnes | ? (Q10) | ? | off until confirmed |
+| MH Condesa | Abarrotes + Carnes | irregular | varía | mode `tras_armado` |
+| MH Zapopan | Abarrotes + Carnes | irregular | varía | mode `tras_armado` |
+
+For later (FyV, not in v1): SN ~13 h, Cumbres/Contry ~15 h, Guadalupe ~12 h, Avícola ~15 h; Norte Mon–Sat.
+Alerts go to **jose.romero@calii.com**.
 
 Channels:
 - **In app:** Admin shows an Alertas feed (from `rec_alerts`) with a count badge on entering Admin.
 - **Email:** sent server-side — a Supabase **Edge Function** (`rec-alertas`) run by **pg_cron** every 15 min
   reads `rec_alert_config` + `rec_events`, writes `rec_alerts`, and sends email through an email API
-  (Resend or similar). The email API key lives only in the Edge Function's secrets, never in `index.html`.
+  (**Resend**). Resend's free tier (3,000 emails/month) can send from its test address `onboarding@resend.dev`
+  **to the account owner's own email without verifying a domain** — enough, since the only recipient is Jose.
+  Jose creates the account with jose.romero@calii.com and gives Claude the API key. The email API key lives only in the Edge Function's secrets, never in `index.html`.
   Each alert is sent once (`rec_alerts` unique on hub+área+fecha+tipo).
 
 ```sql
 create table public.rec_alert_config (
   hub text not null, area text not null, activo boolean not null default true,
   email boolean not null default true, dias int[] not null default '{1,2,3,4,5,6}', -- 0=Sun
-  hora_limite time not null default '11:00', pausado_hasta date,
+  hora_limite time not null default '12:30', pausado_hasta date,
+  modo text not null default 'diario',  -- 'diario' | 'tras_armado'
+  dias_gracia int not null default 3,
   updated_at timestamptz not null default now(), primary key (hub, area)
 );
 create table public.rec_alerts (
@@ -447,11 +477,10 @@ directos, so all items are treated alike · lifecycle §6.7 · admin safety net 
 visits · type-ahead with photos for barcode-less items · **expected qty = `Envío (kg o pz)` > 0** (checked on the
 real Contry file) · scope = Abarrotes + Carnes; Fruta y verdura later · Sorting Hub already in the shared project · one reception per hub+área per day · receptor picked from a list
 · summary keeps file order with search/filters/sort · Carnes may arrive before its file → "Empezar sin archivo" ·
-Carnes file checked: Kg in decimals, 20% lines without barcode, `Requiere confirmar` unreliable · Kg items are always weighed; variance is expected, zero variance is questioned
+Carnes file checked: Kg in decimals, 20% lines without barcode, `Requiere confirmar` unreliable · alert schedule per hub+área (§6.9) · Kg items are always weighed; variance is expected, zero variance is questioned
 (§7.6).
 
-- **Q9 Alertas:** which email(s) receive them; usual truck arrival per hub+área to set each `hora_limite`;
-  which days each área ships (Abarrotes Mon–Sat? Carnes Mon–Fri?); email provider (Resend free tier is enough).
+- **Q10 MH Guadalupe Carnes:** does Guadalupe receive Carnes, and at what time?
 - **Q8 Fresh Carnes (Tue/Thu):** a fresh file would confirm the same columns; not blocking.
 
 ## 12. Not in v1
