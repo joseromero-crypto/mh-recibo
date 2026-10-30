@@ -1,0 +1,102 @@
+# MH Recibo — overnight handoff (2026-10-29 → 30)
+
+Phases 2, 3, 4, 5 and 5b are built, each tested on `test-hub` at localhost (phone width) and committed.
+**Nothing is pushed** — push from GitHub Desktop when you're happy (Netlify deploys `main`).
+
+| Commit | What |
+|---|---|
+| `6b62f76` | Phase 2 — guards (§7.1–7.4), families, stale-file warning, Empezar sin archivo |
+| `f92c537` | Phase 3 — Resumen y cierre, report CSV, Recepciones (registration view) |
+| `9acf57c` | Phase 4 — 15 s polling between phones, remote close / file replace |
+| `a3d5928` | Phase 5 — Canastas, Armado enrichment from `picks` |
+| `f3290fa` | Phase 5b — Admin + alert RPC SQL + Apps Script |
+| `e929001` | Review fixes (no corrections after close, Armado reset per reception) |
+
+## You need to do (before real use)
+1. **Run `sql/v1-alerts-rpc.sql`** in the Supabase SQL editor. It only creates two `rec_*` functions the Apps
+   Script uses to write alerts; until then the script can't record alerts.
+2. **Create `recibo/config/admin_pin.txt`** (Storage → recibo → config) with the PIN. Admin shows
+   "Todavía no hay PIN" until it exists.
+3. **Admin → Receptores**: type each hub's names (one per line) → Guardar. Until then Inicio asks for a free-text name.
+4. **Apps Script**: script.google.com from your Calii account → paste `alertas/apps-script.gs` → set `APP_URL`
+   to the real Netlify URL → run `probar` (authorize) → run `instalar` (15-min trigger).
+5. **Admin → Alertas**: every hub+área starts **off**. Set days, hora límite (or "Tras armado" for Condesa/Zapopan)
+   and switch on.
+
+## What each phase does
+**Phase 2 — guards**
+- §7.1: "Este producto no viene en el envío" shows up to 3 look-alikes from the envío (same family first, then
+  shared words), with photo and position. "Era este otro" moves the scan to that line, and the scan's detalle keeps
+  what was actually scanned.
+- §7.2: the card shows a yellow "Ojo: también vienen {hermano}. Cuenta por separado" banner with photos. For more
+  than 1 piece it asks "¿Revisaste pieza por pieza que las {n} son {presentación}?".
+- §7.4: if the running total exceeds enviado, "Vuelve a contar" clears the field. A second count that is still
+  over is stored and flagged Sobrante. Kg only counts as over beyond ±max(5%, 0.10 kg). Typo guard above 3× or
+  200 pz / 50 kg. Enviado is never shown.
+- §6.7 stale-file modal, on opening Recibir and at the first scan. Ignorar lasts for that file for the rest of the day.
+- §6.2b **Empezar sin archivo**. Cards still show photo and basket. Products are named from the previous file's
+  catalog; an unknown code can be counted as "Código {n}"; the unit (Pz/Kg) is picked on the card when unknown.
+  Uploading the file later reuses the same reception and opens **Revisar ahora** (not in the envío / above
+  enviado / has a sibling), where each item is "Recontar" or "Confirmo".
+- Recontar = the receptor types the total → stored as an `ajuste` with the difference.
+
+**Phase 3 — close**
+- Resumen y cierre: Enviado · Recibido · Diferencia · Estado, differences first. Each one needs its own
+  "Recontar" or "Confirmo la diferencia". A confirmation stops counting if the number changes later.
+- §7.6: with at least 3 Kg lines and 80% or more matching exactly, closing asks "¿Se pesaron todos…?"
+  [Sí / Volver a pesar]. "Sí" adds the **Kg sin variación** badge. 80% or more whole kilograms gives the
+  "Kg en números enteros" badge.
+- Closing first uploads anything left in the outbox and pulls in other phones' scans. It then writes
+  `reportes/{hub}/{area}/{fecha}_{HH-MM}_{receptor}.csv` (§9 columns, quoted, CRLF) and adds the `cerrar` event.
+- **Recepciones cerradas** (link on Inicio, and "Ver resumen" when the file was already received) lists the last
+  30 days. Each one opens with big Recibido numbers, tick boxes, search, filters (solo diferencias, estado, Kg/Pz,
+  pasillo) and sort (archivo, A-Z, pasillo, diferencia). "Descargar CSV" adds the BOM for Excel.
+
+**Phase 4 — several phones.** Every 15 s while Recibir or Resumen is open, the app reads only new `rec_events`.
+- Scans from other phones show up in the totals and in the recent list.
+- If another phone closes the reception, scanning locks and a "Ver resumen" link appears.
+- If another phone replaces the file, the new file is loaded.
+
+**Phase 5**
+- 🧺 Canastas lists what was received grouped by aisle letter.
+- For Abarrotes, Resumen and the report add the **Armado** number from Armado's `picks`, and say where each
+  difference came from (§5.3).
+- Real-data check: for MH Contry 29 Oct, Armado matched the envío file on all 105 lines.
+
+**Phase 5b — Admin** (🔒 link at the bottom of Inicio)
+- Recepciones: every hub, last 14 days, open or closed, with Ver, CSV and Reabrir.
+- Respaldos: make an old envío file active again.
+- Receptores and Alertas: the alert schedule per hub+área, plus a feed of recent alerts.
+- Every admin action on a reception is a `tipo='admin'` event. There are no deletes anywhere.
+
+## Bugs found and fixed during testing
+- The close button stayed disabled after the pending events finished uploading. The summary now redraws when the
+  upload finishes.
+- In the Recepciones filter, the aisle came out as "J · 8" for positions without estante/nivel; it now shows "J".
+- The recent list showed "Código 76…" for scans made without a file even after the file named the product.
+
+## Things to know / decide
+- **I saw a real reception open on prod:** "MH Contry · Abarrotes, abierta desde 23:28, receptor *jose*". It wasn't
+  me, and I didn't touch it. It's probably you trying the deployed Phase 1.
+- **Assembly-date guard in the alert script:** the plan says Abarrotes is assembled the previous working day, but
+  `picks` for MH Contry has `fecha = order_date = 2026-10-29`, the same date as that day's envío file. The script
+  accepts any assembly from the previous working day through today. Check against a real Monday.
+- Starting "sin archivo" is offered when there's no reception open today. A closed reception from today doesn't
+  block a second sin-archivo one; the plan's "one reception per day" didn't cover that case.
+- "Abierta desde" in Admin uses the first event of the reception.
+- The Apps Script `APP_URL` is a guess (`https://mh-recibo.netlify.app`). Fix it.
+
+## Not tested (needs Phase 6)
+- A real phone, a Bluetooth scanner, the camera, two physical phones at once (simulated by inserting another
+  device's rows), Apps Script runs (needs the SQL + your Google account), real email delivery.
+
+## Test data written to prod (all `test-hub`, harmless)
+- `rec_events` rows with `hub='test-hub'`.
+- `recibo/envios/test-hub/…` and `recibo/reportes/test-hub/…`.
+- One `rec_alert_config` row for test-hub, switched off.
+- Nothing was written outside `recibo` / `rec_*`; Armado and Sorting Hub were only read.
+
+## Next: Phase 6
+1. Push, then open the Netlify URL on the MH Contry receptor's phone.
+2. Do the setup steps above.
+3. Run one real Abarrotes reception next to the Google Sheet for a few days and compare the differences.
