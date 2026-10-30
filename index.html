@@ -297,7 +297,7 @@ mark{background:var(--yellow-light);color:inherit;padding:0 3px;border-radius:4p
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'v1 · fase 3';
+const APP_VERSION = 'v1 · fase 4';
 
 /* ════════════════════════════════════════════════════════════════════════════════════
    SUPABASE — shared project with Armado CH + Sorting Hub (plan §3). This app writes ONLY to bucket
@@ -1077,7 +1077,7 @@ function openRecibir(data, opts={}){
   S.hub=INI.hub; S.area=INI.area; S.receptor=INI.receptor;
   S.session={ id:data.session_id, fecha:data.session_fecha };
   setEnvio(data);
-  S.events=[]; S.eventUids=new Set(); S.current=null; S.corrigiendo=null; S.staleAsked=false;
+  S.events=[]; S.eventUids=new Set(); S.current=null; S.corrigiendo=null; S.staleAsked=false; S.lastId=0; S.closedInfo=null;
   buildCatalog();
   const m=latestMirror(S.hub, S.area);
   if(m && m.envio && m.envio.session_id===S.session.id) addEvents(m.events);
@@ -1105,15 +1105,50 @@ async function staleCheck(){
   try{ localStorage.setItem('mr_stale_ign_'+S.envio._path, todayStr()); }catch(_){ S.staleIgnMem=S.envio._path+todayStr(); }
   return true;
 }
+// §8 multi-device: one full read on open, then every 15 s only rows newer than the last id seen
+// (rec_events is append-only, so id=gt.{last} never misses a row once it is visible).
 async function syncServerEvents(){
-  // Phase 4 adds the 15 s poll (id=gt.last) for other phones; here: one full read on open.
-  const sid=S.session.id;
+  if(!S.session) return;
+  const sid=S.session.id, since=S.lastId||0;
   try{
-    const rows=await pgSelectAll('rec_events', `session_id=eq.${encodeURIComponent(sid)}&select=*`);
+    const rows=await pgSelectAll('rec_events', `session_id=eq.${encodeURIComponent(sid)}${since?`&id=gt.${since}`:''}&select=*`);
     if(!S.session || S.session.id!==sid) return;
-    if(addEvents(rows)){ saveMirror(); renderRecibir(); }
+    for(const r of rows) if(r.id>(S.lastId||0)) S.lastId=r.id;
+    const fresh=rows.filter(r=>!S.eventUids.has((r.detalle&&r.detalle.uid)||('id'+r.id)));
+    if(addEvents(rows)){ saveMirror(); await onRemoteEvents(fresh); renderRecibir(); if(screenActive('screen-resumen') && !S.closing) renderResumen(); }
+    if(!NET.ok){ NET.ok=true; renderNet(); }
   }catch(_){ NET.ok=false; renderNet(); }
 }
+function screenActive(id){ return document.getElementById(id).classList.contains('active'); }
+// What other phones did: closed the reception, reopened it (admin), or replaced the file
+async function onRemoteEvents(evs){
+  for(const e of evs){
+    if(e.tipo==='reemplazo' && e.detalle && e.detalle.envio && e.detalle.envio!==S.envio._path){
+      try{
+        const data=JSON.parse(await sbFetch(e.detalle.envio)); data._path=e.detalle.envio;
+        if(data.session_id!==S.session.id) continue;
+        setEnvio(data); buildCatalog(); fold();
+        toast(`${e.receptor||'Otro teléfono'} cargó un archivo nuevo — lo escaneado se conserva`, 4000);
+        if(S.current && S.current.p.enEnvio!==undefined){ const l=S.lines.get(S.current.p.sku_key); if(l) S.current.p=Object.assign({}, l, { enEnvio:true }); }
+      }catch(_){}
+    }
+  }
+  S.closedInfo=closedState();
+  if(S.closedInfo && S.current){ S.current=null; }
+}
+// Latest of cerrar / admin reabrir in this session's events
+function closedState(){
+  let st=null;
+  for(const e of S.events){
+    if(e.tipo==='cerrar') st=Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id }, e.detalle||{});
+    else if(e.tipo==='admin' && e.detalle && e.detalle.accion==='reabrir') st=null;
+  }
+  return st;
+}
+setInterval(()=>{
+  if(!S.session || document.visibilityState!=='visible') return;
+  if(screenActive('screen-recibir') || screenActive('screen-resumen')) syncServerEvents();
+}, 15000);
 function leaveRecibir(){ S.current=null; flushOutbox(); goInicio(); }
 
 // Catalog = every product we can name: the file's non-envío rows + this hub's sorting. Used by
@@ -1149,8 +1184,12 @@ function renderRecibir(){
   if(rev.length) banner+=`<button class="btn btn-warn btn-block" style="margin-bottom:10px" onclick="openRevisar()">⚠ Revisar ahora · ${rev.length}</button>`;
   if(S.sortStatus==='none') banner+=`<div class="note">${escapeHtml(hubName(S.hub))} todavía no tiene archivo en Sorting Hub: las tarjetas no mostrarán canasta.</div>`;
   else if(S.sortStatus==='err') banner+=`<div class="note">No se pudo cargar el sorting de este hub: las tarjetas no mostrarán canasta.</div>`;
+  if(S.closedInfo) banner=`<div class="err-box"><b>Esta recepción ya se cerró</b> (${escapeHtml(S.closedInfo.receptor||'')}, ${localHM(new Date(S.closedInfo.ts))}). Ya no se puede escanear.
+    <button class="btn btn-secondary btn-block" style="margin-top:8px" onclick="openRecepcion(S.closedInfo,'inicio')">📊 Ver resumen</button></div>`;
+  const otros=receptoresDeSesion().filter(r=>r!==S.receptor);
+  document.getElementById('rec-receptor').textContent='👤 '+S.receptor+(otros.length?` (+${otros.length})`:'');
   document.getElementById('rec-banner').innerHTML=banner;
-  document.getElementById('rec-footer').innerHTML = sinArch
+  document.getElementById('rec-footer').innerHTML = S.closedInfo ? '' : sinArch
     ? `<div class="muted" style="text-align:center">Para cerrar la recepción, primero sube el archivo del envío.</div>`
     : `<button class="btn btn-primary btn-block" onclick="openResumen()">✅ Terminé: revisar y cerrar</button>`;
   renderCard(); renderRecent(); renderNet();
@@ -1215,6 +1254,7 @@ function resolveCode(raw){
 async function processScan(raw, metodo){
   const code=stripScanArtifacts(raw); if(!code || overlayOpen()) return;
   if(code.length<4){ toast('Escaneo incompleto — vuelve a escanear'); return; } // no real barcode is this short
+  if(S.closedInfo){ toast('Esta recepción ya se cerró'); return; }
   const now=Date.now();
   if(code===_lastScan.code && now-_lastScan.time<1500) return; // debounce a double trigger
   _lastScan={ code, time:now };
@@ -1450,7 +1490,7 @@ function renderRecent(){
     const editing=S.corrigiendo===u;
     return `<div class="ritem"><div class="ritem-row">
         ${line?imgTag(line.barcode, line.producto, 'thumb'):imgTag(ev.sku_key.startsWith('name:')?'':ev.sku_key, ev.producto, 'thumb')}
-        <div class="ritem-main"><div class="ritem-name">${nameHtml(ev.producto)}</div><div class="ritem-meta">${meta}</div></div>
+        <div class="ritem-main"><div class="ritem-name">${nameHtml(line?line.producto:ev.producto)}</div><div class="ritem-meta">${meta}</div></div>
         <div><div class="ritem-qty">${now!==orig?`<s>${fmtQty(orig,kp)}</s>`:''}${fmtQty(now,kp)} <small>${unitOf(kp)}</small></div>
           ${editing?'':`<button class="corr-btn" onclick="startCorregir('${escapeHtml(u)}')">Corregir</button>`}</div>
       </div>${editing?corrBoxHtml(ev, kp, now):''}</div>`;
@@ -1624,6 +1664,7 @@ function receptoresDeSesion(){ const s=new Set(); for(const e of S.events) if(e.
 
 function openResumen(){
   if(!S.session) return;
+  if(S.closedInfo){ openRecepcion(S.closedInfo,'inicio'); return; }
   if(S.envio.sinArchivo){ toast('Sube el archivo del envío antes de cerrar la recepción', 3500); return; }
   S.current=null; S.corrigiendo=null; closeSheet();
   document.getElementById('resumen-title').textContent=`${hubName(S.hub)} · ${areaName(S.area)}`;
