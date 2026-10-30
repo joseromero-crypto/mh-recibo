@@ -1,10 +1,343 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MH Recibo</title>
-<style>body{font-family:system-ui,sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;background:#f6f7f9;color:#1d2330}main{text-align:center;padding:24px}h1{margin:0 0 8px;font-size:28px}p{margin:0;color:#5b6475}</style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Calii · MH Recibo</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="theme-color" content="#00c3b3">
+<style>
+:root{
+  --green:#00c3b3; --green-dark:#007a6e; --green-light:#E0F7F5;
+  --red:#C62828; --red-light:#FFEBEE;
+  --orange:#E65100; --orange-light:#FFF3E0;
+  --yellow:#F9A825; --yellow-light:#FFF8E1;
+  --gray-50:#FAFAFA; --gray-100:#F5F5F5; --gray-200:#EEEEEE; --gray-300:#E0E0E0; --gray-400:#BDBDBD;
+  --gray-500:#9E9E9E; --gray-600:#757575; --gray-700:#616161; --gray-900:#212121;
+  --radius:14px; --radius-sm:8px;
+  --shadow-sm:0 1px 4px rgba(0,0,0,.10); --shadow-md:0 4px 16px rgba(0,0,0,.14);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:var(--gray-100);color:var(--gray-900);min-height:100dvh;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+button{font:inherit;color:inherit}
+.screen{display:none}
+.screen.active{display:block}
+.wrap{max-width:480px;margin:0 auto;padding:16px 16px 48px}
+.hero{background:linear-gradient(150deg,var(--green-dark) 0%,var(--green) 100%);color:white;padding:40px 24px 28px;text-align:center}
+.hero-logo{font-size:30px;font-weight:900;letter-spacing:-1px}
+.hero-sub{font-size:14px;opacity:.85;margin-top:4px}
+.status-line{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--gray-600);margin:10px 0}
+.db-dot{width:8px;height:8px;border-radius:50%;background:var(--gray-400);flex-shrink:0}
+.db-dot.ok{background:var(--green)} .db-dot.loading{background:var(--yellow)} .db-dot.err{background:var(--red)}
+.clock-warn{background:var(--orange-light);border:1px solid var(--orange);border-radius:var(--radius-sm);padding:10px 12px;margin:12px 0;font-size:13px}
+.clock-warn-title{font-weight:800;color:var(--orange)}
+.clock-warn-sub{margin-top:4px;color:var(--gray-700)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(120px);background:var(--gray-900);color:white;padding:12px 18px;border-radius:24px;font-size:14px;font-weight:600;max-width:calc(100% - 32px);box-shadow:var(--shadow-md);transition:transform .25s;z-index:100;text-align:center}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.app-ver{text-align:center;font-size:11px;color:var(--gray-400);margin-top:24px}
+</style>
 </head>
-<body><main><h1>MH Recibo</h1><p>Recepción de envíos de CH — en construcción.</p></main></body>
+<body>
+
+<!-- ═══════════ INICIO (§6.1) ═══════════ -->
+<div class="screen active" id="screen-inicio">
+  <div class="hero"><div class="hero-logo">MH Recibo</div><div class="hero-sub">Recepción de envíos de CH Guadalupe</div></div>
+  <div class="wrap">
+    <div id="clock-warning" style="display:none"></div>
+    <div class="status-line"><span class="db-dot" id="db-dot"></span><span id="db-label">Cargando base de imágenes…</span></div>
+    <div id="inicio-body"></div>
+    <div class="app-ver" id="app-ver"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script>
+'use strict';
+const APP_VERSION = 'v1 · fase 0';
+
+/* ════════════════════════════════════════════════════════════════════════════════════
+   SUPABASE — shared project with Armado CH + Sorting Hub (plan §3). This app writes ONLY to bucket
+   'recibo' and tables rec_*. Armado's bucket and Sorting Hub's bucket are read-only from here.
+   ════════════════════════════════════════════════════════════════════════════════════ */
+const SB_URL = 'https://uuqqtksxlgkztenojufm.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1cXF0a3N4bGdrenRlbm9qdWZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxODc0NDIsImV4cCI6MjA5Mzc2MzQ0Mn0.Ifj0QKO4oTcIz3IgSD3fMWwdQz_QG_561d4sQAgWG2U';
+const BUCKET = 'recibo';                    // ours
+const ARMADO_BUCKET = 'solcitudesarmado';   // read-only: imagedb/*, reports/*
+const SORTING_BUCKET = 'sorting-hub';       // read-only: sorting/{slug}/*
+
+const HUBS = [
+  { name:'MH Contry',      slug:'mh-contry' },
+  { name:'MH Cumbres',     slug:'mh-cumbres' },
+  { name:'MH Guadalupe',   slug:'mh-guadalupe' },
+  { name:'MH San Nicolás', slug:'mh-san-nicolas' },
+  { name:'MH Avícola',     slug:'mh-avicola' },
+  { name:'MH Zapopan',     slug:'mh-zapopan' },
+  { name:'MH Condesa',     slug:'mh-condesa' },
+];
+// Local runs write to production (CLAUDE.md). On localhost a 'test-hub' is offered so every test write is
+// isolated; it reads MH Contry's sorting so cards still show real basket letters.
+const IS_LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+if (IS_LOCAL) HUBS.push({ name:'Test hub (local)', slug:'test-hub' });
+const SORTING_SLUG = { 'test-hub':'mh-contry' };
+const AREAS = [ { id:'abarrotes', name:'Abarrotes' }, { id:'carnes', name:'Carnes' } ];
+function hubName(slug){ const h=HUBS.find(x=>x.slug===slug); return h?h.name:slug; }
+function areaName(id){ const a=AREAS.find(x=>x.id===id); return a?a.name:id; }
+
+/* ── FECHA Y HORA — copied from armado-CH (§9.1 of its handoff). Every date/time goes through here;
+   never the device clock or its time zone. ── */
+const TZ='America/Monterrey';
+const TZ_FALLBACK_MIN=-360; // México no aplica horario de verano desde 2022 → UTC-6 fijo
+let _fmtDate=null, _fmtHM=null;
+try{
+  _fmtDate=new Intl.DateTimeFormat('en-CA',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit'});
+  _fmtHM=new Intl.DateTimeFormat('en-GB',{timeZone:TZ,hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+  if(_fmtDate.format(new Date(0))!=='1969-12-31'){ _fmtDate=null; _fmtHM=null; } // autoprueba
+}catch(_){ _fmtDate=null; _fmtHM=null; }
+function _mtyParts(t){ // respaldo si el navegador no soporta timeZone en Intl
+  const u=new Date(t.getTime()+TZ_FALLBACK_MIN*60000);
+  return {y:u.getUTCFullYear(),m:u.getUTCMonth()+1,d:u.getUTCDate(),h:u.getUTCHours(),mi:u.getUTCMinutes()};
+}
+let _skewMs=0, _skewKnown=false;
+function serverNow(){ return new Date(Date.now()+_skewMs); }
+function skewMinutes(){ return Math.round(_skewMs/60000); }
+async function syncClock(){
+  try{
+    const t0=Date.now();
+    // HEAD on a table with anon SELECT exposes a readable Date header (the /rest/v1/ root answers 401 without one).
+    const r=await fetch(`${SB_URL}/rest/v1/rec_events?select=id&limit=1`,{method:'HEAD',headers:{'apikey':SB_KEY,'Authorization':`Bearer ${SB_KEY}`}});
+    const h=r.headers.get('Date');
+    if(h){
+      const srv=Date.parse(h);
+      if(!isNaN(srv)){ _skewMs=srv+Math.round((Date.now()-t0)/2)-Date.now(); _skewKnown=true; }
+    }
+  }catch(_){ /* sin conexión → se usa el reloj del equipo, con la zona ya anclada */ }
+  try{ renderClockWarning(); }catch(_){}
+}
+function localDateStr(d){
+  const t=d||serverNow();
+  if(_fmtDate) return _fmtDate.format(t); // en-CA → "YYYY-MM-DD"
+  const p=_mtyParts(t); return `${p.y}-${String(p.m).padStart(2,'0')}-${String(p.d).padStart(2,'0')}`;
+}
+function localHM(d){
+  const t=d||serverNow();
+  if(_fmtHM) return _fmtHM.format(t); // "HH:MM" 24 h
+  const p=_mtyParts(t); return `${String(p.h).padStart(2,'0')}:${String(p.mi).padStart(2,'0')}`;
+}
+function todayStr(){ return localDateStr(); }
+const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+// "29 de octubre" from a YYYY-MM-DD (Monterrey) date string
+function fechaLarga(ymd){ const [,m,d]=String(ymd).split('-').map(Number); return m?`${d} de ${MESES[m-1]}`:String(ymd); }
+// Whole Monterrey days between two YYYY-MM-DD strings
+function daysBetween(a,b){ return Math.round((Date.parse(b+'T00:00:00Z')-Date.parse(a+'T00:00:00Z'))/86400000); }
+function renderClockWarning(){
+  const el=document.getElementById('clock-warning'); if(!el) return;
+  const m=skewMinutes();
+  if(!_skewKnown || Math.abs(m)<=5){ el.style.display='none'; el.innerHTML=''; return; }
+  const h=Math.round(Math.abs(m)/60*10)/10;
+  const cuanto = Math.abs(m)<60 ? `${Math.abs(m)} min` : `${h} h`;
+  el.innerHTML=`<div class="clock-warn">
+    <div class="clock-warn-title">⏰ El reloj de este teléfono está ${m>0?'atrasado':'adelantado'} ${cuanto}</div>
+    <div class="clock-warn-sub">Tu recepción se guarda con la fecha y hora correctas — la app usa la hora del servidor. Aun así activa <b>Fecha y hora automática</b> en este equipo.</div>
+  </div>`;
+  el.style.display='block';
+}
+
+/* ── sbReq — copied from armado-CH v2.3: at most SB_MAX_INFLIGHT in flight, 429 waits and retries. ── */
+const SB_MAX_INFLIGHT=8;
+let _sbInflight=0; const _sbQueue=[];
+function _sbAcquire(){ if(_sbInflight<SB_MAX_INFLIGHT){ _sbInflight++; return Promise.resolve(); } return new Promise(r=>_sbQueue.push(r)); }
+function _sbRelease(){ const next=_sbQueue.shift(); if(next) next(); else _sbInflight--; }
+async function sbReq(url, opts){
+  for(let attempt=0;;attempt++){
+    await _sbAcquire();
+    let r; try{ r=await fetch(url, opts); } finally{ _sbRelease(); }
+    if(r.status!==429 || attempt>=4) return r;
+    const ra=Number(r.headers.get('Retry-After'));
+    await new Promise(res=>setTimeout(res, (ra>0?ra*1000:500*2**attempt)+Math.random()*250));
+  }
+}
+// Storage — writes are always to BUCKET ('recibo'); the bucket allows anon UPDATE so x-upsert works.
+async function sbUpload(path, content, contentType='text/csv'){
+  const r = await sbReq(`${SB_URL}/storage/v1/object/${BUCKET}/${path}`,{
+    method:'POST',
+    headers:{'Authorization':`Bearer ${SB_KEY}`,'Content-Type':contentType,'x-upsert':'true'},
+    body: content
+  });
+  if(!r.ok){ const e=await r.text(); throw new Error(`${r.status}: ${e}`); }
+}
+// Public read from any bucket (ours, Armado's imagedb, Sorting Hub's sorting)
+async function sbPublic(path, bucket=BUCKET){
+  const r = await sbReq(`${SB_URL}/storage/v1/object/public/${bucket}/${path}`,{cache:'no-store'});
+  if(!r.ok){ const e=new Error(`${r.status}`); e.status=r.status; throw e; }
+  return r;
+}
+async function sbFetch(path, bucket=BUCKET){ return (await sbPublic(path, bucket)).text(); }
+async function sbList(prefix){
+  const r = await sbReq(`${SB_URL}/storage/v1/object/list/${BUCKET}`,{
+    method:'POST',
+    headers:{'Authorization':`Bearer ${SB_KEY}`,'Content-Type':'application/json'},
+    body: JSON.stringify({prefix, limit:500, sortBy:{column:'name',order:'desc'}})
+  });
+  if(!r.ok) throw new Error(`${r.status}`);
+  return r.json();
+}
+/* ── PostgREST (rec_* tables only for writes) ── */
+async function pgInsert(table, rows){
+  if(!/^rec_/.test(table)) throw new Error('Solo se escribe en tablas rec_*');
+  const r = await sbReq(`${SB_URL}/rest/v1/${table}`,{
+    method:'POST',
+    headers:{'apikey':SB_KEY,'Authorization':`Bearer ${SB_KEY}`,'Content-Type':'application/json','Prefer':'return=minimal'},
+    body: JSON.stringify(rows)
+  });
+  if(!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+}
+async function pgSelect(table, query){
+  const r = await sbReq(`${SB_URL}/rest/v1/${table}?${query}`,{
+    headers:{'apikey':SB_KEY,'Authorization':`Bearer ${SB_KEY}`}
+  });
+  if(!r.ok) throw new Error(`${r.status}`);
+  return r.json();
+}
+// The project caps every PostgREST response at 1000 rows — page anything that can grow.
+const PG_PAGE=1000;
+async function pgSelectAll(table, query){
+  const q=/(^|&)order=/.test(query)?query:query+'&order=id.asc'; // stable order, or offsets can skip/repeat rows
+  let out=[];
+  for(let off=0;;off+=PG_PAGE){
+    const rows=await pgSelect(table, `${q}&limit=${PG_PAGE}&offset=${off}`);
+    out=out.concat(rows);
+    if(rows.length<PG_PAGE) return out;
+  }
+}
+function isNetErr(e){ return e instanceof TypeError || /Failed to fetch|NetworkError|Load failed/i.test(String(e&&e.message)); }
+
+/* ── BARCODES / HEADERS / NAMES — copied from armado-CH ── */
+function bcMatch(scanned, system){
+  if(!scanned||!system) return false;
+  if(scanned===system) return true;
+  const s1=scanned.replace(/^0+/,''), s2=system.replace(/^0+/,'');
+  return s1.length>0 && s1===s2;
+}
+function cleanBC(raw){
+  if(raw==null) return '';
+  let s=String(raw).trim(); if(!s) return '';
+  if(/[eE][+\-]?\d+$/.test(s)){ const n=Number(s); if(!isNaN(n)&&isFinite(n)) s=n.toFixed(0); }
+  s=s.replace(/\.0+$/,''); if(s.includes('.')) s=s.split('.')[0];
+  return s;
+}
+function normHeader(h){ return String(h||'').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''); }
+function pickCol(row, ...names){
+  const want=names.map(normHeader);
+  for(const k of Object.keys(row||{})){ if(want.includes(normHeader(k))) return row[k]; }
+  return undefined;
+}
+function bcKey(bc){ const s=String(bc||''); return s.replace(/^0+/,'') || s; }
+function normName(s){
+  if(!s) return '';
+  return String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+}
+function stripBOM(text){ return text.charCodeAt(0)===0xFEFF ? text.slice(1) : text; }
+// Ours: one export carries a barcode with an inner space ("083078 003623") — the scanner never sends it.
+function codeKey(raw){ return bcKey(cleanBC(raw).replace(/\s+/g,'')); }
+// sku_key (plan §3.1): bcKey(barcode), or 'name:'+normalized name when the line has no barcode
+function skuKeyOf(barcode, producto){ const k=codeKey(barcode); return k ? k : 'name:'+normName(producto); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ── IMAGE DB (plan §3.3) — loader copied from armado-CH; imgUrl/imgName from sorting-hub read both the
+   plain-string and {url,name} entry shapes. ── */
+const S = { imgDb:{} };
+function normalizeImgDbKeys(db){
+  const out={};
+  for(const k in db){
+    if(/^\d+$/.test(k)){ const s=bcKey(k); if(!(s in out)) out[s]=db[k]; }
+    else out[k]=db[k];
+  }
+  return out;
+}
+function imgUrl(entry){ return typeof entry==='string' ? entry : (entry && entry.url) || null; }
+function imgName(entry){ return typeof entry==='string' ? null : (entry && entry.name) || null; }
+async function loadImageDB(){
+  setDbStatus('loading','Cargando base de imágenes…');
+  const CK='mr_imgdb_cache';
+  const base=`${SB_URL}/storage/v1/object/public/${ARMADO_BUCKET}/imagedb/`;
+  // 1. Armado's published imagedb/latest.json — tiny version.txt first, the 1.3 MB body cached
+  try{
+    const ver=(await fetch(base+'version.txt',{cache:'no-store'}).then(r=>{ if(!r.ok) throw 0; return r.text(); })).trim();
+    let cached=null; try{ cached=JSON.parse(localStorage.getItem(CK)||'null'); }catch(_){}
+    let map;
+    if(cached && cached.v===ver && cached.map){ map=cached.map; }
+    else{
+      const j=await fetch(base+'latest.json',{cache:'no-store'}).then(r=>{ if(!r.ok) throw 0; return r.json(); });
+      map=j.map||j;
+      try{ localStorage.setItem(CK, JSON.stringify({v:ver, map})); }catch(_){}
+    }
+    S.imgDb=normalizeImgDbKeys(map);
+    setDbStatus('ok',`Base de imágenes (${Math.round(Object.keys(S.imgDb).length/2).toLocaleString('es-MX')} productos)`);
+    return;
+  }catch(_){}
+  // 2. Fallback: the file bundled in the repo (the floor, not the source)
+  try{
+    const res=await fetch('./imagedb.json');
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    S.imgDb=normalizeImgDbKeys(await res.json());
+    setDbStatus('ok',`Base de imágenes incluida (${Math.round(Object.keys(S.imgDb).length/2).toLocaleString('es-MX')} productos)`);
+  }catch(e){ S.imgDb={}; setDbStatus('err','Sin imágenes'); }
+}
+function setDbStatus(type,msg){
+  const d=document.getElementById('db-dot'), l=document.getElementById('db-label'); if(!d||!l) return;
+  d.className='db-dot '+(type==='ok'?'ok':type==='loading'?'loading':'err');
+  l.textContent=msg;
+}
+// Lookup identical to armado-CH getImgUrl (bcKey → exact name → first word → prefix ≥5 chars), memoised
+// because the "Sin código" type-ahead asks for dozens of photos per keystroke.
+const _imgMemo=new Map();
+function getImgUrl(barcode, producto){
+  const memoKey=(barcode||'')+'|'+(producto||'');
+  if(_imgMemo.has(memoKey)) return _imgMemo.get(memoKey);
+  const res=_getImgUrl(barcode, producto);
+  if(Object.keys(S.imgDb).length) _imgMemo.set(memoKey,res);
+  return res;
+}
+function _getImgUrl(barcode, producto){
+  const bk=codeKey(barcode), name=normName(producto||'');
+  if(bk&&S.imgDb[bk]) return imgUrl(S.imgDb[bk]);
+  if(name&&S.imgDb[name]) return imgUrl(S.imgDb[name]);
+  const fw=name.split(' ')[0];
+  if(fw.length>3&&S.imgDb[fw]) return imgUrl(S.imgDb[fw]);
+  // a wrong image is worse than none, so require ≥5 chars before guessing
+  for(const k of Object.keys(S.imgDb)){
+    if(k.length>5 && name.startsWith(k)) return imgUrl(S.imgDb[k]);
+    if(fw.length>=5 && k.length>5 && k.startsWith(fw)) return imgUrl(S.imgDb[k]);
+  }
+  return null;
+}
+
+/* ── UI basics ── */
+let _toastT=null;
+function toast(msg, ms=2600){
+  const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show');
+  clearTimeout(_toastT); _toastT=setTimeout(()=>el.classList.remove('show'), ms);
+}
+function showScreen(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active', s.id===id));
+  window.scrollTo(0,0);
+}
+
+/* ── BOOT ── */
+function registerServiceWorker(){
+  if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+async function boot(){
+  document.getElementById('app-ver').textContent=APP_VERSION;
+  registerServiceWorker();
+  await Promise.all([syncClock(), loadImageDB()]);
+  if(typeof renderInicio==='function') renderInicio();
+}
+boot();
+</script>
+</body>
 </html>
