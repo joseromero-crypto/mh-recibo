@@ -315,7 +315,7 @@ textarea.text-input{min-height:110px;font-size:15px}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'v1 · códigos incorrectos';
+const APP_VERSION = 'v1 · borrar envío';
 
 /* ════════════════════════════════════════════════════════════════════════════════════
    SUPABASE — shared project with Armado CH + Sorting Hub (plan §3). This app writes ONLY to bucket
@@ -427,6 +427,16 @@ async function sbUpload(path, content, contentType='text/csv'){
     method:'POST',
     headers:{'Authorization':`Bearer ${SB_KEY}`,'Content-Type':contentType,'x-upsert':'true'},
     body: content
+  });
+  if(!r.ok){ const e=await r.text(); throw new Error(`${r.status}: ${e}`); }
+}
+// Delete envío files only (Borrar envío) — never reports or config
+async function sbDeleteEnvio(paths){
+  if(!paths.every(p=>/^envios\/[^/]+\/[^/]+\/[^/]+\.(json|csv)$/.test(p))) throw new Error('Solo se borran archivos de envíos');
+  const r = await sbReq(`${SB_URL}/storage/v1/object/${BUCKET}`,{
+    method:'DELETE',
+    headers:{'Authorization':`Bearer ${SB_KEY}`,'Content-Type':'application/json'},
+    body: JSON.stringify({ prefixes:paths })
   });
   if(!r.ok){ const e=await r.text(); throw new Error(`${r.status}: ${e}`); }
 }
@@ -782,7 +792,8 @@ function inicioActionsHtml(){
     return `<div class="info-card"><b>El archivo cargado ya se recibió el ${fechaLarga(localDateStr(new Date(a.closed)))}.</b></div>`
       +`<div class="stack"><button class="btn btn-secondary btn-block" onclick="verResumenCerrado()">📊 Ver resumen</button>${subir.replace('btn-secondary','btn-primary')}${d.fecha<today?sinArch:''}</div>`;
   }
-  return `<div class="info-card">${info}</div><div class="stack"><button class="btn btn-primary btn-block" onclick="continuarRecepcion()">▶ Continuar recepción</button>${a.offline?'':subir}${(!a.offline && d.session_fecha<today)?sinArch:''}</div>`;
+  return `<div class="info-card">${info}</div><div class="stack"><button class="btn btn-primary btn-block" onclick="continuarRecepcion()">▶ Continuar recepción</button>${a.offline?'':subir}${(!a.offline && d.session_fecha<today)?sinArch:''}</div>`
+    +(a.offline?'':`<button class="link-btn" style="color:var(--red)" onclick="borrarEnvio()">🗑 Borrar este envío</button>`);
 }
 async function refreshActive(){
   const tok=++_activeTok; INI.active=undefined; renderInicio();
@@ -794,6 +805,34 @@ function goInicio(){
   closeCamera(); closeSheet();
   showScreen('screen-inicio'); renderInicio();
   if(INI.receptor) refreshActive();
+}
+// Borrar envío: a file uploaded by mistake (wrong hub, a test). Typed "borrar" confirms. The reception's events stay
+// (append-only) and an admin 'borrar' event ends it; the .json/.csv are removed, so the previous file becomes active.
+async function borrarEnvio(){
+  const a=INI.active; if(!a || !a.data || a.closed || a.offline) return;
+  const d=a.data;
+  let scans=0; try{ scans=(await pgSelect('rec_events', `session_id=eq.${encodeURIComponent(d.session_id)}&tipo=eq.scan&select=id`)).length; }catch(e){ toast('Sin conexión: conéctate para borrar el envío'); return; }
+  scans+=OUTBOX.filter(e=>e.session_id===d.session_id && e.tipo==='scan').length;
+  const v=await showModal({ title:'¿Borrar este envío?',
+    html:`<p><b>${escapeHtml(d.sourceFile||'Envío sin archivo')}</b><br>Cargado el ${fechaLarga(d.fecha)} a las ${localHM(new Date(d.uploadedAt))}${d.receptor?' por '+escapeHtml(d.receptor):''}.</p>`
+      +(scans?`<p style="color:var(--red);font-weight:700">Esta recepción tiene ${scans} escaneo${scans===1?'':'s'}: se descartan.</p>`:'')
+      +`<p>Úsalo solo si el archivo se subió por error. Escribe <b>borrar</b> para confirmar.</p>
+        <input id="del-confirm" class="text-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="escribe aquí">`,
+    buttons:[{label:'🗑 Borrar envío', value:'del', kind:'danger'}], cancel:true });
+  if(v!=='del') return;
+  const typed=(document.getElementById('del-confirm')||{}).value||'';
+  if(typed.trim().toLowerCase()!=='borrar'){ toast('No se borró: escribe «borrar» para confirmar', 3500); return; }
+  const paths=[d._path||a.path].concat(d.csvPath?[d.csvPath]:[]);
+  try{
+    await pgInsert('rec_events', [{ session_id:d.session_id, hub:INI.hub, area:INI.area, fecha:d.session_fecha||d.fecha, tipo:'admin',
+      detalle:{ uid:newUid(), accion:'borrar', envio:paths[0], csv:d.csvPath||null, archivo:d.sourceFile||'', escaneos:scans },
+      receptor:INI.receptor, device_id:DEVICE_ID, ts:serverNow().toISOString() }]);
+    await sbDeleteEnvio(paths);
+    OUTBOX=OUTBOX.filter(e=>e.session_id!==d.session_id); saveOutbox();
+    try{ localStorage.removeItem(mirrorPrefix(INI.hub, INI.area)+(d.session_fecha||d.fecha)); }catch(_){}
+    toast('✓ Envío borrado');
+  }catch(e){ toast(isNetErr(e)?'Sin conexión: no se borró. Intenta de nuevo.':'No se pudo borrar ('+e.message+')', 4500); }
+  refreshActive();
 }
 function continuarRecepcion(){ const a=INI.active; if(a && a.data) openRecibir(a.data, { parciales:(a.parciales||[]).length }); }
 
@@ -820,7 +859,7 @@ async function sessionClosedAt(sessionId){
   try{
     const r=await pgSelect('rec_events', `session_id=eq.${encodeURIComponent(sessionId)}&tipo=in.(cerrar,admin)&select=ts,tipo,detalle&order=id.desc&limit=20`);
     for(const e of r){
-      if(e.tipo==='cerrar') return e.ts;
+      if(e.tipo==='cerrar' || (e.detalle && e.detalle.accion==='borrar')) return e.ts;
       if(e.detalle && e.detalle.accion==='reabrir') return null;
     }
     return null;
@@ -1196,6 +1235,7 @@ function closedState(){
   for(const e of S.events){
     if(e.tipo==='cerrar') st=Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id }, e.detalle||{});
     else if(e.tipo==='admin' && e.detalle && e.detalle.accion==='reabrir') st=null;
+    else if(e.tipo==='admin' && e.detalle && e.detalle.accion==='borrar') return { borrada:true, ts:e.ts, receptor:e.receptor };
   }
   return st;
 }
@@ -1239,7 +1279,9 @@ function renderRecibir(){
   if(rev.length) banner+=`<button class="btn btn-warn btn-block" style="margin-bottom:10px" onclick="openRevisar()">⚠ Revisar ahora · ${rev.length}</button>`;
   if(S.sortStatus==='none') banner+=`<div class="note">${escapeHtml(hubName(S.hub))} todavía no tiene archivo en Sorting Hub: las tarjetas no mostrarán canasta.</div>`;
   else if(S.sortStatus==='err') banner+=`<div class="note">No se pudo cargar el sorting de este hub: las tarjetas no mostrarán canasta.</div>`;
-  if(S.closedInfo) banner=`<div class="err-box"><b>Esta recepción ya se cerró</b> (${escapeHtml(S.closedInfo.receptor||'')}, ${localHM(new Date(S.closedInfo.ts))}). Ya no se puede escanear.
+  if(S.closedInfo && S.closedInfo.borrada) banner=`<div class="err-box"><b>Este envío se borró</b> (${escapeHtml(S.closedInfo.receptor||'')}, ${localHM(new Date(S.closedInfo.ts))}). Ya no se puede escanear.
+    <button class="btn btn-secondary btn-block" style="margin-top:8px" onclick="goInicio()">← Volver a Inicio</button></div>`;
+  else if(S.closedInfo) banner=`<div class="err-box"><b>Esta recepción ya se cerró</b> (${escapeHtml(S.closedInfo.receptor||'')}, ${localHM(new Date(S.closedInfo.ts))}). Ya no se puede escanear.
     <button class="btn btn-secondary btn-block" style="margin-top:8px" onclick="openRecepcion(S.closedInfo,'inicio')">📊 Ver resumen</button></div>`;
   const otros=receptoresDeSesion().filter(r=>r!==S.receptor);
   document.getElementById('rec-receptor').textContent='👤 '+S.receptor+(otros.length?` (+${otros.length})`:'');
@@ -1760,6 +1802,7 @@ function receptoresDeSesion(){ const s=new Set(); for(const e of S.events) if(e.
 
 function openResumen(){
   if(!S.session) return;
+  if(S.closedInfo && S.closedInfo.borrada){ toast('Este envío se borró'); goInicio(); return; }
   if(S.closedInfo){ openRecepcion(S.closedInfo,'inicio'); return; }
   if(S.envio.sinArchivo){ toast('Sube el archivo del envío antes de cerrar la recepción', 3500); return; }
   S.current=null; S.corrigiendo=null; closeSheet();
@@ -2041,7 +2084,7 @@ async function listCerradas(slug, area, days=30){
     if(e.tipo==='parcial'){ parts.push(Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id, parcial:true }, e.detalle||{})); continue; }
     if(seen.has(e.session_id)) continue;
     if(e.tipo==='cerrar') seen.set(e.session_id, Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id }, e.detalle||{}));
-    else if(e.detalle && e.detalle.accion==='reabrir') seen.set(e.session_id, null);
+    else if(e.detalle && (e.detalle.accion==='reabrir' || e.detalle.accion==='borrar')) seen.set(e.session_id, null);
   }
   return [...seen.values()].filter(Boolean).concat(parts).sort((a,b)=>Date.parse(b.ts)-Date.parse(a.ts));
 }
@@ -2217,14 +2260,15 @@ async function admRecepciones(){
     if(e.tipo==='abrir' || e.tipo==='reemplazo'){ if(d.envio) r.envio=d.envio; if(d.sin_archivo) r.sinArchivo=true; if(d.tras_sin_archivo) r.sinArchivo=false; }
     if(e.tipo==='cerrar') r.cerrada=Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id }, d);
     if(e.tipo==='admin' && d.accion==='reabrir') r.cerrada=null;
+    if(e.tipo==='admin' && d.accion==='borrar') r.borrada={ ts:e.ts, receptor:e.receptor, escaneos:d.escaneos||0 };
     if(e.tipo==='parcial') r.parciales.push(Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id, parcial:true }, d));
   }
   _admRecep=[...by.values()].sort((a,b)=>b.fecha.localeCompare(a.fecha) || a.hub.localeCompare(b.hub) || a.area.localeCompare(b.area));
   let h='<div class="muted" style="margin-bottom:8px">Últimos 14 días. Una recepción abierta se reconstruye sola desde los eventos al abrirla en cualquier teléfono (Continuar recepción).</div>', day='';
   _admRecep.forEach((r,i)=>{
     if(r.fecha!==day){ day=r.fecha; h+=`<div class="section-title">${fechaLarga(day)}</div>`; }
-    const c=r.cerrada;
-    h+=`<div class="adm-row"><b>${escapeHtml(hubName(r.hub))} · ${areaName(r.area)}</b> — ${c?`<span class="tag green">✓ cerrada ${localHM(new Date(c.ts))}</span>`:`<span class="tag orange">abierta desde ${localHM(new Date(r.abierta))}</span>`}${r.sinArchivo?' <span class="tag red">sin archivo</span>':''}${r.parciales.length?` <span class="tag orange">${r.parciales.length} entrega${r.parciales.length===1?'':'s'} parcial${r.parciales.length===1?'':'es'}</span>`:''}
+    const c=r.borrada?null:r.cerrada;
+    h+=`<div class="adm-row"><b>${escapeHtml(hubName(r.hub))} · ${areaName(r.area)}</b> — ${r.borrada?`<span class="tag red">🗑 envío borrado ${localHM(new Date(r.borrada.ts))} por ${escapeHtml(r.borrada.receptor||'')}${r.borrada.escaneos?` · ${r.borrada.escaneos} escaneos descartados`:''}</span>`:c?`<span class="tag green">✓ cerrada ${localHM(new Date(c.ts))}</span>`:`<span class="tag orange">abierta desde ${localHM(new Date(r.abierta))}</span>`}${r.sinArchivo?' <span class="tag red">sin archivo</span>':''}${r.parciales.length?` <span class="tag orange">${r.parciales.length} entrega${r.parciales.length===1?'':'s'} parcial${r.parciales.length===1?'':'es'}</span>`:''}
       <div class="muted" style="font-size:12px">${escapeHtml([...r.receptores].join(', ')||'—')}${c?` · ${c.lineas||0} productos · ${c.diferencias||0} con diferencia`:''}</div>
       ${c?(c.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join(''):''}
       <div class="btns">${c?`<button class="btn btn-secondary" onclick="openRecepcion(_admRecep[${i}].cerrada,'admin')">Ver</button>

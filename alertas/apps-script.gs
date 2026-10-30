@@ -84,8 +84,9 @@ function sesiones_(hub, area, hoy){
     if (e.tipo === 'parcial') { s.parciales++; s.ultimaParcial = fmt_(new Date(e.ts), 'yyyy-MM-dd'); }
     if (e.tipo === 'cerrar') s.cerrada = e.detalle || {};
     if (e.tipo === 'admin' && e.detalle && e.detalle.accion === 'reabrir') s.cerrada = null;
+    if (e.tipo === 'admin' && e.detalle && e.detalle.accion === 'borrar') s.borrada = true; // envío uploaded by mistake
   });
-  return Object.keys(by).map(k => by[k]);
+  return Object.keys(by).map(k => by[k]).filter(s => !s.borrada);
 }
 
 /* ── Main ── */
