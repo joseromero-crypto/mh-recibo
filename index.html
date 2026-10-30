@@ -315,7 +315,7 @@ textarea.text-input{min-height:110px;font-size:15px}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'v1 · fase 5b';
+const APP_VERSION = 'v1 · fase 5b · QA 1';
 
 /* ════════════════════════════════════════════════════════════════════════════════════
    SUPABASE — shared project with Armado CH + Sorting Hub (plan §3). This app writes ONLY to bucket
@@ -341,6 +341,9 @@ const HUBS = [
 const IS_LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
 if (IS_LOCAL) HUBS.push({ name:'Test hub (local)', slug:'test-hub' });
 const SORTING_SLUG = { 'test-hub':'mh-contry' };
+// §6.2b "Empezar sin archivo" — built (Phase 2) but switched off: receptors would get used to scanning before
+// uploading and miss the real-time flags. Kept for emergencies / a future version.
+const SIN_ARCHIVO_ENABLED = false;
 const AREAS = [ { id:'abarrotes', name:'Abarrotes' }, { id:'carnes', name:'Carnes' } ];
 function hubName(slug){ const h=HUBS.find(x=>x.slug===slug); return h?h.name:slug; }
 function areaName(id){ const a=AREAS.find(x=>x.id===id); return a?a.name:id; }
@@ -616,7 +619,8 @@ function nameHtml(name){
 // §7.2 family key: the name without size/weight/count tokens ("Oreo 210g" ~ "Oreo 114g")
 const SIZE_RE=/\d+(?:[.,]\d+)?\s?(?:kg|kgs|gr|grs|g|mg|ml|lt|lts|l|oz|pzs|pz|piezas)(?![a-z])/gi;
 function familyKey(name){
-  const s=String(name||'').replace(/\([^)]*\d[^)]*\)/g,' ').replace(SIZE_RE,' ');
+  // grades count as size too: "41/50" shrimp, "95/5" ground beef
+  const s=String(name||'').replace(/\([^)]*\d[^)]*\)/g,' ').replace(SIZE_RE,' ').replace(/\b\d+\s*\/\s*\d+\b/g,' ');
   return normName(s).replace(/\b(de|con|x)$/,'').trim();
 }
 function imgTag(barcode, producto, cls){
@@ -749,7 +753,7 @@ function inicioActionsHtml(){
   const a=INI.active;
   const subir=`<button class="btn btn-secondary btn-block" onclick="openSubir()">📄 Subir envío</button>`;
   // §6.2b — the truck arrived before its file (mostly Carnes)
-  const sinArch=`<button class="btn btn-secondary btn-block" onclick="startSinArchivo()">📦 Empezar sin archivo</button>`;
+  const sinArch=SIN_ARCHIVO_ENABLED ? `<button class="btn btn-secondary btn-block" onclick="startSinArchivo()">📦 Empezar sin archivo</button>` : '';
   if(a===undefined) return `<div class="muted">Buscando el envío activo…</div>`;
   if(a.offline && !a.data) return `<div class="warn-box">Sin conexión. Conéctate a internet para cargar el envío.</div><button class="btn btn-secondary btn-block" onclick="refreshActive()">Reintentar</button>`;
   if(a.none) return `<div class="info-card">Todavía no hay un envío cargado para este hub y área.</div><div class="stack"><button class="btn btn-primary btn-block" onclick="openSubir()">📄 Subir envío</button>${sinArch}</div>`;
@@ -816,6 +820,13 @@ async function sessionHasScans(sessionId){
    SUBIR ENVÍO (§5.2, §6.2)
    ════════════════════════════════════════════════════════════════════════════════════ */
 let SUBIR=null; // { file, parsed, acks:Set, busy, error }
+let PENDING_UPLOAD=null; // the file chosen before "Primero cerrar la recepción actual" (§6.7)
+function resumePendingUpload(){
+  if(!PENDING_UPLOAD) return;
+  SUBIR=Object.assign(PENDING_UPLOAD, { busy:false, error:null }); PENDING_UPLOAD=null;
+  document.getElementById('subir-title').textContent=`${hubName(INI.hub)} · ${areaName(INI.area)}`;
+  showScreen('screen-subir'); renderSubir();
+}
 function openSubir(){
   SUBIR=null;
   document.getElementById('subir-title').textContent=`${hubName(INI.hub)} · ${areaName(INI.area)}`;
@@ -926,7 +937,8 @@ async function doUpload(){
         html:`<p>Lo escaneado es conteo físico: se conserva y se vuelve a comparar contra el archivo nuevo.</p>`,
         buttons:[{label:'Reemplazar el archivo y conservar lo escaneado', value:'replace', kind:'primary'},
                  {label:'Primero cerrar la recepción actual', value:'close', kind:'secondary'}], cancel:true });
-      if(v==='close'){ SUBIR=null; openRecibir(prev.data); openResumen(); return; }
+      // "Primero cerrar": keep the chosen file so it can be loaded right after closing
+      if(v==='close'){ PENDING_UPLOAD=SUBIR; SUBIR=null; openRecibir(prev.data, { noStale:true }); openResumen(); return; }
       if(v!=='replace') return;
       reuse=true;
     } else if(prev.data.session_fecha===fecha) reuse=true; // same day, nothing scanned → simply replaces
@@ -950,6 +962,7 @@ async function doUpload(){
 // §6.2b — start receiving before the file exists. A placeholder envío JSON makes the reception visible to
 // other phones; the real upload later reuses its session_id.
 async function startSinArchivo(){
+  if(!SIN_ARCHIVO_ENABLED) return;
   const slug=INI.hub, area=INI.area, now=serverNow(), epochMs=now.getTime(), fecha=localDateStr(now);
   let prev; try{ prev=await findActiveEnvio(slug, area); }catch(_){ prev={offline:true}; }
   if(prev.offline){ toast('Sin conexión: conéctate para empezar la recepción'); return; }
@@ -1089,14 +1102,14 @@ Object.assign(S, { hub:null, area:null, receptor:null, envio:null, session:null,
 function setEnvio(data){
   S.envio=data;
   S.lines=new Map(data.lines.map(l=>[l.sku_key, Object.assign(l, { _n:normName(l.producto) })]));
-  S.famLines=new Map();
-  for(const l of S.lines.values()){ const f=familyKey(l.producto); if(f.length<4) continue; if(!S.famLines.has(f)) S.famLines.set(f,[]); S.famLines.get(f).push(l); }
+  S.sibCache=new Map();
+  for(const l of S.lines.values()) l._fw=famWords(l.producto);
 }
 function openRecibir(data, opts={}){
   S.hub=INI.hub; S.area=INI.area; S.receptor=INI.receptor;
   S.session={ id:data.session_id, fecha:data.session_fecha };
   setEnvio(data);
-  S.events=[]; S.eventUids=new Set(); S.current=null; S.corrigiendo=null; S.staleAsked=false; S.lastId=0; S.closedInfo=null; S.armado=null;
+  S.events=[]; S.eventUids=new Set(); S.current=null; S.corrigiendo=null; S.staleAsked=false; S.recentAll=false; S.resumenOrder=new Map(); S.lastId=0; S.closedInfo=null; S.armado=null;
   buildCatalog();
   const m=latestMirror(S.hub, S.area);
   if(m && m.envio && m.envio.session_id===S.session.id) addEvents(m.events);
@@ -1110,7 +1123,7 @@ function openRecibir(data, opts={}){
   loadSorting(S.hub).then(()=>{ buildCatalog(); renderRecibir(); });
   syncServerEvents().then(()=>{ if(opts.revisar && revisarItems().length) openRevisar(); });
   flushOutbox();
-  staleCheck();
+  if(!opts.noStale) staleCheck();
 }
 /* ── §6.7 stale warning: the active file was uploaded on an earlier day. Ignorar lasts for that file today. ── */
 function staleIgnored(){ try{ return localStorage.getItem('mr_stale_ign_'+S.envio._path)===todayStr(); }catch(_){ return S.staleIgnMem===S.envio._path+todayStr(); } }
@@ -1298,9 +1311,27 @@ async function processScan(raw, metodo){
 }
 function vibrate(ok){ try{ if(navigator.vibrate) navigator.vibrate(ok?70:[60,50,60]); }catch(_){} }
 /* ── Families (§7.2): envío lines grouped by familyKey; built in openRecibir ── */
+// Hermanos = envío lines easy to mix up with p. Beyond the plan's "same name, other size" (familyKey), the real
+// Contry file showed two more cases worth flagging, always within the same product type (first word):
+//  · one name contains the other: "Frijoles bayos refritos Isadora" ~ "… bajos en grasa Isadora"
+//  · same words but one swapped (flavor/variant): "Mermelada de higo St Dalfour" ~ "… de fresa St Dalfour"
+function famWords(name){ return new Set(familyKey(name).split(' ').filter(w=>w.length>=2)); }
+function isSibling(a, b){
+  const fa=familyKey(a.producto), fb=familyKey(b.producto);
+  if(fa.length>=4 && fa===fb) return true;
+  // both extra rules need the same product type (first word): "Barbacoa de res" vs "Flautas de res" is not a mix-up
+  if(fa.split(' ')[0]!==fb.split(' ')[0]) return false;
+  const wa=a._fw||famWords(a.producto), wb=b._fw||famWords(b.producto);
+  const [x,y]=wa.size<=wb.size?[wa,wb]:[wb,wa];
+  let miss=0; for(const w of x) if(!y.has(w)) miss++;
+  if(x.size>=3 && miss===0) return true;
+  return x.size>=4 && x.size===y.size && miss===1;
+}
 function siblingsOf(p){
-  const f=familyKey(p.producto); if(f.length<4) return [];
-  return (S.famLines.get(f)||[]).filter(l=>l.sku_key!==p.sku_key);
+  if(S.sibCache.has(p.sku_key)) return S.sibCache.get(p.sku_key);
+  const out=[...S.lines.values()].filter(l=>l.sku_key!==p.sku_key && isSibling(p, l));
+  S.sibCache.set(p.sku_key, out);
+  return out;
 }
 // §7.1 look-alikes: same family first, then envío lines sharing ≥2 significant words
 function lookAlikes(p){
@@ -1398,14 +1429,14 @@ function wireQtyInput(q){
   q.addEventListener('keydown', e=>{
     if(e.key!=='Enter') return;
     e.preventDefault(); clearTimeout(_qtyScanT);
-    if(/^\d{8,}$/.test(q.value.trim())){ const v=q.value; q.value=''; S.current=null; renderCard(); processScan(v,'scanner'); return; }
+    if(/^\d{8,}$/.test(q.value.trim())){ const v=q.value; q.value=''; if(S.current) S.current.val=''; processScan(v,'scanner'); return; }
     confirmCard();
   });
   q.addEventListener('input', ()=>{
     if(S.current) S.current.val=q.value;
     document.getElementById('qty-err').textContent='';
     clearTimeout(_qtyScanT);
-    if(/^\d{8,}$/.test(q.value.trim())) _qtyScanT=setTimeout(()=>{ const v=q.value; q.value=''; S.current=null; renderCard(); processScan(v,'scanner'); }, SCAN_AUTO_SUBMIT_MS);
+    if(/^\d{8,}$/.test(q.value.trim())) _qtyScanT=setTimeout(()=>{ const v=q.value; q.value=''; if(S.current) S.current.val=''; processScan(v,'scanner'); }, SCAN_AUTO_SUBMIT_MS);
   });
 }
 // Pz: whole pieces · Kg: up to 2 decimals (§7.4). allowZero for corrections.
@@ -1419,35 +1450,42 @@ function pickUnit(u){ if(!S.current) return; S.current.p.kgpz=u; renderCard(); c
 // §7.6 scale tolerance: ±5% of enviado or ±0.10 kg, whichever is larger
 function kgTol(esperado){ return Math.max(0.05*esperado, 0.10); }
 function overEnviado(line, total){ return line.kgpz==='Kg' ? total > round2(line.esperado+kgTol(line.esperado)) : total > line.esperado; }
+function clearQty(c){ const q=document.getElementById('qty-input'); if(q){ q.value=''; c.val=''; } }
+// "¿Seguro que son 40 pz?" — Corregir (the safe answer) is the primary button and clears the field
+async function typoOk(c, qty){
+  const p=c.p, u=unitOf(p.kgpz);
+  const v=await showModal({ title:`¿Seguro que son ${fmtQty(qty,p.kgpz)} ${u}?`,
+    html:`<p>Es mucho más de lo normal para este producto. Revisa que no le sobre un número (por ejemplo 40 en vez de 4).</p>`,
+    buttons:[{label:'Corregir', value:'no', kind:'primary'}, {label:`Sí, son ${fmtQty(qty,p.kgpz)} ${u}`, value:'yes', kind:'secondary'}] });
+  if(v!=='yes'){ clearQty(c); return false; }
+  c.typoOk=qty; return true;
+}
 // §7.2-qty + §7.4 — blocking only to stop a wrong number; the enviado number is never shown (still blind).
 async function guardQty(c, qty){
   const p=c.p, line=p.enEnvio ? S.lines.get(p.sku_key) : null, kg=p.kgpz==='Kg', u=unitOf(p.kgpz);
   const total = c.recount ? qty : round2(recibidoDe(p.sku_key)+qty);
   if(line){
+    // Typo guard first (40 instead of 4, 120 instead of 12): the most likely cause of a big number
+    // The fixed limits (50 kg / 200 pz) only count when the number is also well above what was sent: the real
+    // Carnes file has a 65.11 kg line, and a correct 63.81 kg weighing must not be questioned.
+    const e=line.esperado, big = qty>3*e || (qty>(kg?50:200) && qty>1.5*e);
+    if(big && c.typoOk!==qty && !(await typoOk(c, qty))) return false;
     if(overEnviado(line, total)){
       if(!c.overWarned){
         c.overWarned=true;
         await showModal({ title:'Esta cantidad es mayor a lo enviado. Vuelve a contar.',
           html:`<p>Cuenta otra vez ${kg?'(pésalo de nuevo)':'pieza por pieza'} y escribe la cantidad.</p>`,
           buttons:[{label:'Volver a contar', value:'again', kind:'primary'}] });
-        const q=document.getElementById('qty-input'); if(q){ q.value=''; c.val=''; }
+        clearQty(c);
         return false;
       }
       c.det.sobrante=true; // counted twice and still above: stored and flagged Sobrante for the summary
     }
-    // Typo guard: 120 instead of 12
-    const big = kg ? (qty>3*line.esperado || qty>50) : (qty>3*line.esperado || qty>200);
-    if(big && c.typoOk!==qty){
-      const v=await showModal({ title:`¿Seguro que son ${fmtQty(qty,p.kgpz)} ${u}?`,
-        html:`<p>Es mucho más de lo normal para este producto. Revisa que no sobre un número.</p>`,
-        buttons:[{label:`Sí, son ${fmtQty(qty,p.kgpz)} ${u}`, value:'yes', kind:'warn'}, {label:'Corregir', value:'no', kind:'secondary'}] });
-      if(v!=='yes') return false;
-      c.typoOk=qty;
-    }
     // §7.2-qty: sibling in the envío and more than one piece
     if(!kg && qty>1 && siblingsOf(p).length && c.sibOk!==qty){
-      const pres=presentacion(p.producto);
-      const v=await showModal({ title:`¿Revisaste pieza por pieza que las ${qty} son ${pres?pres.t:p.producto}?`,
+      // Name the presentation when it's what differs; the whole name when the siblings share it (flavors)
+      const pres=presentacion(p.producto), sameSize=!pres || siblingsOf(p).some(s=>{ const q=presentacion(s.producto); return q && normName(q.t)===normName(pres.t); });
+      const v=await showModal({ title:`¿Revisaste pieza por pieza que las ${qty} son ${sameSize?p.producto:pres.t}?`,
         html:`<p>En este envío también viene ${siblingsOf(p).map(s=>'<b>'+escapeHtml(s.producto)+'</b>').join(', ')}.</p>`,
         buttons:[{label:'Sí, todas', value:'yes', kind:'primary'}, {label:'Voy a revisar', value:'no', kind:'secondary'}] });
       if(v!=='yes') return false;
@@ -1455,12 +1493,7 @@ async function guardQty(c, qty){
     }
   } else {
     const big = kg ? qty>50 : qty>200;
-    if(big && c.typoOk!==qty){
-      const v=await showModal({ title:`¿Seguro que son ${fmtQty(qty,p.kgpz)} ${u}?`, html:'<p>Es una cantidad muy grande. Revisa que no sobre un número.</p>',
-        buttons:[{label:`Sí, son ${fmtQty(qty,p.kgpz)} ${u}`, value:'yes', kind:'warn'}, {label:'Corregir', value:'no', kind:'secondary'}] });
-      if(v!=='yes') return false;
-      c.typoOk=qty;
-    }
+    if(big && c.typoOk!==qty && !(await typoOk(c, qty))) return false;
   }
   return true;
 }
@@ -1501,8 +1534,11 @@ function scanQtyNow(ev){ return round2((Number(ev.cantidad)||0)+(S.adjByRef.get(
 function kgpzOf(ev){ const l=S.lines.get(ev.sku_key); return l ? l.kgpz : ((ev.detalle&&ev.detalle.kgpz)||'Pz'); }
 function renderRecent(){
   const el=document.getElementById('recent-list');
-  const scans=S.events.filter(e=>e.tipo==='scan').slice(-10).reverse();
+  const all=S.events.filter(e=>e.tipo==='scan');
+  // Last 10 by default; "Ver todos" lets an older scan be corrected without waiting for the summary
+  const scans=(S.recentAll?all:all.slice(-10)).reverse();
   if(!scans.length){ el.innerHTML='<div class="muted" style="font-size:13px">Todavía no hay escaneos.</div>'; return; }
+  const more=all.length>10 ? `<button class="link-btn" onclick="S.recentAll=!S.recentAll;renderRecent()">${S.recentAll?'Ver solo los últimos 10':`Ver todos los escaneos (${all.length})`}</button>` : '';
   el.innerHTML=scans.map(ev=>{
     const u=ev.detalle&&ev.detalle.uid, kp=kgpzOf(ev), now=scanQtyNow(ev), orig=round2(ev.cantidad), line=S.lines.get(ev.sku_key);
     const meta=[localHM(new Date(ev.ts)), ev.receptor!==S.receptor?escapeHtml(ev.receptor):'', ev.metodo==='manual'?'sin código':ev.metodo==='camara'?'cámara':'', line?'':'<span style="color:var(--red);font-weight:700">no esperado</span>'].filter(Boolean).join(' · ');
@@ -1513,7 +1549,7 @@ function renderRecent(){
         <div><div class="ritem-qty">${now!==orig?`<s>${fmtQty(orig,kp)}</s>`:''}${fmtQty(now,kp)} <small>${unitOf(kp)}</small></div>
           ${editing?'':`<button class="corr-btn" onclick="startCorregir('${escapeHtml(u)}')">Corregir</button>`}</div>
       </div>${editing?corrBoxHtml(ev, kp, now):''}</div>`;
-  }).join('');
+  }).join('')+more;
 }
 function corrBoxHtml(ev, kp, now){
   return `<div class="corr-box">
@@ -1687,6 +1723,7 @@ function openResumen(){
   if(S.closedInfo){ openRecepcion(S.closedInfo,'inicio'); return; }
   if(S.envio.sinArchivo){ toast('Sube el archivo del envío antes de cerrar la recepción', 3500); return; }
   S.current=null; S.corrigiendo=null; closeSheet();
+  S.resumenOrder=new Map(summaryRows().filter(isDelta).sort((a,b)=>(isAcked(a)-isAcked(b)) || Math.abs(b.dif)-Math.abs(a.dif)).map((r,i)=>[r.sku,i]));
   document.getElementById('resumen-title').textContent=`${hubName(S.hub)} · ${areaName(S.area)}`;
   showScreen('screen-resumen'); renderResumen();
   Promise.all([syncServerEvents(), loadArmado()]).then(()=>{ if(screenActive('screen-resumen')) renderResumen(); });
@@ -1705,8 +1742,10 @@ function renderResumen(){
   const el=document.getElementById('resumen-body');
   const rows=summaryRows(), deltas=rows.filter(isDelta), oks=rows.filter(r=>!isDelta(r));
   const pend=deltas.filter(r=>!isAcked(r)), rev=revisarItems();
-  // deltas first: unanswered on top, biggest gaps first
-  deltas.sort((a,b)=>(isAcked(a)-isAcked(b)) || Math.abs(b.dif)-Math.abs(a.dif));
+  // Order is fixed when the summary opens (unanswered first, biggest gaps first) and does NOT move as rows are
+  // answered — otherwise the next row slides under the thumb and tapping one spot confirms everything (rule 2).
+  const ord=r=>S.resumenOrder.has(r.sku) ? S.resumenOrder.get(r.sku) : 1e6;
+  deltas.sort((a,b)=>ord(a)-ord(b) || Math.abs(b.dif)-Math.abs(a.dif));
   let h=`<h2>Resumen y cierre</h2><div class="stat-grid">
     <div class="stat"><div class="stat-n">${S.lines.size}</div><div class="stat-l">productos en el envío</div></div>
     <div class="stat"><div class="stat-n">${oks.length}</div><div class="stat-l">completos</div></div>
@@ -1770,7 +1809,7 @@ async function cerrarRecepcion(){
     recordEvent(ev); S.closedInfo=closedState(); await flushAndWait();
     S.closing=false;
     toast(OUTBOX.length?'Recepción cerrada — se termina de subir al reconectar':'✓ Recepción cerrada', 3500);
-    openRecepcion(Object.assign({ ts:ev.ts, fecha:S.session.fecha, receptor:S.receptor }, ev.detalle), 'inicio');
+    openRecepcion(Object.assign({ ts:ev.ts, fecha:S.session.fecha, hub:S.hub, area:S.area, session_id:S.session.id, receptor:S.receptor }, ev.detalle), 'inicio');
   }catch(e){
     S.closing=false; renderResumen();
     toast(isNetErr(e)?'Sin conexión: no se pudo cerrar. Intenta de nuevo con internet.':'No se pudo cerrar ('+e.message+')', 4500);
@@ -1831,7 +1870,8 @@ function origenDif(r){
   const eq=(x,y)=>Math.abs(x-y)<=(r.kgpz==='Kg'?kgTol(r.env):0);
   if(!eq(a, r.env)) return `Armado ${fmtQty(a,r.kgpz)} ≠ enviado: error al registrar la salida en CH.`;
   if(!eq(r.env, r.rec) && eq(a, r.rec)) return 'Coincide con lo armado: error de registro, no físico.';
-  if(!eq(r.env, r.rec)) return 'Armado = enviado ≠ recibido: pérdida física o error de recepción.';
+  if(r.rec<r.env) return 'Armado = enviado, llegó menos: pérdida física o error de recepción.';
+  if(r.rec>r.env) return 'Armado = enviado, llegó de más: producto equivocado o error de conteo.';
   return '';
 }
 
@@ -1912,6 +1952,8 @@ async function openRecepcion(info, from){
   let ticks=new Set(); try{ ticks=new Set(JSON.parse(localStorage.getItem('mr_ticks_'+info.reporte)||'[]')); }catch(_){}
   RV={ info, rows, csv, ticks, f:{ q:'', solo:false, estado:'', kgpz:'', pasillo:'', sort:'archivo' } };
   renderRecepcion();
+  if(PENDING_UPLOAD && from==='inicio' && info.hub===INI.hub && info.area===INI.area)
+    document.getElementById('recep-body').insertAdjacentHTML('afterbegin', `<button class="btn btn-primary btn-block" style="margin-bottom:12px" onclick="resumePendingUpload()">📄 Ahora carga el archivo nuevo (${escapeHtml(PENDING_UPLOAD.file.name)})</button>`);
 }
 function rvSet(k, v){ RV.f[k]=v; renderRecepcionRows(); }
 function rvTick(i){
