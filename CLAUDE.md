@@ -35,7 +35,7 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   the Google Sheet) is the next step and needs people + phones. See `HANDOFF.md` for the overnight session log.
 - **Jose must still:** run `sql/v1-alerts-rpc.sql`; create `recibo/config/admin_pin.txt` (Admin is locked until
   then); fill Admin → Receptores; paste `alertas/apps-script.gs` into script.google.com (`probar`, then `instalar`)
-  and set its `APP_URL`; set alert schedules in Admin → Alertas (all start off).
+  (`APP_URL` is already https://mh-recibo.joseromero.co); set alert schedules in Admin → Alertas (all start off).
 - Supabase answers **HTTP 400** (not 404) for a missing storage object.
 - Sorting Hub files exist only for `mh-contry` and `mh-condesa`; other hubs show "sin posición".
 - Until `receptores.json` exists, Inicio falls back to a free-text name. Shape: `{ "mh-contry": ["Nombre", …] }`.
@@ -97,4 +97,4 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - Real exports go in `fixtures/` (gitignored). Never commit business data.
 - Bump `CACHE_NAME` in `sw.js` on every deploy that changes `index.html`.
 - **Never `git push` from the terminal.** Commit locally and stop — Jose pushes with GitHub Desktop.
-  Netlify auto-deploys `main`.
+  Netlify (site `mh-recibo`, https://mh-recibo.joseromero.co) auto-deploys `main`.

@@ -145,7 +145,7 @@ Phases 2, 3, 4, 5 and 5b are built, each tested on `test-hub` at localhost (phon
 - Starting "sin archivo" is offered when there's no reception open today. A closed reception from today doesn't
   block a second sin-archivo one; the plan's "one reception per day" didn't cover that case.
 - "Abierta desde" in Admin uses the first event of the reception.
-- The Apps Script `APP_URL` is a guess (`https://mh-recibo.netlify.app`). Fix it.
+- The app is live at https://mh-recibo.joseromero.co (Netlify site `mh-recibo`); the Apps Script `APP_URL` points there.
 
 ## Not tested (needs Phase 6)
 - A real phone, a Bluetooth scanner, the camera, two physical phones at once (simulated by inserting another

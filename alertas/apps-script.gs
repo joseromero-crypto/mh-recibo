@@ -27,7 +27,7 @@ const HORA_CIERRE = '21:00';   // from here: "abierta sin cerrar" + daily digest
 const HUBS = { 'mh-contry':'MH Contry', 'mh-cumbres':'MH Cumbres', 'mh-guadalupe':'MH Guadalupe', 'mh-san-nicolas':'MH San Nicolás',
                'mh-avicola':'MH Avícola', 'mh-zapopan':'MH Zapopan', 'mh-condesa':'MH Condesa' }; // picks.hub uses these names
 const AREAS = { abarrotes:'Abarrotes', carnes:'Carnes' };
-const APP_URL = 'https://mh-recibo.netlify.app'; // adjust to the real Netlify URL
+const APP_URL = 'https://mh-recibo.joseromero.co';
 
 function instalar(){
   desinstalar();
