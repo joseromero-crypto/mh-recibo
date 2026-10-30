@@ -33,15 +33,13 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   switched off (`SIN_ARCHIVO_ENABLED`) on Jose's request: receptors must upload before scanning.
 - Phases 0–5b were tested on test-hub (localhost, phone width). Phase 6 (real-device QA at MH Contry next to
   the Google Sheet) is the next step and needs people + phones. See `HANDOFF.md` for the overnight session log.
-- **Jose must still:** run `sql/v1-alerts-rpc.sql`; create `recibo/config/admin_pin.txt` (Admin is locked until
-  then); fill Admin → Receptores; paste `alertas/apps-script.gs` into script.google.com (`probar`, then `instalar`)
-  (`APP_URL` is already https://mh-recibo.joseromero.co); set alert schedules in Admin → Alertas (all start off).
 - Supabase answers **HTTP 400** (not 404) for a missing storage object.
 - Sorting Hub files exist only for `mh-contry` and `mh-condesa`; other hubs show "sin posición".
 - Until `receptores.json` exists, Inicio falls back to a free-text name. Shape: `{ "mh-contry": ["Nombre", …] }`.
-- Test data in prod: `rec_events` rows with `hub='test-hub'`, files under `recibo/envios/test-hub/`,
-  `recibo/reportes/test-hub/`, `recibo/test/`, and one `rec_alert_config` row for test-hub (off). The Apps Script
-  ignores test-hub; Admin hides it outside localhost.
+- **Prod is clean (2026-10-30):** all test data was deleted before launch (`rec_events`, `rec_alert_config`, every
+  file except `recibo/config/`). The app is live at https://mh-recibo.joseromero.co; Receptores are filled in,
+  PIN file exists, `v1-alerts-rpc.sql` is run. Alert schedules and the Apps Script wait for the real launch. Any
+  new local test writes to prod again: use test-hub and tell Jose what to clean up.
 
 ## How the code is laid out (index.html)
 - Helpers copied from armado-CH sit at the top, each block labelled. Our additions: `codeKey` (cleanBC + strip
