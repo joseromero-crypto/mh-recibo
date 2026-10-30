@@ -312,40 +312,25 @@ What is checked (all America/Monterrey):
   deadline: when Armado shows an assembly finished for them, expect a reception within `dias_gracia` (default 3)
   days; otherwise alert "envío armado el {fecha} sin recepción".
 
-**Default schedule (from Jose, 2026-10-29).** `hora_limite` = end of the arrival window + ~1–2 h.
-
-| Hub | Área | Días | Llegada | Alerta si nada a las |
-|---|---|---|---|---|
-| MH Contry | Abarrotes | Lun–Sáb | 9–11 h | 12:30 |
-| MH Cumbres | Abarrotes | Lun–Sáb | 9–11 h | 12:30 |
-| MH San Nicolás | Abarrotes | Lun–Sáb | 9–11 h | 12:30 |
-| MH Guadalupe | Abarrotes | Lun–Sáb | noche anterior (comparte almacén con CH), desde 6 h | 9:00 |
-| MH Avícola | Abarrotes | Lun–Sáb | ~15 h | 17:00 |
-| MH Contry | Carnes | Lun–Vie | ~15 h | 17:00 |
-| MH Cumbres | Carnes | Lun–Vie | ~15 h | 17:00 |
-| MH San Nicolás | Carnes | Lun–Vie | ~13 h | 15:00 |
-| MH Avícola | Carnes | Lun–Vie | ~15 h | 17:00 |
-| MH Guadalupe | Carnes | ? (Q10) | ? | off until confirmed |
-| MH Condesa | Abarrotes + Carnes | irregular | varía | mode `tras_armado` |
-| MH Zapopan | Abarrotes + Carnes | irregular | varía | mode `tras_armado` |
-
-For later (FyV, not in v1): SN ~13 h, Cumbres/Contry ~15 h, Guadalupe ~12 h, Avícola ~15 h; Norte Mon–Sat.
+**No schedule is hard-coded.** Every hub+área starts **off** with empty days/times; Jose sets days, `hora_limite`,
+mode and email per hub+área himself in Admin → Alertas. An alert can't be switched on until its days and time
+(or `tras_armado` mode) are filled in.
 Alerts go to **jose.romero@calii.com**.
 
 Channels:
 - **In app:** Admin shows an Alertas feed (from `rec_alerts`) with a count badge on entering Admin.
-- **Email:** sent server-side — a Supabase **Edge Function** (`rec-alertas`) run by **pg_cron** every 15 min
-  reads `rec_alert_config` + `rec_events`, writes `rec_alerts`, and sends email through an email API
-  (**Resend**). Resend's free tier (3,000 emails/month) can send from its test address `onboarding@resend.dev`
-  **to the account owner's own email without verifying a domain** — enough, since the only recipient is Jose.
-  Jose creates the account with jose.romero@calii.com and gives Claude the API key. The email API key lives only in the Edge Function's secrets, never in `index.html`.
-  Each alert is sent once (`rec_alerts` unique on hub+área+fecha+tipo).
-
+- **Email: from jose.romero@calii.com to jose.romero@calii.com, via Google Apps Script.** A script in Jose's own
+  Calii Google account runs on a time trigger every 15 min, reads `rec_alert_config` + `rec_events` from Supabase
+  (anon key, read-only use), writes `rec_alerts` through an RPC, and sends with `MailApp`/`GmailApp` — so the email
+  really comes from his Calii address, with no third-party service and no DNS changes to calii.com.
+  (Rejected: Resend "from @calii.com" needs calii.com DNS records added by whoever runs the domain.)
+  Each alert is sent once (`rec_alerts` unique on hub+área+fecha+tipo). Apps Script code lives in
+  `alertas/apps-script.gs` in this repo for reference; Jose pastes it into script.google.com.
 ```sql
 create table public.rec_alert_config (
-  hub text not null, area text not null, activo boolean not null default true,
-  email boolean not null default true, dias int[] not null default '{1,2,3,4,5,6}', -- 0=Sun
-  hora_limite time not null default '12:30', pausado_hasta date,
+  hub text not null, area text not null, activo boolean not null default false,
+  email boolean not null default true, dias int[] not null default '{}', -- 0=Sun
+  hora_limite time, pausado_hasta date,
   modo text not null default 'diario',  -- 'diario' | 'tras_armado'
   dias_gracia int not null default 3,
   updated_at timestamptz not null default now(), primary key (hub, area)
@@ -459,7 +444,7 @@ All cells quoted, CRLF, BOM only on browser download.
 - **Phase 3 — Close.** Revisar y cerrar, report CSV, Resumen para registrar.
 - **Phase 4 — Multi-device & resume.** Join session, polling, rebuild from events, overnight sessions.
 - **Phase 5 — Canastas + Armado enrichment** (§6.4, §5.3).
-- **Phase 5b — Alertas** (§6.9): config UI in Admin, Edge Function + pg_cron, email provider set up by Jose.
+- **Phase 5b — Alertas** (§6.9): config UI in Admin, `rec_alerts` writer RPC, Apps Script with a 15-min trigger in Jose's Calii account.
 - **Phase 6 — Real-device QA** at one hub (MH Contry suggested) side by side with the Google Sheet for a few days;
   compare deltas.
 
@@ -477,10 +462,10 @@ directos, so all items are treated alike · lifecycle §6.7 · admin safety net 
 visits · type-ahead with photos for barcode-less items · **expected qty = `Envío (kg o pz)` > 0** (checked on the
 real Contry file) · scope = Abarrotes + Carnes; Fruta y verdura later · Sorting Hub already in the shared project · one reception per hub+área per day · receptor picked from a list
 · summary keeps file order with search/filters/sort · Carnes may arrive before its file → "Empezar sin archivo" ·
-Carnes file checked: Kg in decimals, 20% lines without barcode, `Requiere confirmar` unreliable · alert schedule per hub+área (§6.9) · Kg items are always weighed; variance is expected, zero variance is questioned
+Carnes file checked: Kg in decimals, 20% lines without barcode, `Requiere confirmar` unreliable · alert schedule is set by Jose in Admin, nothing hard-coded (§6.9) · alert email sent from his own Calii
+account via Apps Script · Kg items are always weighed; variance is expected, zero variance is questioned
 (§7.6).
 
-- **Q10 MH Guadalupe Carnes:** does Guadalupe receive Carnes, and at what time?
 - **Q8 Fresh Carnes (Tue/Thu):** a fresh file would confirm the same columns; not blocking.
 
 ## 12. Not in v1
