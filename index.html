@@ -2177,6 +2177,8 @@ async function listCerradas(slug, area, days=30){
 function recepBack(){ goInicio(); }
 async function openRecepciones(){
   document.getElementById('recep-title').textContent=`${hubName(INI.hub)} · ${areaName(INI.area)}`;
+  // The list always goes back to Inicio (opening a reception from it points this button at the list)
+  const back=document.getElementById('recep-back'); back.onclick=recepBack; back.textContent='← Inicio';
   const el=document.getElementById('recep-body');
   el.innerHTML='<h2>Recepciones cerradas</h2><div class="muted">Cargando…</div>';
   showScreen('screen-recepciones');
