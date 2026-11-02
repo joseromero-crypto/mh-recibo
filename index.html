@@ -821,7 +821,7 @@ function inicioActionsHtml(){
   if(d.sinArchivo && !a.closed){
     return `<div class="info-card"><b>Recepción sin archivo</b>, empezada el ${fechaLarga(d.fecha)} a las ${localHM(new Date(d.uploadedAt))}${d.receptor?' por '+escapeHtml(d.receptor):''}.
       <div class="muted" style="margin-top:4px">Sube el envío cuando esté listo: lo escaneado se conserva y se revisa.</div></div>
-      <div class="stack"><button class="btn btn-primary btn-block" onclick="continuarRecepcion()">▶ Continuar recepción</button>${a.offline?'':subir}</div>`;
+      <div class="stack"><button class="btn btn-primary btn-block" onclick="continuarRecepcion()">Continuar recepción</button>${a.offline?'':subir}</div>`;
   }
   let info=`<b>Envío cargado el ${fechaLarga(d.fecha)}</b>, ${localHM(new Date(d.uploadedAt))} · ${d.stats.lineas} productos`
     +`<div class="muted" style="font-size:12px;margin-top:2px">${escapeHtml(d.sourceFile||'')}${d.receptor?' · subido por '+escapeHtml(d.receptor):''}</div>`;
@@ -837,7 +837,7 @@ function inicioActionsHtml(){
     return `<div class="info-card"><b>El archivo cargado ya se recibió el ${fechaLarga(localDateStr(new Date(a.closed)))}.</b></div>`
       +`<div class="stack"><button class="btn btn-secondary btn-block" onclick="verResumenCerrado()">Ver resumen</button>${subir.replace('btn-secondary','btn-primary')}${d.fecha<today?sinArch:''}</div>`;
   }
-  return `<div class="info-card">${info}</div><div class="stack"><button class="btn btn-primary btn-block" onclick="continuarRecepcion()">▶ Continuar recepción</button>${a.offline?'':subir}${(!a.offline && d.session_fecha<today)?sinArch:''}</div>`
+  return `<div class="info-card">${info}</div><div class="stack"><button class="btn btn-primary btn-block" onclick="continuarRecepcion()">Continuar recepción</button>${a.offline?'':subir}${(!a.offline && d.session_fecha<today)?sinArch:''}</div>`
     +(a.offline?'':`<button class="link-btn" style="color:var(--red)" onclick="borrarEnvio()">Borrar este envío</button>`);
 }
 async function refreshActive(){
