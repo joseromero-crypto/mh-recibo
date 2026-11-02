@@ -91,7 +91,7 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   `findActiveEnvio` returns none when a `borrar` is newer than the newest file, so an older file never reappears. closedState/sessionClosedAt/listCerradas/Admin/Apps Script treat it as ended.
 - Caducidad mínima: `parseEnvio` keeps «Vida anaquel usuarios (min. días)» as `vida_dias` (lines and catalogo[3]; files
   uploaded before 2026-11-02 don't have it → no box). Card shows `todayStr()` + días = minimum expiry accepted and a
-  "Viene con fecha menor" toggle (not a modal). Every scan stores `detalle.caducidad_min`; flagged ones `fecha_corta:true`
+  one-row "Fecha menor" toggle (not a modal; kept short so the quantity field stays above the keyboard). Every scan stores `detalle.caducidad_min`; flagged ones `fecha_corta:true`
   and still count as received. `fechaCortaDe(sku)` sums flagged scans (after Corregir). Shown in the recent list,
   Resumen (row note + count), report/parcial CSV columns `Fecha corta`, `Caducidad mínima` + a note, `cerrar.fecha_corta`,
   Recepciones ("Solo fecha corta" filter).

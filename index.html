@@ -153,12 +153,13 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .banner.blue{background:var(--c-white);color:var(--c-ink);font-size:16px;font-weight:700}
 .banner.gray{background:var(--c-white);color:var(--c-muted)}
 .banner.yellow{background:var(--c-ink);color:var(--c-white)}
-.cad-box{background:var(--c-white);border-radius:var(--r-md);padding:12px 14px;margin-bottom:10px}
+.cad-box{background:var(--c-white);border-radius:var(--r-md);padding:8px 8px 8px 14px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
 .cad-box.on{background:var(--c-ink);color:var(--c-white)}
-.cad-main{font-size:17px;font-weight:800;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
-.cad-sub{font-size:13px;font-weight:500;color:var(--c-muted);margin-top:2px}
-.cad-box.on .cad-sub{color:var(--c-white);opacity:.85}
-.cad-btn{margin-top:10px;width:100%;min-height:44px;background:var(--c-surface);border:none;border-radius:var(--r-pill);padding:10px;font-size:14px;font-weight:700;cursor:pointer}
+.cad-main{flex:1;min-width:0;font-size:15px;font-weight:800;line-height:1.2;font-variant-numeric:tabular-nums}
+.cad-main small{display:block;font-size:12px;font-weight:600;color:var(--c-muted);white-space:nowrap}
+.cad-hint{font-size:12px;color:var(--c-muted);margin:-6px 4px 10px}
+.cad-box.on .cad-main small{color:var(--c-white);opacity:.8}
+.cad-btn{flex-shrink:0;min-height:40px;background:var(--c-surface);border:none;border-radius:var(--r-pill);padding:0 14px;font-size:13px;font-weight:700;cursor:pointer}
 .cad-box.on .cad-btn{background:var(--c-white);color:var(--c-ink)}
 .sib-row{display:flex;gap:8px;align-items:center;margin-top:8px;font-weight:600;font-size:13px}
 .sib-row img,.sib-row .thumb-none{width:52px;height:52px;object-fit:contain;flex-shrink:0;border-radius:var(--r-xs);background:var(--c-white)}
@@ -1513,9 +1514,9 @@ function dmy(ymd){ const [y,m,d]=String(ymd).split('-'); return d?`${d}/${m}/${y
 function cadBoxHtml(c){
   const cad=c.recount?null:caducidadMin(c.p); if(!cad) return '';
   const on=!!c.det.fecha_corta;
-  return `<div class="cad-box ${on?'on':''}"><div class="cad-main">Caducidad mínima: ${dmy(cad)}</div>
-    <div class="cad-sub">${on?'Se registra como <b>fecha corta</b>. Si solo algunas piezas vienen así, regístralas aparte.':'No aceptar con fecha de caducidad anterior'}</div>
-    <button class="cad-btn" onclick="toggleFechaCorta()">${on?'✓ Viene con fecha menor · quitar':'Viene con fecha menor'}</button></div>`;
+  // One row so the quantity field stays above the keyboard
+  return `<div class="cad-box ${on?'on':''}"><div class="cad-main"><small>${on?'Fecha corta':'Caducidad mínima'}</small>${dmy(cad)}</div>
+    <button class="cad-btn" onclick="toggleFechaCorta()">${on?'Quitar':'Fecha menor'}</button></div>${on?'<div class="cad-hint">Si no son todas, registra las de fecha corta en otro escaneo.</div>':''}`;
 }
 function toggleFechaCorta(){
   const c=S.current; if(!c) return;
