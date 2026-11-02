@@ -43,7 +43,6 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - Supabase answers **HTTP 400** (not 404) for a missing storage object.
 - Sorting Hub files exist only for `mh-contry` and `mh-condesa`; other hubs show "sin posición".
 - Until `receptores.json` exists, Inicio falls back to a free-text name. Shape: `{ "mh-contry": ["Nombre", …] }`.
-- 2026-11-02: one stray test row (`rec_events` id 1007, hub test-hub) uploaded during theme QA; Jose deletes it.
 - **Prod is clean (2026-10-30):** all test data was deleted before launch (`rec_events`, `rec_alert_config`, every
   file except `recibo/config/`). The app is live at https://mh-recibo.joseromero.co; Receptores are filled in,
   PIN file exists, `v1-alerts-rpc.sql` is run. Alert schedules and the Apps Script wait for the real launch. Any
