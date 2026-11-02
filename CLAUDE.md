@@ -8,6 +8,11 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 ## Shape
 - Single `index.html` (HTML + CSS + vanilla JS). No framework, no build step, no package.json. `sw.js`
   network-first. Spanish UI. Netlify publish dir `.`, no build command.
+- **Calii Theme v1** (2026-11-02): rules in `~/Desktop/sorting-hub/Claude outputs/THEME.md` (Sorting Hub is the
+  reference). White page, Plus Jakarta Sans, `--c-*` tokens at the top of the `<style>`; the app's old token names
+  (`--green`, `--orange`, `--red`, `--gray-*`) are aliases so JS inline styles follow. Teal = the one primary action or
+  key value (the basket on the product card; Registrar and modal confirms are ink); attention = ink; `--c-danger` only
+  for errors/deletes. No emoji in buttons/labels (inline SVG icons for keyboard/camera/torch/close). No new hues.
 - Helpers are copied once from `~/Desktop/armado-CH/index.html` (read-only). Never edit the armado-CH or
   sorting-hub repos from here.
 
@@ -38,6 +43,7 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - Supabase answers **HTTP 400** (not 404) for a missing storage object.
 - Sorting Hub files exist only for `mh-contry` and `mh-condesa`; other hubs show "sin posición".
 - Until `receptores.json` exists, Inicio falls back to a free-text name. Shape: `{ "mh-contry": ["Nombre", …] }`.
+- 2026-11-02: one stray test row (`rec_events` id 1007, hub test-hub) uploaded during theme QA; Jose deletes it.
 - **Prod is clean (2026-10-30):** all test data was deleted before launch (`rec_events`, `rec_alert_config`, every
   file except `recibo/config/`). The app is live at https://mh-recibo.joseromero.co; Receptores are filled in,
   PIN file exists, `v1-alerts-rpc.sql` is run. Alert schedules and the Apps Script wait for the real launch. Any

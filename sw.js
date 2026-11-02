@@ -1,7 +1,7 @@
 /* Calii MH Recibo — service worker (plan §8)
    Network-first for the app shell: online always gets the freshest deploy, offline falls back to cache.
    BUMP CACHE_NAME on every deploy that changes index.html. */
-const CACHE_NAME = 'calii-mhrecibo-v1-caducidad';
+const CACHE_NAME = 'calii-mhrecibo-v1-tema';
 const SHELL = [
   './',
   './index.html',
@@ -27,12 +27,14 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
   if (url.hostname.includes('supabase.co')) return; // never intercept live data
-  const cacheable = url.origin === self.location.origin || url.hostname.includes('cloudflare') || url.hostname.includes('jsdelivr');
+  // Google Fonts (Calii theme, Plus Jakarta Sans) cached too so the font works offline
+  const cacheable = url.origin === self.location.origin || url.hostname.includes('cloudflare') || url.hostname.includes('jsdelivr')
+    || url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com';
   if (!cacheable) return; // product photos (S3) go straight to the network
   e.respondWith((async () => {
     try {
       const net = await fetch(e.request);
-      if (net && net.ok) {
+      if (net && (net.ok || net.type === 'opaque')) {
         const copy = net.clone();
         caches.open(CACHE_NAME).then((c) => c.put(e.request, copy));
       }
