@@ -127,6 +127,13 @@ mark{background:var(--yellow-light);color:inherit;padding:0 3px;border-radius:4p
 .banner.blue{background:#E3F2FD;color:#1565C0;font-size:16px}
 .banner.gray{background:var(--gray-100);color:var(--gray-700);font-weight:600}
 .banner.yellow{background:var(--yellow-light);border:2px solid var(--yellow);color:var(--gray-900)}
+.cad-box{border:2px solid #90CAF9;background:#F3F8FE;border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:10px}
+.cad-box.on{border-color:var(--orange);background:var(--orange-light)}
+.cad-main{font-size:17px;font-weight:900;color:#0D47A1}
+.cad-box.on .cad-main{color:var(--orange)}
+.cad-sub{font-size:13px;font-weight:600;color:var(--gray-700)}
+.cad-btn{margin-top:8px;width:100%;background:white;border:2px solid var(--gray-300);border-radius:var(--radius-sm);padding:9px;font-size:14px;font-weight:800;cursor:pointer}
+.cad-box.on .cad-btn{border-color:var(--orange);color:var(--orange)}
 .sib-row{display:flex;gap:8px;align-items:center;margin-top:8px;font-weight:600;font-size:13px}
 .sib-row img,.sib-row .thumb-none{width:52px;height:52px;object-fit:contain;flex-shrink:0;border-radius:6px;background:white}
 .unit-pick{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
@@ -315,7 +322,7 @@ textarea.text-input{min-height:110px;font-size:15px}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'v1 · borrar envío 2';
+const APP_VERSION = 'v1 · caducidad mínima';
 
 /* ════════════════════════════════════════════════════════════════════════════════════
    SUPABASE — shared project with Armado CH + Sorting Hub (plan §3). This app writes ONLY to bucket
@@ -907,7 +914,7 @@ function parseEnvio(text){
   const col=name=>fields.find(f=>normHeader(stripBOM(f))===normHeader(name));
   const C={ producto:col('Producto'), barcode:col('Código de barras'), kgpz:col('Kg/Pz'), envio:col('Envío (kg o pz)'),
             temp:col('Temp'), categoria:col('Categoría'), act:col('Actualización envío'), por:col('Envío registrado por'),
-            reqConf:col('Requiere confirmar') };
+            reqConf:col('Requiere confirmar'), vida:col('Vida anaquel usuarios (min. días)') };
   const missing=[['Producto',C.producto],['Código de barras',C.barcode],['Kg/Pz',C.kgpz],['Envío (kg o pz)',C.envio]].filter(x=>!x[1]).map(x=>x[0]);
   if(missing.length){
     out.errors.push(`Al archivo le falta${missing.length>1?'n las columnas':' la columna'} ${missing.map(m=>`«${m}»`).join(', ')}. ¿Es la exportación de Envío del sistema?`);
@@ -921,11 +928,12 @@ function parseEnvio(text){
     const esperado=parseNum(r[C.envio]);
     if(isNaN(esperado)){ badNums++; return; }
     const sku_key=skuKeyOf(barcode, producto);
-    if(!(esperado>0)){ out.catalogo.push([producto, barcode, kgpz]); return; }
+    const vd=C.vida?parseInt(String(r[C.vida]||'').trim(),10):NaN, vida_dias=vd>=0?vd:null;
+    if(!(esperado>0)){ out.catalogo.push([producto, barcode, kgpz, vida_dias]); return; }
     if(bySku.has(sku_key)){ // same product on two lines — counted together (never seen in real files)
       const l=bySku.get(sku_key); l.esperado=round2(l.esperado+esperado); dupes++; return;
     }
-    const line={ rowIndex, producto, barcode, sku_key, kgpz, esperado:round2(esperado),
+    const line={ rowIndex, producto, barcode, sku_key, kgpz, esperado:round2(esperado), vida_dias,
       temp:String(C.temp?r[C.temp]||'':'').trim(), categoria:String(C.categoria?r[C.categoria]||'':'').trim(),
       actualizacion_envio:String(C.act?r[C.act]||'':'').trim(), envio_registrado_por:String(C.por?r[C.por]||'':'').trim(),
       _reqConf:C.reqConf?String(r[C.reqConf]||'').trim().toLowerCase():'' };
@@ -1253,12 +1261,12 @@ function leaveRecibir(){ S.current=null; flushOutbox(); goInicio(); }
 // "Sin código" (§7.3) and to name a scanned barcode that isn't in the envío (§7.1).
 function buildCatalog(){
   const cat=new Map(), byCode=new Map();
-  const add=(producto, barcode, kgpz)=>{
+  const add=(producto, barcode, kgpz, vida_dias)=>{
     const sku=skuKeyOf(barcode, producto); if(!producto || cat.has(sku) || S.lines.has(sku)) return;
-    const c={ sku_key:sku, producto, barcode, kgpz:kgpz||'Pz', kgpzKnown:!!kgpz, _n:normName(producto) };
+    const c={ sku_key:sku, producto, barcode, kgpz:kgpz||'Pz', kgpzKnown:!!kgpz, vida_dias:vida_dias??null, _n:normName(producto) };
     cat.set(sku, c); if(barcode) byCode.set(codeKey(barcode), c);
   };
-  for(const r of (S.envio&&S.envio.catalogo)||[]) add(r[0], r[1], r[2]);
+  for(const r of (S.envio&&S.envio.catalogo)||[]) add(r[0], r[1], r[2], r[3]);
   for(const it of S.sortBC.values()) add(String(it[0]||'').trim(), cleanBC(it[1]), null);
   S.catalog=cat; S.catByCode=byCode;
 }
@@ -1460,6 +1468,29 @@ function openCard(p, metodo, det={}){
   document.getElementById('card-area').scrollIntoView({ block:'start', behavior:'smooth' });
 }
 function cancelCard(){ S.current=null; renderCard(); focusScan(); }
+/* ── Caducidad mínima: «Vida anaquel usuarios (min. días)» from the envío file + the day it's received (server,
+   Monterrey). Shown on the card; "Viene con fecha menor" flags that scan (still counted as received). ── */
+function vidaDiasOf(p){ const l=S.lines.get(p.sku_key), v=l?l.vida_dias:p.vida_dias; return Number.isFinite(v)?v:null; }
+function caducidadMin(p){ const d=vidaDiasOf(p); return d==null ? null : new Date(Date.parse(todayStr()+'T12:00:00Z')+d*86400000).toISOString().slice(0,10); }
+function dmy(ymd){ const [y,m,d]=String(ymd).split('-'); return d?`${d}/${m}/${y}`:String(ymd||''); }
+function cadBoxHtml(c){
+  const cad=c.recount?null:caducidadMin(c.p); if(!cad) return '';
+  const on=!!c.det.fecha_corta;
+  return `<div class="cad-box ${on?'on':''}"><div class="cad-main">📅 Caducidad mínima: ${dmy(cad)}</div>
+    <div class="cad-sub">${on?'Se registra como <b>fecha corta</b>. Si solo algunas piezas vienen así, regístralas aparte.':'No aceptar con fecha de caducidad anterior'}</div>
+    <button class="cad-btn" onclick="toggleFechaCorta()">${on?'✓ Viene con fecha menor · quitar':'⚠ Viene con fecha menor'}</button></div>`;
+}
+function toggleFechaCorta(){
+  const c=S.current; if(!c) return;
+  if(c.det.fecha_corta) delete c.det.fecha_corta; else c.det.fecha_corta=true;
+  renderCard(); const q=document.getElementById('qty-input'); if(q) q.focus();
+}
+// Received pieces flagged short-dated (Corregir on a flagged scan changes it; never above what was received)
+function fechaCortaDe(sku){
+  let n=0; for(const e of S.events) if(e.tipo==='scan' && e.sku_key===sku && e.detalle && e.detalle.fecha_corta) n+=scanQtyNow(e);
+  return round2(Math.max(0, Math.min(n, recibidoDe(sku))));
+}
+function caducidadDe(sku){ let c=''; for(const e of S.events) if(e.tipo==='scan' && e.sku_key===sku && e.detalle && e.detalle.caducidad_min && (!c || e.detalle.fecha_corta)) c=e.detalle.caducidad_min; return c; }
 function renderCard(){
   const el=document.getElementById('card-area');
   const c=S.current;
@@ -1485,6 +1516,7 @@ function renderCard(){
     ${p.kgpzUnknown?`<div class="qty-label">¿Cómo se recibe?</div><div class="unit-pick">${['Pz','Kg'].map(u=>`<button class="choice ${p.kgpz===u?'sel':''}" onclick="pickUnit('${u}')">${u==='Kg'?'⚖️ Por peso (Kg)':'🔢 Por pieza (Pz)'}</button>`).join('')}</div>`:''}
     ${ya>0?`<div class="banner gray">Ya registraste ${fmtQty(ya,p.kgpz||'Kg')} ${p.kgpz?unitOf(p.kgpz):''} de este producto.</div>`:''}
     ${kg?'<div class="banner blue">⚖️ Pésalo en la báscula</div>':''}
+    ${cadBoxHtml(c)}
     <label class="qty-label" for="qty-input">${c.recount?(kg?'Total en kg (báscula)':'Total de piezas contadas ahora'):kg?'kg (báscula)':'Piezas contadas'}</label>
     <input id="qty-input" class="qty-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}">
     <div class="qty-err" id="qty-err"></div>
@@ -1591,9 +1623,10 @@ async function confirmCard(){
       detalle:Object.assign({ antes:before, despues:qty, motivo:'Recuento', kgpz:p.kgpz }, c.det) }));
     toast(`✓ Recontado: ${fmtQty(qty,p.kgpz)} ${unitOf(p.kgpz)} · ${p.producto}`);
   } else {
+    const cad=caducidadMin(p);
     recordEvent(makeEvent('scan', { sku_key:p.sku_key, producto:p.producto, cantidad:qty, metodo:c.metodo,
-      detalle:Object.assign({ esperado:p.enEnvio, kgpz:p.kgpz }, c.det) }));
-    toast(`✓ ${fmtQty(qty,p.kgpz)} ${unitOf(p.kgpz)} · ${p.producto}`);
+      detalle:Object.assign({ esperado:p.enEnvio, kgpz:p.kgpz }, cad?{ caducidad_min:cad }:{}, c.det) }));
+    toast(`✓ ${fmtQty(qty,p.kgpz)} ${unitOf(p.kgpz)} · ${p.producto}${c.det.fecha_corta?' · fecha corta':''}`);
   }
   S.current=null;
   renderRecibir();
@@ -1614,7 +1647,7 @@ function renderRecent(){
   const more=all.length>10 ? `<button class="link-btn" onclick="S.recentAll=!S.recentAll;renderRecent()">${S.recentAll?'Ver solo los últimos 10':`Ver todos los escaneos (${all.length})`}</button>` : '';
   el.innerHTML=scans.map(ev=>{
     const u=ev.detalle&&ev.detalle.uid, kp=kgpzOf(ev), now=scanQtyNow(ev), orig=round2(ev.cantidad), line=S.lines.get(ev.sku_key);
-    const meta=[localHM(new Date(ev.ts)), ev.receptor!==S.receptor?escapeHtml(ev.receptor):'', ev.metodo==='manual'?'sin código':ev.metodo==='codigo_incorrecto'?'<span style="color:var(--orange);font-weight:700">código incorrecto</span>':ev.metodo==='camara'?'cámara':'', line?'':'<span style="color:var(--red);font-weight:700">no esperado</span>'].filter(Boolean).join(' · ');
+    const meta=[localHM(new Date(ev.ts)), ev.receptor!==S.receptor?escapeHtml(ev.receptor):'', ev.metodo==='manual'?'sin código':ev.metodo==='codigo_incorrecto'?'<span style="color:var(--orange);font-weight:700">código incorrecto</span>':ev.metodo==='camara'?'cámara':'', line?'':'<span style="color:var(--red);font-weight:700">no esperado</span>', ev.detalle&&ev.detalle.fecha_corta?'<span style="color:var(--orange);font-weight:700">fecha corta</span>':''].filter(Boolean).join(' · ');
     const editing=S.corrigiendo===u;
     return `<div class="ritem"><div class="ritem-row">
         ${line?imgTag(line.barcode, line.producto, 'thumb'):imgTag(ev.sku_key.startsWith('name:')?'':ev.sku_key, ev.producto, 'thumb')}
@@ -1821,7 +1854,7 @@ function sumRowHtml(r, inner){
   return `<div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
       <div class="ritem-meta">${pos?escapeHtml(pos.full)+' · ':''}${r.kgpz}${r.barcode?'':' · sin código'}</div></div>
       <span class="estado ${ESTADO_CLS[r.estado]}">${escapeHtml(r.estado)}</span></div>
-    ${(()=>{ const a=armadoDe(r), o=isDelta(r)?origenDif(r):''; return (a!=null?`<div class="ritem-meta" style="margin-top:4px">Armado en CH: <b>${fmtQty(a,r.kgpz)}</b> ${u}</div>`:'')+(o?`<div class="ritem-meta" style="color:#4527A0;font-weight:700">${escapeHtml(o)}</div>`:''); })()}
+    ${(()=>{ const a=armadoDe(r), o=isDelta(r)?origenDif(r):''; const fc=fechaCortaDe(r.sku); return (a!=null?`<div class="ritem-meta" style="margin-top:4px">Armado en CH: <b>${fmtQty(a,r.kgpz)}</b> ${u}</div>`:'')+(o?`<div class="ritem-meta" style="color:#4527A0;font-weight:700">${escapeHtml(o)}</div>`:'')+(fc>0?`<div class="ritem-meta" style="color:var(--orange);font-weight:700">📅 ${fmtQty(fc,r.kgpz)} ${u} con fecha corta (caducidad antes del ${dmy(caducidadDe(r.sku))})</div>`:''); })()}
     <div class="sum-nums"><div><b>${r.env?fmtQty(r.env,r.kgpz):'—'}</b><span>Enviado (${u})</span></div><div class="big"><b>${fmtQty(r.rec,r.kgpz)}</b><span>Recibido (${u})</span></div>
       <div><b style="color:${r.dif<0?'var(--red)':r.dif>0?'var(--orange)':'inherit'}">${sign}${fmtQty(r.dif,r.kgpz)}</b><span>Diferencia</span></div></div>${inner||''}`;
 }
@@ -1839,6 +1872,8 @@ function renderResumen(){
     <div class="stat"><div class="stat-n">${deltas.length}</div><div class="stat-l">con diferencia</div></div>
     <div class="stat"><div class="stat-n" style="color:${pend.length?'var(--orange)':'var(--green-dark)'}">${pend.length}</div><div class="stat-l">por confirmar</div></div></div>`;
   if(OUTBOX.length) h+=`<div class="warn-box">Hay ${OUTBOX.length} registro(s) sin subir. Conéctate a internet para poder cerrar.</div>`;
+  const nfc=rows.filter(r=>fechaCortaDe(r.sku)>0).length;
+  if(nfc) h+=`<div class="warn-box">📅 ${nfc} producto(s) llegaron con fecha corta. Se cuentan como recibidos y quedan marcados en el reporte.</div>`;
   if(rev.length) h+=`<button class="btn btn-warn btn-block" style="margin-bottom:10px" onclick="backToRecibir();openRevisar()">⚠ Revisar ahora · ${rev.length}</button>`;
   if(deltas.length){
     h+=`<div class="section-title">Diferencias · ${deltas.length}</div><div class="muted" style="margin-bottom:8px">Contesta cada una: recuenta el producto o confirma la diferencia.</div>`;
@@ -1893,6 +1928,7 @@ async function cerrarRecepcion(){
     const deltas=rows.filter(isDelta);
     const ev=makeEvent('cerrar', { detalle:{ reporte:path, envio:S.envio._path, lineas:S.lines.size, recibidas:rows.filter(r=>r.env>0 && r.rec>0).length,
       diferencias:deltas.length, no_esperados:rows.filter(r=>r.estado==='No esperado').length, badges, receptores,
+      fecha_corta:rows.filter(r=>fechaCortaDe(r.sku)>0).length||undefined,
       entregas:parciales().length?parciales().length+1:undefined } });
     recordEvent(ev); S.closedInfo=closedState(); await flushAndWait();
     S.closing=false;
@@ -1922,12 +1958,18 @@ function porEntrega(){
   }
   return out;
 }
+// Short-dated pieces scanned in entrega n
+function fechaCortaEntrega(sku, n){
+  const ps=parciales(); let t=0;
+  for(const e of S.events) if(e.tipo==='scan' && e.sku_key===sku && e.detalle && e.detalle.fecha_corta && entregaDe(e, ps)===n) t+=scanQtyNow(e);
+  return round2(t);
+}
 function entregaActualRows(){
   const n=parciales().length+1, m=porEntrega().get(n)||new Map(), rows=[];
   for(const [sku, q] of m){
     if(!q) continue;
     const l=S.lines.get(sku), ne=S.noEsperados.get(sku);
-    rows.push({ sku, producto:l?l.producto:ne?ne.producto:sku, barcode:l?l.barcode:(sku.startsWith('name:')?'':sku), kgpz:l?l.kgpz:ne?ne.kgpz:'Pz', q, total:recibidoDe(sku), esperado:!!l });
+    rows.push({ sku, producto:l?l.producto:ne?ne.producto:sku, barcode:l?l.barcode:(sku.startsWith('name:')?'':sku), kgpz:l?l.kgpz:ne?ne.kgpz:'Pz', q, total:recibidoDe(sku), esperado:!!l, corta:fechaCortaEntrega(sku, n) });
   }
   return rows.sort((a,b)=>normName(a.producto).localeCompare(normName(b.producto)));
 }
@@ -1945,17 +1987,17 @@ function openParcial(){
       <div class="stat"><div class="stat-n">${got} / ${total}</div><div class="stat-l">del envío ya recibidos</div></div></div>
     ${OUTBOX.length?`<div class="warn-box">Hay ${OUTBOX.length} registro(s) sin subir. Conéctate a internet para poder cerrar la entrega.</div>`:''}
     ${rows.map(r=>`<div class="ritem"><div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
-      <div class="ritem-meta">${r.esperado?'':'<span style="color:var(--red);font-weight:700">no esperado</span>'}</div></div>
+      <div class="ritem-meta">${r.esperado?'':'<span style="color:var(--red);font-weight:700">no esperado</span>'}${r.corta?`<span style="color:var(--orange);font-weight:700">${r.esperado?'':' · '}${fmtQty(r.corta,r.kgpz)} con fecha corta</span>`:''}</div></div>
       <div class="ritem-qty">${fmtQty(r.q,r.kgpz)} <small>${unitOf(r.kgpz)}</small></div></div></div>`).join('')}
     <button class="btn btn-primary btn-block" id="parcial-btn" style="margin-top:16px" onclick="cerrarParcial()">📦 Cerrar entrega parcial ${n}</button>
     <div class="muted" style="margin-top:8px;text-align:center">Cuando llegue lo demás, entra de nuevo y toca «Continuar recepción». Al terminar todo, usa «Terminé todo: revisar y cerrar».</div>`);
 }
-const PARCIAL_COLS=['Hub','Área','Fecha','Entrega','Fecha de entrega','Receptor(es)','Producto','Código de barras','Kg/Pz','Posición','Recibido','Recibido acumulado'];
+const PARCIAL_COLS=['Hub','Área','Fecha','Entrega','Fecha de entrega','Receptor(es)','Producto','Código de barras','Kg/Pz','Posición','Recibido','Recibido acumulado','Fecha corta','Caducidad mínima'];
 function buildParcialCsv(n, hoy, rows, receptores){
   const head=PARCIAL_COLS.map(csvCell).join(',');
   const body=rows.map(r=>{ const pos=positionOf(r.barcode, r.producto);
     return [hubName(S.hub), areaName(S.area), S.session.fecha, n, hoy, receptores.join(', '), r.producto, r.barcode, r.kgpz, pos?pos.full:'',
-      fmtQty(r.q,r.kgpz), fmtQty(r.total,r.kgpz)].map(csvCell).join(','); });
+      fmtQty(r.q,r.kgpz), fmtQty(r.total,r.kgpz), r.corta?fmtQty(r.corta,r.kgpz):'', caducidadDe(r.sku)?dmy(caducidadDe(r.sku)):''].map(csvCell).join(','); });
   return [head].concat(body).join('\r\n')+'\r\n';
 }
 async function cerrarParcial(){
@@ -1988,7 +2030,7 @@ async function cerrarParcial(){
 }
 
 /* ── Report CSV (§9): all cells quoted, CRLF; the BOM is added only on browser download ── */
-const REPORT_COLS=['Hub','Área','Fecha','Receptor(es)','Producto','Código de barras','Kg/Pz','Posición','Armado','Enviado','Recibido','Diferencia','Estado','Notas (correcciones / confirmaciones)','Alertas'];
+const REPORT_COLS=['Hub','Área','Fecha','Receptor(es)','Producto','Código de barras','Kg/Pz','Posición','Armado','Enviado','Recibido','Diferencia','Estado','Notas (correcciones / confirmaciones)','Alertas','Fecha corta','Caducidad mínima'];
 function csvCell(v){ return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'; }
 function notasDe(sku, kgpz){
   const n=[];
@@ -2000,6 +2042,7 @@ function notasDe(sku, kgpz){
     else if(e.tipo==='confirmacion' && d.revisar) n.push(`Revisado sin archivo (${e.receptor||''})`);
     else if(e.tipo==='scan' && d.reatribuido_de) n.push(`Escaneado como «${d.reatribuido_de.producto}»`);
     else if(e.tipo==='scan' && d.sobrante) n.push('Se registró arriba de lo enviado tras recontar');
+    if(e.tipo==='scan' && d.fecha_corta) n.push(`Fecha corta: ${fmtQty(scanQtyNow(e),kgpz)} ${u} con caducidad antes del ${dmy(d.caducidad_min)} (${e.receptor||''})`);
     if(e.tipo==='scan' && d.codigo_incorrecto) n.push(`Código incorrecto en sistema: se escaneó ${d.codigo_incorrecto.escaneado}, el sistema tiene ${d.codigo_incorrecto.codigo_sistema||'(sin código)'}`);
   }
   const r=summaryRows().find(x=>x.sku===sku); if(r && isDelta(r)){ const o=origenDif(r); if(o) n.push(o); }
@@ -2011,7 +2054,8 @@ function buildReportCsv(rows, badges, receptores){
   const head=REPORT_COLS.concat(ent.map(n=>'Entrega '+n)).map(csvCell).join(',');
   const body=rows.map(r=>{ const pos=positionOf(r.barcode, r.producto), arm=armadoDe(r);
     return [hubName(S.hub), areaName(S.area), S.session.fecha, receptores.join(', '), r.producto, r.barcode, r.kgpz, pos?pos.full:'',
-      arm==null?'—':fmtQty(arm,r.kgpz), r.env?fmtQty(r.env,r.kgpz):'0', fmtQty(r.rec,r.kgpz), fmtQty(r.dif,r.kgpz), r.estado, notasDe(r.sku, r.kgpz), badges.join(' · ')]
+      arm==null?'—':fmtQty(arm,r.kgpz), r.env?fmtQty(r.env,r.kgpz):'0', fmtQty(r.rec,r.kgpz), fmtQty(r.dif,r.kgpz), r.estado, notasDe(r.sku, r.kgpz), badges.join(' · '),
+      fechaCortaDe(r.sku)>0?fmtQty(fechaCortaDe(r.sku),r.kgpz):'', caducidadDe(r.sku)?dmy(caducidadDe(r.sku)):'']
       .concat(ent.map(n=>fmtQty((pe.get(n)&&pe.get(n).get(r.sku))||0, r.kgpz))).map(csvCell).join(','); });
   return [head].concat(body).join('\r\n')+'\r\n';
 }
@@ -2105,7 +2149,7 @@ async function openRecepciones(){
       ${r.parcial?`<div class="res-name">${fechaLarga(r.fecha)} · <span class="tag orange">entrega parcial ${r.entrega}</span></div>
       <div class="res-sub">${r.fecha_entrega&&r.fecha_entrega!==r.fecha?fechaLarga(r.fecha_entrega)+', ':''}${localHM(new Date(r.ts))} · ${escapeHtml((r.receptores||[r.receptor]).join(', '))} · ${r.productos||0} productos en esta entrega</div>`
       :`<div class="res-name">${fechaLarga(r.fecha)} · cerrada ${localHM(new Date(r.ts))}${r.entregas?` · ${r.entregas} entregas`:''}</div>
-      <div class="res-sub">${escapeHtml((r.receptores||[r.receptor]).join(', '))} · ${r.lineas||0} productos · ${r.diferencias?`<b style="color:var(--orange)">${r.diferencias} con diferencia</b>`:'sin diferencias'}</div>`}
+      <div class="res-sub">${escapeHtml((r.receptores||[r.receptor]).join(', '))} · ${r.lineas||0} productos · ${r.diferencias?`<b style="color:var(--orange)">${r.diferencias} con diferencia</b>`:'sin diferencias'}${r.fecha_corta?` · ${r.fecha_corta} con fecha corta`:''}</div>`}
       ${(r.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div><span style="font-size:20px">›</span></button>`).join('')
       :'<div class="empty-hint">No hay recepciones cerradas en los últimos 30 días.</div>');
 }
@@ -2129,9 +2173,9 @@ async function openRecepcion(info, from){
     const pos=g('Posición'), kgpz=g('Kg/Pz')==='Kg'?'Kg':'Pz';
     return { i, producto:g('Producto'), barcode:g('Código de barras'), kgpz, pos, pasillo:(pos.split(/[-·\s]/)[0]||'').trim(), armado:g('Armado'),
       env:parseNum(g('Enviado')), rec:parseNum(g('Recibido')), dif:parseNum(g('Diferencia')), estado:info.parcial?'Entrega '+info.entrega:g('Estado'),
-      acum:info.parcial?parseNum(g('Recibido acumulado')):null, notas:g('Notas (correcciones / confirmaciones)'), _n:normName(g('Producto')) }; });
+      acum:info.parcial?parseNum(g('Recibido acumulado')):null, corta:parseNum(g('Fecha corta'))||0, notas:g('Notas (correcciones / confirmaciones)'), _n:normName(g('Producto')) }; });
   let ticks=new Set(); try{ ticks=new Set(JSON.parse(localStorage.getItem('mr_ticks_'+info.reporte)||'[]')); }catch(_){}
-  RV={ info, rows, csv, ticks, f:{ q:'', solo:false, estado:'', kgpz:'', pasillo:'', sort:'archivo' } };
+  RV={ info, rows, csv, ticks, f:{ q:'', solo:'', estado:'', kgpz:'', pasillo:'', sort:'archivo' } };
   renderRecepcion();
   if(PENDING_UPLOAD && from==='inicio' && info.hub===INI.hub && info.area===INI.area)
     document.getElementById('recep-body').insertAdjacentHTML('afterbegin', `<button class="btn btn-primary btn-block" style="margin-bottom:12px" onclick="resumePendingUpload()">📄 Ahora carga el archivo nuevo (${escapeHtml(PENDING_UPLOAD.file.name)})</button>`);
@@ -2152,13 +2196,13 @@ function renderRecepcion(){
       <div class="muted" style="margin-top:4px">Lo que falta se recibe en la siguiente entrega; las diferencias se revisan al cerrar toda la recepción.</div></div>`
     :`<h2>Recepción del ${fechaLarga(I.fecha)}</h2>
     <div class="info-card">Cerrada a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}${I.entregas?` · en ${I.entregas} entregas`:''}<br>
-      ${I.lineas||0} productos · ${I.diferencias?`<b style="color:var(--orange)">${I.diferencias} con diferencia</b>`:'sin diferencias'}${I.no_esperados?` · ${I.no_esperados} no esperado(s)`:''}
+      ${I.lineas||0} productos · ${I.diferencias?`<b style="color:var(--orange)">${I.diferencias} con diferencia</b>`:'sin diferencias'}${I.no_esperados?` · ${I.no_esperados} no esperado(s)`:''}${I.fecha_corta?` · <b style="color:var(--orange)">${I.fecha_corta} con fecha corta</b>`:''}
       <div>${(I.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div></div>`)+`
     <button class="btn btn-secondary btn-block" onclick="descargarReporte()">⬇ Descargar CSV</button>
     <input class="text-input" style="margin-top:12px" placeholder="Buscar producto…" oninput="rvSet('q',this.value)" autocomplete="off">
     <div class="filters">
-      ${P?'':`<select onchange="rvSet('solo',this.value==='1')"><option value="">Todos</option><option value="1">Solo diferencias</option></select>
-      <select onchange="rvSet('estado',this.value)"><option value="">Estado</option>${est.map(e=>`<option>${escapeHtml(e)}</option>`).join('')}</select>`}
+      ${P&&!RV.rows.some(r=>r.corta>0)?'':`<select onchange="rvSet('solo',this.value)"><option value="">Todos</option>${P?'':'<option value="1">Solo diferencias</option>'}${RV.rows.some(r=>r.corta>0)?'<option value="corta">Solo fecha corta</option>':''}</select>`}
+      ${P?'':`<select onchange="rvSet('estado',this.value)"><option value="">Estado</option>${est.map(e=>`<option>${escapeHtml(e)}</option>`).join('')}</select>`}
       <select onchange="rvSet('kgpz',this.value)"><option value="">Kg/Pz</option><option>Kg</option><option>Pz</option></select>
       <select onchange="rvSet('pasillo',this.value)"><option value="">Pasillo</option>${pas.map(p=>`<option>${escapeHtml(p)}</option>`).join('')}</select>
       <select onchange="rvSet('sort',this.value)"><option value="archivo">Orden del archivo</option><option value="az">A-Z</option><option value="pasillo">Pasillo</option><option value="dif">Diferencia</option></select>
@@ -2169,14 +2213,14 @@ function renderRecepcion(){
 function renderRecepcionRows(){
   const f=RV.f, words=normName(f.q).split(' ').filter(Boolean);
   let rows=RV.rows.filter(r=>(!words.length || words.every(w=>r._n.includes(w)))
-    && (!f.solo || !/^Completo/.test(r.estado)) && (!f.estado || r.estado===f.estado) && (!f.kgpz || r.kgpz===f.kgpz) && (!f.pasillo || r.pasillo===f.pasillo));
+    && (!f.solo || (f.solo==='corta' ? r.corta>0 : !/^Completo/.test(r.estado))) && (!f.estado || r.estado===f.estado) && (!f.kgpz || r.kgpz===f.kgpz) && (!f.pasillo || r.pasillo===f.pasillo));
   const cmp={ archivo:(a,b)=>a.i-b.i, az:(a,b)=>a._n.localeCompare(b._n), pasillo:(a,b)=>(a.pos||'~').localeCompare(b.pos||'~','es',{numeric:true})||a.i-b.i, dif:(a,b)=>Math.abs(b.dif)-Math.abs(a.dif)||a.i-b.i }[f.sort];
   rows=rows.slice().sort(cmp);
   document.getElementById('rv-count').textContent=`${rows.length} producto(s) · ${RV.ticks.size} de ${RV.rows.length} marcados`;
   document.getElementById('rv-rows').innerHTML=rows.map(r=>{ const u=unitOf(r.kgpz), on=RV.ticks.has(r.i);
     return `<div class="sum-row ${on?'ticked':''} ${r.acum!=null||/^Completo/.test(r.estado)?'':'delta'}"><div class="ritem-row">
       <input type="checkbox" class="chk" ${on?'checked':''} onchange="rvTick(${r.i})">${imgTag(r.barcode, r.producto, 'thumb')}
-      <div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div><div class="ritem-meta">${escapeHtml(r.barcode||'sin código')}${r.pos?' · '+escapeHtml(r.pos):''}</div></div>
+      <div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div><div class="ritem-meta">${escapeHtml(r.barcode||'sin código')}${r.pos?' · '+escapeHtml(r.pos):''}${r.corta>0?` · <span style="color:var(--orange);font-weight:700">📅 ${fmtQty(r.corta,r.kgpz)} ${u} fecha corta</span>`:''}</div></div>
       <div style="text-align:right"><div style="font-size:30px;font-weight:900;color:var(--green-dark)">${fmtQty(r.rec,r.kgpz)}</div><div class="ritem-meta">${u} recibido</div></div></div>
       ${r.acum!=null?`<div class="ritem-meta" style="margin-top:4px">Acumulado en la recepción: ${fmtQty(r.acum,r.kgpz)} ${u}</div>`:`<div class="ritem-meta" style="margin-top:4px">Enviado ${fmtQty(r.env,r.kgpz)}${r.armado&&r.armado!=='—'?' · Armado '+escapeHtml(r.armado):''} · Dif ${r.dif>0?'+':''}${fmtQty(r.dif,r.kgpz)} · <span class="estado ${ESTADO_CLS[r.estado]||'mid'}">${escapeHtml(r.estado)}</span></div>`}
       ${r.notas?`<div class="ritem-meta">${escapeHtml(r.notas)}</div>`:''}</div>`; }).join('') || '<div class="empty-hint">Nada coincide con el filtro.</div>';
