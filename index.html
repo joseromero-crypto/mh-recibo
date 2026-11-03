@@ -2181,9 +2181,16 @@ function origenTexto(o){ return o ? [ORIGEN[o.cat], o.nota].filter(Boolean).join
 
 /* ── Mensaje para Slack: the daily discrepancy post the auxiliares wrote by hand, now in one fixed format so
    mistakes can be tracked by where they come from. Built from the closed report (works for old reports too). ── */
-// Short on purpose (a daily wall of text gets ignored): one bold line per group, one line per error, A/E/R inline.
-const SLACK_GRUPOS=[['Armado',['cruce_armado','sobrante_armado']], ['Captura CH',['cruce_captura','captura']],
-  ['Faltante (armado o traslado)',['faltante']], ['Revisar',['revisar']], ['Sin datos de armado',['cruce','sin_armado']]];
+// Two paragraphs in one copy: 1) the items with a difference, one line each with A/E/R and a short cause tag;
+// 2) for the CH coordinator, how many errors of each kind and the weakest step. Short: a daily wall gets ignored.
+const SLACK_CAUSAS=[ // [key, categories, tag on the item line, how paragraph 2 names it, the weakness it points to]
+  ['conteo', ['sobrante_armado'], 'conteo al armar', 'conteo al armar', 'no se cuentan bien las piezas al armar'],
+  ['presentacion', ['cruce_armado'], 'presentación al armar', 'presentación o variante cruzada al armar', 'no se revisa la presentación o variante al armar'],
+  ['captura', ['captura','cruce_captura'], 'captura CH', 'captura al registrar la salida en CH', 'errores de tecleo o de producto al capturar la salida'],
+  ['faltante', ['faltante'], 'faltante', 'faltante (armado o traslado)', 'faltan piezas que sí se registraron como armadas: conteo al armar o traslado'],
+  ['revisar', ['revisar'], 'revisar', 'sin conclusión (armado, enviado y recibido no coinciden)', null],
+  ['sin_armado', ['cruce','sin_armado'], 'sin datos de armado', 'sin datos de armado', null],
+];
 // The words of b that a doesn't have: "Refresco Pepsi Light 600ml" vs "… 2.5L" → "2.5L"
 function nombreDif(a, b){
   const wa=new Set(normName(a).split(' ')), d=String(b).split(/\s+/).filter(w=>w && !wa.has(normName(w)));
@@ -2194,25 +2201,35 @@ function slackMensaje(info, rvRows){
   const rows=rvRows.filter(r=>!/^Completo/.test(r.estado)).map(r=>({ sku:'r'+r.i, producto:r.producto, kgpz:r.kgpz,
     arm:r.armado===''||r.armado==='—'?null:parseNum(r.armado), env:r.env||0, rec:r.rec||0, dif:r.dif||0 }));
   const org=clasificarDiferencias(rows), bySku=new Map(rows.map(r=>[r.sku,r]));
-  let aer=false;
-  const linea=r=>{ const o=org.get(r.sku), u=unitOf(r.kgpz);
-    if(o.par){ const p=bySku.get(o.par), [neg,pos]=r.dif<0?[r,p]:[p,r], q=`${fmtQty(pos.dif,r.kgpz)} ${u}`;
-      return o.cat==='cruce_captura' ? `• ${pos.producto}: se capturó como ${nombreDif(pos.producto, neg.producto)} · ${q}`
-        : `• ${neg.producto}: ${o.cat==='cruce_armado'?'se armó':'llegó'} ${nombreDif(neg.producto, pos.producto)} en su lugar · ${q}`; }
-    aer=true;
-    return `• ${r.producto}: ${sign(r.dif,r.kgpz)} ${u} · ${r.arm==null?'':`A${fmtQty(r.arm,r.kgpz)} `}E${fmtQty(r.env,r.kgpz)} R${fmtQty(r.rec,r.kgpz)}`; };
-  const body=[]; let total=0;
-  for(const [titulo, cats] of SLACK_GRUPOS){
-    const done=new Set(), lines=[];
+  const nums=r=>`${sign(r.dif,r.kgpz)} ${unitOf(r.kgpz)} · ${r.arm==null?'':`A${fmtQty(r.arm,r.kgpz)} `}E${fmtQty(r.env,r.kgpz)} R${fmtQty(r.rec,r.kgpz)}`;
+  const items=[], casos=new Map();
+  for(const [key, cats, tag] of SLACK_CAUSAS){
+    const done=new Set();
     for(const r of rows){ const o=org.get(r.sku); if(!cats.includes(o.cat) || done.has(r.sku)) continue;
-      done.add(r.sku); if(o.par) done.add(o.par); lines.push(linea(r)); }
-    if(lines.length){ total+=lines.length; body.push(`*${titulo} (${lines.length})*`, ...lines); }
+      casos.set(key, (casos.get(key)||0)+1); // a mix-up pair is one error
+      if(!o.par){ done.add(r.sku); items.push(`• ${r.producto}: ${nums(r)} → ${tag}`); continue; }
+      const p=bySku.get(o.par), [neg,pos]=r.dif<0?[r,p]:[p,r]; done.add(neg.sku); done.add(pos.sku);
+      // the note goes on the product that physically arrived wrong (armado) or was captured wrong (captura)
+      if(o.cat==='cruce_captura') items.push(`• ${neg.producto}: ${nums(neg)} → ${tag}`, `• ${pos.producto}: ${nums(pos)} → ${tag} (se capturó como ${nombreDif(pos.producto, neg.producto)})`);
+      else items.push(`• ${neg.producto}: ${nums(neg)} → ${tag} (llegó ${nombreDif(neg.producto, pos.producto)} en su lugar)`, `• ${pos.producto}: ${nums(pos)} → ${tag}`);
+    }
   }
+  const total=[...casos.values()].reduce((a,b)=>a+b,0), quien=(info.receptores||[info.receptor]).filter(Boolean).join(', ');
+  const out=[`*${hubName(info.hub)} · ${areaName(info.area)} · ${fechaLarga(info.fecha)}*: ${rows.length?`${rows.length} producto(s) con diferencia`:'sin diferencias'}${quien?' · recibió '+quien:''}`, ...items];
+  if(items.some(l=>/ A\d| E\d/.test(l))) out.push('_A armado · E enviado · R recibido_');
+  // Paragraph 2: the diagnosis for the CH coordinator
   const mal=rvRows.map(r=>({ r, m:/Código incorrecto en sistema: se escaneó (\S+), el sistema tiene ([^·]*)/.exec(r.notas||'') })).filter(x=>x.m);
-  if(mal.length) body.push(`*Código incorrecto en sistema (${mal.length})*`, ...mal.map(x=>`• ${x.r.producto}: escaneado ${x.m[1]}, sistema ${x.m[2].trim()}`));
-  const quien=(info.receptores||[info.receptor]).filter(Boolean).join(', ');
-  return [`*${hubName(info.hub)} · ${areaName(info.area)} · ${fechaLarga(info.fecha)}*: ${total?`${total} error(es)`:'sin diferencias'}${quien?' · recibió '+quien:''}`]
-    .concat(body, aer?['_A armado · E enviado · R recibido_']:[]).join('\n');
+  if(total || mal.length){
+    const partes=SLACK_CAUSAS.filter(c=>casos.get(c[0])).map(c=>`${casos.get(c[0])} de ${c[3]}`);
+    const conCausa=SLACK_CAUSAS.filter(c=>c[4] && casos.get(c[0])), max=Math.max(0, ...conCausa.map(c=>casos.get(c[0])));
+    const peores=conCausa.filter(c=>casos.get(c[0])===max);
+    let d=`*Para coordinación CH:* `;
+    if(total) d+=`${total} error(es) de ${info.lineas||rvRows.length} productos: ${partes.join(', ')}. `;
+    if(peores.length) d+=`${peores.length>1?'Puntos más débiles':'Punto más débil'}: ${peores.map(c=>c[4]).join('; ')}.`;
+    if(mal.length) d+=`${total?' ':''}Además, ${mal.length} código(s) incorrecto(s) en sistema para comercial: ${mal.map(x=>`${x.r.producto} (escaneado ${x.m[1]}, sistema ${x.m[2].trim()})`).join(', ')}.`;
+    out.push('', d.trim());
+  }
+  return out.join('\n');
 }
 function openSlackMensaje(){
   const txt=slackMensaje(RV.info, RV.rows);
