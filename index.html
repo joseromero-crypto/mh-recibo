@@ -2181,30 +2181,38 @@ function origenTexto(o){ return o ? [ORIGEN[o.cat], o.nota].filter(Boolean).join
 
 /* ── Mensaje para Slack: the daily discrepancy post the auxiliares wrote by hand, now in one fixed format so
    mistakes can be tracked by where they come from. Built from the closed report (works for old reports too). ── */
+// Short on purpose (a daily wall of text gets ignored): one bold line per group, one line per error, A/E/R inline.
+const SLACK_GRUPOS=[['Armado',['cruce_armado','sobrante_armado']], ['Captura CH',['cruce_captura','captura']],
+  ['Faltante (armado o traslado)',['faltante']], ['Revisar',['revisar']], ['Sin datos de armado',['cruce','sin_armado']]];
+// The words of b that a doesn't have: "Refresco Pepsi Light 600ml" vs "… 2.5L" → "2.5L"
+function nombreDif(a, b){
+  const wa=new Set(normName(a).split(' ')), d=String(b).split(/\s+/).filter(w=>w && !wa.has(normName(w)));
+  return d.length ? d.join(' ') : b;
+}
 function slackMensaje(info, rvRows){
   const sign=(d,k)=>(d>0?'+':'')+fmtQty(d,k);
   const rows=rvRows.filter(r=>!/^Completo/.test(r.estado)).map(r=>({ sku:'r'+r.i, producto:r.producto, kgpz:r.kgpz,
     arm:r.armado===''||r.armado==='—'?null:parseNum(r.armado), env:r.env||0, rec:r.rec||0, dif:r.dif||0 }));
   const org=clasificarDiferencias(rows), bySku=new Map(rows.map(r=>[r.sku,r]));
-  const linea=r=>`• ${r.producto}: ${r.arm==null?'':`Armado ${fmtQty(r.arm,r.kgpz)} · `}Enviado ${fmtQty(r.env,r.kgpz)} · Recibido ${fmtQty(r.rec,r.kgpz)} ${unitOf(r.kgpz)} (${sign(r.dif,r.kgpz)})`;
-  const casos={}, out=[];
-  for(const cat of ORIGEN_ORDEN){
-    const done=new Set(), lines=[]; let n=0;
-    for(const r of rows){
-      const o=org.get(r.sku); if(o.cat!==cat || done.has(r.sku)) continue;
-      done.add(r.sku); n++; lines.push(linea(r));
-      if(o.par){ done.add(o.par); lines.push(linea(bySku.get(o.par))); }
-      if(o.nota) lines.push(`   ↳ ${o.nota}`);
-    }
-    if(n){ casos[cat]=n; out.push('', `*${ORIGEN[cat]}* (${n})`, ...lines); }
+  let aer=false;
+  const linea=r=>{ const o=org.get(r.sku), u=unitOf(r.kgpz);
+    if(o.par){ const p=bySku.get(o.par), [neg,pos]=r.dif<0?[r,p]:[p,r], q=`${fmtQty(pos.dif,r.kgpz)} ${u}`;
+      return o.cat==='cruce_captura' ? `• ${pos.producto}: se capturó como ${nombreDif(pos.producto, neg.producto)} · ${q}`
+        : `• ${neg.producto}: ${o.cat==='cruce_armado'?'se armó':'llegó'} ${nombreDif(neg.producto, pos.producto)} en su lugar · ${q}`; }
+    aer=true;
+    return `• ${r.producto}: ${sign(r.dif,r.kgpz)} ${u} · ${r.arm==null?'':`A${fmtQty(r.arm,r.kgpz)} `}E${fmtQty(r.env,r.kgpz)} R${fmtQty(r.rec,r.kgpz)}`; };
+  const body=[]; let total=0;
+  for(const [titulo, cats] of SLACK_GRUPOS){
+    const done=new Set(), lines=[];
+    for(const r of rows){ const o=org.get(r.sku); if(!cats.includes(o.cat) || done.has(r.sku)) continue;
+      done.add(r.sku); if(o.par) done.add(o.par); lines.push(linea(r)); }
+    if(lines.length){ total+=lines.length; body.push(`*${titulo} (${lines.length})*`, ...lines); }
   }
-  const mal=rvRows.map(r=>({ r, m:/Código incorrecto en sistema: ([^·]*)/.exec(r.notas||'') })).filter(x=>x.m);
-  if(mal.length) out.push('', `*Código incorrecto en sistema* (${mal.length})`, ...mal.map(x=>`• ${x.r.producto}: ${x.m[1].trim()}`));
-  const c=k=>k.reduce((t,x)=>t+(casos[x]||0),0), total=c(ORIGEN_ORDEN);
-  out.unshift(`*Recepción ${hubName(info.hub)} · ${areaName(info.area)} · ${fechaLarga(info.fecha)}*`,
-    `Recibió: ${(info.receptores||[info.receptor]).filter(Boolean).join(', ')} · ${total?`${total} error(es) en ${rows.length} producto(s)`:'sin diferencias'} de ${info.lineas||rvRows.length} en el envío`);
-  if(rows.length) out.push('', `Conteo: armado ${c(['cruce_armado','sobrante_armado'])} · captura CH ${c(['captura','cruce_captura'])} · faltante ${c(['faltante'])} · revisar ${c(['revisar'])}${c(['cruce','sin_armado'])?` · sin datos de armado ${c(['cruce','sin_armado'])}`:''}`);
-  return out.join('\n');
+  const mal=rvRows.map(r=>({ r, m:/Código incorrecto en sistema: se escaneó (\S+), el sistema tiene ([^·]*)/.exec(r.notas||'') })).filter(x=>x.m);
+  if(mal.length) body.push(`*Código incorrecto en sistema (${mal.length})*`, ...mal.map(x=>`• ${x.r.producto}: escaneado ${x.m[1]}, sistema ${x.m[2].trim()}`));
+  const quien=(info.receptores||[info.receptor]).filter(Boolean).join(', ');
+  return [`*${hubName(info.hub)} · ${areaName(info.area)} · ${fechaLarga(info.fecha)}*: ${total?`${total} error(es)`:'sin diferencias'}${quien?' · recibió '+quien:''}`]
+    .concat(body, aer?['_A armado · E enviado · R recibido_']:[]).join('\n');
 }
 function openSlackMensaje(){
   const txt=slackMensaje(RV.info, RV.rows);
