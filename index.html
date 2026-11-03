@@ -2183,7 +2183,15 @@ function origenTexto(o){ return o ? [ORIGEN[o.cat], o.nota].filter(Boolean).join
    mistakes can be tracked by where they come from. Built from the closed report (works for old reports too). ── */
 // Two paragraphs in one copy: 1) the items with a difference, one line each with A/E/R and a short cause tag;
 // 2) for the CH coordinator, how many errors of each kind and the weakest step. Short: a daily wall gets ignored.
-const SLACK_COORD_CH='@alberto'; // CH coordinator (Alberto Mendoza). Slack turns a pasted @handle into a mention; the full name left "Mendoza" as extra text
+// People tagged on the last line: recibo/config/slack.json { tags:[…] }, edited in Admin → Slack. Use the Slack
+// @username (or a first name that's unique in Slack): a pasted "@Alberto Mendoza" tagged @alberto and left "Mendoza" as text.
+const SLACK_TAGS_DEFAULT=['@alberto','@jose.romero'];
+let SLACK_TAGS=null;
+async function loadSlackTags(){
+  try{ const j=JSON.parse(await sbFetch('config/slack.json')); SLACK_TAGS=Array.isArray(j.tags)?j.tags:SLACK_TAGS_DEFAULT; }
+  catch(_){ if(!SLACK_TAGS) SLACK_TAGS=SLACK_TAGS_DEFAULT; }
+  return SLACK_TAGS;
+}
 const SLACK_CAUSAS=[ // [key, categories, tag on the item line, how paragraph 2 names it, the weakness it points to]
   ['conteo', ['sobrante_armado'], 'conteo al armar', 'conteo al armar', 'no se cuentan bien las piezas al armar'],
   ['presentacion', ['cruce_armado'], 'presentación al armar', 'presentación o variante cruzada al armar', 'no se revisa la presentación o variante al armar'],
@@ -2197,7 +2205,7 @@ function nombreDif(a, b){
   const wa=new Set(normName(a).split(' ')), d=String(b).split(/\s+/).filter(w=>w && !wa.has(normName(w)));
   return d.length ? d.join(' ') : b;
 }
-function slackMensaje(info, rvRows){
+function slackMensaje(info, rvRows, tags){
   const sign=(d,k)=>(d>0?'+':'')+fmtQty(d,k);
   const rows=rvRows.filter(r=>!/^Completo/.test(r.estado)).map(r=>({ sku:'r'+r.i, producto:r.producto, kgpz:r.kgpz,
     arm:r.armado===''||r.armado==='—'?null:parseNum(r.armado), env:r.env||0, rec:r.rec||0, dif:r.dif||0 }));
@@ -2224,16 +2232,17 @@ function slackMensaje(info, rvRows){
     const partes=SLACK_CAUSAS.filter(c=>casos.get(c[0])).map(c=>`${casos.get(c[0])} de ${c[3]}`);
     const conCausa=SLACK_CAUSAS.filter(c=>c[4] && casos.get(c[0])), max=Math.max(0, ...conCausa.map(c=>casos.get(c[0])));
     const peores=conCausa.filter(c=>casos.get(c[0])===max);
-    let d=`${SLACK_COORD_CH} `;
+    let d=`*Para coordinación CH:* `;
     if(total) d+=`${total} error(es) de ${info.lineas||rvRows.length} productos: ${partes.join(', ')}. `;
     if(peores.length) d+=`${peores.length>1?'Puntos más débiles':'Punto más débil'}: ${peores.map(c=>c[4]).join('; ')}.`;
     if(mal.length) d+=`${total?' ':''}Además, ${mal.length} código(s) incorrecto(s) en sistema para comercial: ${mal.map(x=>`${x.r.producto} (escaneado ${x.m[1]}, sistema ${x.m[2].trim()})`).join(', ')}.`;
     out.push('', d.trim());
+    if(tags && tags.length) out.push('', tags.join(' '));
   }
   return out.join('\n');
 }
-function openSlackMensaje(){
-  const txt=slackMensaje(RV.info, RV.rows);
+async function openSlackMensaje(){
+  const txt=slackMensaje(RV.info, RV.rows, await loadSlackTags());
   openSheet('Mensaje para Slack', `<div class="muted" style="margin-bottom:10px">Cópialo y pégalo en el canal de abastecimiento del hub. Las conclusiones las calcula el sistema con lo armado, lo enviado y lo recibido.</div>
     <pre class="slack-pre" id="slack-txt">${escapeHtml(txt)}</pre>
     <button class="btn btn-primary btn-block" style="margin-top:12px" onclick="copiarSlack()">Copiar mensaje</button>`);
@@ -2428,10 +2437,10 @@ async function admLogin(){
 }
 function admTab(t){ ADM.tab=t; renderAdmin(); }
 async function renderAdmin(){
-  const tabs=[['recep','Recepciones'],['resp','Respaldos'],['recept','Receptores'],['codigos','Códigos'],['alert',`Alertas${ADM.alertCount?' ('+ADM.alertCount+')':''}`]];
+  const tabs=[['recep','Recepciones'],['resp','Respaldos'],['recept','Receptores'],['codigos','Códigos'],['slack','Slack'],['alert',`Alertas${ADM.alertCount?' ('+ADM.alertCount+')':''}`]];
   document.getElementById('admin-body').innerHTML=`<div class="tabs">${tabs.map(([k,n])=>`<button class="choice ${ADM.tab===k?'sel':''}" onclick="admTab('${k}')">${n}</button>`).join('')}</div><div id="adm-tab"><div class="muted">Cargando…</div></div>`;
   admAlertCount();
-  try{ await ({ recep:admRecepciones, resp:admRespaldos, recept:admReceptores, codigos:admCodigos, alert:admAlertas })[ADM.tab](); }
+  try{ await ({ recep:admRecepciones, resp:admRespaldos, recept:admReceptores, codigos:admCodigos, slack:admSlack, alert:admAlertas })[ADM.tab](); }
   catch(e){ document.getElementById('adm-tab').innerHTML=`<div class="err-box">${isNetErr(e)?'Sin conexión.':'Error: '+escapeHtml(e.message)}</div>`; }
 }
 async function admAlertCount(){
@@ -2563,6 +2572,19 @@ async function admGuardarReceptores(){
     if(names.length) out[t.dataset.hub]=names;
   });
   try{ await sbUpload('config/receptores.json', JSON.stringify(out, null, 1), 'application/json'); RECEPTORES=out; toast('✓ Receptores guardados'); }
+  catch(e){ toast('No se pudo guardar: '+e.message); }
+}
+
+/* ── Slack: who the Mensaje para Slack tags on its last line → recibo/config/slack.json ── */
+async function admSlack(){
+  const tags=await loadSlackTags();
+  document.getElementById('adm-tab').innerHTML=`<div class="muted" style="margin-bottom:10px">Un usuario de Slack por renglón (como <b>@alberto</b> o <b>@jose.romero</b>). Se etiquetan al final del mensaje de diferencias de todos los hubs. Usa el nombre de usuario de Slack, no el nombre completo.</div>
+    <textarea class="text-input" id="adm-slack-tags">${escapeHtml(tags.join('\n'))}</textarea>
+    <button class="btn btn-primary btn-block" style="margin-top:14px" onclick="admGuardarSlack()">Guardar etiquetas</button>`;
+}
+async function admGuardarSlack(){
+  const tags=[...new Set(document.getElementById('adm-slack-tags').value.split('\n').map(x=>x.trim().replace(/\s+/g,'')).filter(x=>x.replace(/^@/,'').length>=2).map(x=>x.startsWith('@')?x:'@'+x))];
+  try{ await sbUpload('config/slack.json', JSON.stringify({ tags }, null, 1), 'application/json'); SLACK_TAGS=tags; toast('✓ Etiquetas guardadas'); }
   catch(e){ toast('No se pudo guardar: '+e.message); }
 }
 

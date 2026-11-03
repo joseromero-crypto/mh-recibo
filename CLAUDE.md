@@ -108,7 +108,10 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   nota. Shown in Resumen, CSV column `Origen de la diferencia`, `cerrar.origenes` (counts) + `cerrar.errores`
   (per delta: armado/enviado/recibido/origen/par) for tracking. "Mensaje para Slack" (closed reception view,
   not parciales) rebuilds it from the report CSV (old reports too) in a fixed format and copies it.
-- Admin (§6.8/6.9): PIN in memory only; writes `rec_events` (admin), `config/receptores.json`, envío copies
+  Two paragraphs: items (A/E/R + cause tag), then «Para coordinación CH» (counts per cause + weakest step), then
+  the tags line from `config/slack.json` `{ tags:[…] }` (Admin → Slack; default `@alberto @jose.romero`). Tags
+  must be Slack @usernames: a pasted "@Alberto Mendoza" mentions @alberto and leaves "Mendoza" as text.
+- Admin (§6.8/6.9): PIN in memory only; writes `rec_events` (admin), `config/receptores.json`, `config/slack.json`, envío copies
   (restore), `rec_alert_config` (upsert via `pgUpsert`, `on_conflict=hub,area`). Alerts are written only by the
   Apps Script through the RPCs.
 - Judgement calls: upload warnings (§5.2) are inline buttons, not modals; Corregir is inline; Sin código /
