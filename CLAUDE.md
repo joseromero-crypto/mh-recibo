@@ -101,6 +101,13 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - Armado enrichment (`loadArmado`): Abarrotes only; picks of the newest `order_date` within 3 days ≤ reception
   date; latest row per (sku, ronda), rondas summed. picks.hub is the display name ("MH Contry"), sku_key is
   cleanBC or `norm:`+name.
+- Origen de la diferencia (`clasificarDiferencias`, replaces `origenDif`): A=armado, E=enviado, R=recibido.
+  A=R≠E → `captura`; A=E, R>E → `sobrante_armado`; A=E, R<E → `faltante` (armado or traslado, can't tell);
+  all differ → `revisar`; no Armado → `sin_armado`. Then an exact −n/+n pair of the same family (`mixUpScore`:
+  isSibling, or same first word + ≥2 shared words) becomes one `cruce_armado` / `cruce_captura` / `cruce` with a
+  nota. Shown in Resumen, CSV column `Origen de la diferencia`, `cerrar.origenes` (counts) + `cerrar.errores`
+  (per delta: armado/enviado/recibido/origen/par) for tracking. "Mensaje para Slack" (closed reception view,
+  not parciales) rebuilds it from the report CSV (old reports too) in a fixed format and copies it.
 - Admin (§6.8/6.9): PIN in memory only; writes `rec_events` (admin), `config/receptores.json`, envío copies
   (restore), `rec_alert_config` (upsert via `pgUpsert`, `on_conflict=hub,area`). Alerts are written only by the
   Apps Script through the RPCs.

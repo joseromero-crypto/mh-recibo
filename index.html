@@ -85,6 +85,7 @@ h2{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.15;margin:
 .note{background:var(--c-surface);border-radius:var(--r-md);padding:12px 14px;font-size:13px;margin-bottom:10px;color:var(--c-muted)}
 .info-card{background:var(--c-surface);border-radius:var(--r-lg);padding:16px;margin-bottom:12px;font-size:14px;line-height:1.5}
 .info-card b{font-weight:800}
+.slack-pre{background:var(--c-surface);border-radius:var(--r-lg);padding:14px;margin:0;font:13px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word;color:var(--c-ink)}
 .tag{display:inline-flex;align-items:center;font-size:12px;font-weight:700;padding:3px 10px;border-radius:var(--r-pill);background:var(--c-white);color:var(--c-ink);vertical-align:middle;max-width:100%;border:1.5px solid var(--c-line)}
 .tag.orange{background:var(--c-ink);color:var(--c-white);border-color:var(--c-ink)}
 .tag.green{background:var(--c-teal-light);color:var(--c-teal-dark);border-color:var(--c-teal-light)}
@@ -1887,19 +1888,19 @@ function openResumen(){
   Promise.all([syncServerEvents(), loadArmado()]).then(()=>{ if(screenActive('screen-resumen')) renderResumen(); });
 }
 function backToRecibir(){ showScreen('screen-recibir'); renderRecibir(); focusScan(); }
-function sumRowHtml(r, inner){
+function sumRowHtml(r, inner, org){
   const pos=positionOf(r.barcode, r.producto), u=unitOf(r.kgpz), sign=r.dif>0?'+':'';
   return `<div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
       <div class="ritem-meta">${pos?escapeHtml(pos.full)+' · ':''}${r.kgpz}${r.barcode?'':' · sin código'}</div></div>
       <span class="estado ${ESTADO_CLS[r.estado]}">${escapeHtml(r.estado)}</span></div>
-    ${(()=>{ const a=armadoDe(r), o=isDelta(r)?origenDif(r):''; const fc=fechaCortaDe(r.sku); return (a!=null?`<div class="ritem-meta" style="margin-top:4px">Armado en CH: <b>${fmtQty(a,r.kgpz)}</b> ${u}</div>`:'')+(o?`<div class="ritem-meta" style="color:var(--c-ink);font-weight:700">${escapeHtml(o)}</div>`:'')+(fc>0?`<div class="ritem-meta" style="color:var(--orange);font-weight:700">${fmtQty(fc,r.kgpz)} ${u} con fecha corta (caducidad antes del ${dmy(caducidadDe(r.sku))})</div>`:''); })()}
+    ${(()=>{ const a=armadoDe(r), oo=org&&org.get(r.sku), o=oo&&oo.cat!=='sin_armado'?origenTexto(oo):''; const fc=fechaCortaDe(r.sku); return (a!=null?`<div class="ritem-meta" style="margin-top:4px">Armado en CH: <b>${fmtQty(a,r.kgpz)}</b> ${u}</div>`:'')+(o?`<div class="ritem-meta" style="color:var(--c-ink);font-weight:700">${escapeHtml(o)}</div>`:'')+(fc>0?`<div class="ritem-meta" style="color:var(--orange);font-weight:700">${fmtQty(fc,r.kgpz)} ${u} con fecha corta (caducidad antes del ${dmy(caducidadDe(r.sku))})</div>`:''); })()}
     <div class="sum-nums"><div><b>${r.env?fmtQty(r.env,r.kgpz):'—'}</b><span>Enviado (${u})</span></div><div class="big"><b>${fmtQty(r.rec,r.kgpz)}</b><span>Recibido (${u})</span></div>
       <div><b style="color:${r.dif?'var(--c-ink)':'inherit'}">${sign}${fmtQty(r.dif,r.kgpz)}</b><span>Diferencia</span></div></div>${inner||''}`;
 }
 function renderResumen(){
   const el=document.getElementById('resumen-body');
   const rows=summaryRows(), deltas=rows.filter(isDelta), oks=rows.filter(r=>!isDelta(r));
-  const pend=deltas.filter(r=>!isAcked(r)), rev=revisarItems();
+  const pend=deltas.filter(r=>!isAcked(r)), rev=revisarItems(), org=origenesResumen(rows);
   // Order is fixed when the summary opens (unanswered first, biggest gaps first) and does NOT move as rows are
   // answered — otherwise the next row slides under the thumb and tapping one spot confirms everything (rule 2).
   const ord=r=>S.resumenOrder.has(r.sku) ? S.resumenOrder.get(r.sku) : 1e6;
@@ -1918,7 +1919,7 @@ function renderResumen(){
     h+=deltas.map(r=>{ const ok=isAcked(r), a=ackOf(r.sku);
       return `<div class="sum-row ${ok?'acked':'delta'}">${sumRowHtml(r, ok
         ? `<div class="ritem-meta" style="margin-top:6px;color:var(--green-dark);font-weight:700">✓ Diferencia confirmada por ${escapeHtml(a.receptor||'')} · <button class="corr-btn" onclick="resumenRecontar('${escapeHtml(r.sku)}')">Recontar</button></div>`
-        : `<div class="pcard-actions" style="grid-template-columns:1fr 1fr"><button class="btn btn-secondary" onclick="resumenRecontar('${escapeHtml(r.sku)}')">Recontar</button><button class="btn btn-warn" onclick="resumenConfirmo('${escapeHtml(r.sku)}')">Confirmo la diferencia</button></div>`)}</div>`; }).join('');
+        : `<div class="pcard-actions" style="grid-template-columns:1fr 1fr"><button class="btn btn-secondary" onclick="resumenRecontar('${escapeHtml(r.sku)}')">Recontar</button><button class="btn btn-warn" onclick="resumenConfirmo('${escapeHtml(r.sku)}')">Confirmo la diferencia</button></div>`, org)}</div>`; }).join('');
   } else h+=`<div class="warn-box ok">Todo llegó completo.</div>`;
   if(oks.length) h+=`<details style="margin-top:14px"><summary class="section-title" style="cursor:pointer">Completos · ${oks.length}</summary>${oks.map(r=>`<div class="sum-row">${sumRowHtml(r)}</div>`).join('')}</details>`;
   const can=!pend.length && !OUTBOX.length && !S.closing;
@@ -1963,11 +1964,13 @@ async function cerrarRecepcion(){
     const now=serverNow(), badges=receptionBadges(rows), receptores=receptoresDeSesion();
     const path=`reportes/${S.hub}/${S.area}/${S.session.fecha}_${localHM(now).replace(':','-')}_${fileSafe(S.receptor)}.csv`;
     await sbUpload(path, buildReportCsv(rows, badges, receptores), 'text/csv; charset=utf-8');
-    const deltas=rows.filter(isDelta);
+    const deltas=rows.filter(isDelta), org=origenesResumen(rows), origenes={};
+    for(const o of org.values()) origenes[o.cat]=(origenes[o.cat]||0)+1;
     const ev=makeEvent('cerrar', { detalle:{ reporte:path, envio:S.envio._path, lineas:S.lines.size, recibidas:rows.filter(r=>r.env>0 && r.rec>0).length,
       diferencias:deltas.length, no_esperados:rows.filter(r=>r.estado==='No esperado').length, badges, receptores,
       fecha_corta:rows.filter(r=>fechaCortaDe(r.sku)>0).length||undefined,
-      entregas:parciales().length?parciales().length+1:undefined } });
+      entregas:parciales().length?parciales().length+1:undefined, origenes,
+      errores:deltas.map(r=>{ const o=org.get(r.sku), a=armadoDe(r); return { sku_key:r.sku, producto:r.producto, kgpz:r.kgpz, armado:a, enviado:r.env, recibido:r.rec, origen:o.cat, par:o.par||undefined }; }) } });
     recordEvent(ev); S.closedInfo=closedState(); await flushAndWait();
     S.closing=false;
     toast(OUTBOX.length?'Recepción cerrada — se termina de subir al reconectar':'✓ Recepción cerrada', 3500);
@@ -2068,9 +2071,9 @@ async function cerrarParcial(){
 }
 
 /* ── Report CSV (§9): all cells quoted, CRLF; the BOM is added only on browser download ── */
-const REPORT_COLS=['Hub','Área','Fecha','Receptor(es)','Producto','Código de barras','Kg/Pz','Posición','Armado','Enviado','Recibido','Diferencia','Estado','Notas (correcciones / confirmaciones)','Alertas','Fecha corta','Caducidad mínima'];
+const REPORT_COLS=['Hub','Área','Fecha','Receptor(es)','Producto','Código de barras','Kg/Pz','Posición','Armado','Enviado','Recibido','Diferencia','Estado','Notas (correcciones / confirmaciones)','Alertas','Fecha corta','Caducidad mínima','Origen de la diferencia'];
 function csvCell(v){ return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'; }
-function notasDe(sku, kgpz){
+function notasDe(sku, kgpz, o){
   const n=[];
   for(const e of S.events){
     if(e.sku_key!==sku || !e.detalle) continue;
@@ -2083,17 +2086,18 @@ function notasDe(sku, kgpz){
     if(e.tipo==='scan' && d.fecha_corta) n.push(`Fecha corta: ${fmtQty(scanQtyNow(e),kgpz)} ${u} con caducidad antes del ${dmy(d.caducidad_min)} (${e.receptor||''})`);
     if(e.tipo==='scan' && d.codigo_incorrecto) n.push(`Código incorrecto en sistema: se escaneó ${d.codigo_incorrecto.escaneado}, el sistema tiene ${d.codigo_incorrecto.codigo_sistema||'(sin código)'}`);
   }
-  const r=summaryRows().find(x=>x.sku===sku); if(r && isDelta(r)){ const o=origenDif(r); if(o) n.push(o); }
+  if(o && o.nota) n.push(o.nota);
   return n.join(' · ');
 }
 function buildReportCsv(rows, badges, receptores){
   // With partial closes, one extra column per entrega (what came in each tarima); they add up to Recibido
   const np=parciales().length, pe=np?porEntrega():null, ent=np?Array.from({length:np+1}, (_,i)=>i+1):[];
   const head=REPORT_COLS.concat(ent.map(n=>'Entrega '+n)).map(csvCell).join(',');
-  const body=rows.map(r=>{ const pos=positionOf(r.barcode, r.producto), arm=armadoDe(r);
+  const org=origenesResumen(rows);
+  const body=rows.map(r=>{ const pos=positionOf(r.barcode, r.producto), arm=armadoDe(r), o=org.get(r.sku);
     return [hubName(S.hub), areaName(S.area), S.session.fecha, receptores.join(', '), r.producto, r.barcode, r.kgpz, pos?pos.full:'',
-      arm==null?'—':fmtQty(arm,r.kgpz), r.env?fmtQty(r.env,r.kgpz):'0', fmtQty(r.rec,r.kgpz), fmtQty(r.dif,r.kgpz), r.estado, notasDe(r.sku, r.kgpz), badges.join(' · '),
-      fechaCortaDe(r.sku)>0?fmtQty(fechaCortaDe(r.sku),r.kgpz):'', caducidadDe(r.sku)?dmy(caducidadDe(r.sku)):'']
+      arm==null?'—':fmtQty(arm,r.kgpz), r.env?fmtQty(r.env,r.kgpz):'0', fmtQty(r.rec,r.kgpz), fmtQty(r.dif,r.kgpz), r.estado, notasDe(r.sku, r.kgpz, o), badges.join(' · '),
+      fechaCortaDe(r.sku)>0?fmtQty(fechaCortaDe(r.sku),r.kgpz):'', caducidadDe(r.sku)?dmy(caducidadDe(r.sku)):'', o?ORIGEN[o.cat]:'']
       .concat(ent.map(n=>fmtQty((pe.get(n)&&pe.get(n).get(r.sku))||0, r.kgpz))).map(csvCell).join(','); });
   return [head].concat(body).join('\r\n')+'\r\n';
 }
@@ -2122,15 +2126,97 @@ async function loadArmado(){
   }catch(_){ S.armado=null; }
 }
 function armadoDe(r){ if(!S.armado) return null; return S.armado.get(r.sku) ?? 0; }
-// Where a difference comes from (§5.3) — only when there is Armado data
-function origenDif(r){
-  const a=armadoDe(r); if(a==null || !r.env) return '';
-  const eq=(x,y)=>Math.abs(x-y)<=(r.kgpz==='Kg'?kgTol(r.env):0);
-  if(!eq(a, r.env)) return `Armado ${fmtQty(a,r.kgpz)} ≠ enviado: error al registrar la salida en CH.`;
-  if(!eq(r.env, r.rec) && eq(a, r.rec)) return 'Coincide con lo armado: error de registro, no físico.';
-  if(r.rec<r.env) return 'Armado = enviado, llegó menos: pérdida física o error de recepción.';
-  if(r.rec>r.env) return 'Armado = enviado, llegó de más: producto equivocado o error de conteo.';
-  return '';
+/* ── Where a difference comes from (§5.3). The system decides, not the receptor: A = armado en CH, E = enviado
+   (what CH captured), R = recibido. A=R≠E → captura en CH · A=E≠R → armado (de más / faltante) · all three
+   differ → revisar · no Armado data → only E vs R. Then mix-ups: a short line and an over line of the same
+   product family that cancel out exactly (Pepsi Light 600ml −8 / 2.5L +8, Coca light +1 / zero −1, Lala entera /
+   deslactosada) are ONE error: armado when A=E on both sides (the picker grabbed the other one), captura when A=R
+   on both (picked right, captured the wrong product). ── */
+const ORIGEN={
+  cruce_armado:'Error de armado: producto cruzado (presentación o variante)',
+  sobrante_armado:'Error de armado: llegó de más',
+  faltante:'Faltante: armado o traslado',
+  cruce_captura:'Error de captura en CH: se capturó otro producto',
+  captura:'Error de captura en CH',
+  cruce:'Producto cruzado (sin datos de armado)',
+  revisar:'Revisar: armado, enviado y recibido no coinciden',
+  sin_armado:'Sin datos de armado',
+};
+const ORIGEN_ORDEN=Object.keys(ORIGEN);
+// Looser than isSibling (which wants ≥4 words for a swapped one): an exact +n/−n pair is evidence enough
+function mixUpScore(a, b){
+  if(isSibling(a, b)) return 100;
+  const fa=familyKey(a.producto), fb=familyKey(b.producto);
+  if(!fa || fa.split(' ')[0]!==fb.split(' ')[0]) return 0;
+  const wa=famWords(a.producto), wb=famWords(b.producto); let shared=0; for(const w of wa) if(wb.has(w)) shared++;
+  return shared>=2 && shared>=Math.min(wa.size, wb.size)-1 ? shared : 0;
+}
+// rows: the deltas, each { sku, producto, kgpz, arm (null = no Armado data), env, rec, dif } → Map sku → { cat, nota, par }
+function clasificarDiferencias(rows){
+  const eq=(r,x,y)=>Math.abs(x-y)<=(r.kgpz==='Kg'?kgTol(Math.max(r.env, r.rec)):0)+1e-9, out=new Map();
+  for(const r of rows){
+    const cat = r.arm==null ? 'sin_armado' : eq(r, r.arm, r.rec) ? 'captura' : eq(r, r.arm, r.env) ? (r.rec>r.env?'sobrante_armado':'faltante') : 'revisar';
+    out.set(r.sku, { cat, nota:'' });
+  }
+  const used=new Set();
+  for(const n of rows.filter(r=>r.dif<0)){
+    let best=null, score=0;
+    for(const p of rows){ if(!(p.dif>0) || used.has(p.sku) || p.kgpz!==n.kgpz || !eq(n, -n.dif, p.dif)) continue;
+      const s=mixUpScore(n, p); if(s>score){ best=p; score=s; } }
+    if(!best) continue;
+    const cn=out.get(n.sku).cat, cp=out.get(best.sku).cat;
+    const cat = cn==='faltante' && cp==='sobrante_armado' ? 'cruce_armado' : cn==='captura' && cp==='captura' ? 'cruce_captura' : cn==='sin_armado' && cp==='sin_armado' ? 'cruce' : null;
+    if(!cat) continue;
+    used.add(best.sku);
+    const q=`${fmtQty(best.dif,n.kgpz)} ${unitOf(n.kgpz)}`;
+    const nota = cat==='cruce_armado' ? `Se armó ${best.producto} en lugar de ${n.producto} (${q})`
+      : cat==='cruce_captura' ? `En CH se armó ${best.producto} pero se capturó ${n.producto} (${q})`
+      : `Llegó ${best.producto} en lugar de ${n.producto} (${q})`;
+    out.set(n.sku, { cat, nota, par:best.sku }); out.set(best.sku, { cat, nota, par:n.sku });
+  }
+  return out;
+}
+function origenesResumen(rows){ return clasificarDiferencias(rows.filter(isDelta).map(r=>Object.assign({}, r, { arm:armadoDe(r) }))); }
+function origenTexto(o){ return o ? [ORIGEN[o.cat], o.nota].filter(Boolean).join(': ') : ''; }
+
+/* ── Mensaje para Slack: the daily discrepancy post the auxiliares wrote by hand, now in one fixed format so
+   mistakes can be tracked by where they come from. Built from the closed report (works for old reports too). ── */
+function slackMensaje(info, rvRows){
+  const sign=(d,k)=>(d>0?'+':'')+fmtQty(d,k);
+  const rows=rvRows.filter(r=>!/^Completo/.test(r.estado)).map(r=>({ sku:'r'+r.i, producto:r.producto, kgpz:r.kgpz,
+    arm:r.armado===''||r.armado==='—'?null:parseNum(r.armado), env:r.env||0, rec:r.rec||0, dif:r.dif||0 }));
+  const org=clasificarDiferencias(rows), bySku=new Map(rows.map(r=>[r.sku,r]));
+  const linea=r=>`• ${r.producto}: ${r.arm==null?'':`Armado ${fmtQty(r.arm,r.kgpz)} · `}Enviado ${fmtQty(r.env,r.kgpz)} · Recibido ${fmtQty(r.rec,r.kgpz)} ${unitOf(r.kgpz)} (${sign(r.dif,r.kgpz)})`;
+  const casos={}, out=[];
+  for(const cat of ORIGEN_ORDEN){
+    const done=new Set(), lines=[]; let n=0;
+    for(const r of rows){
+      const o=org.get(r.sku); if(o.cat!==cat || done.has(r.sku)) continue;
+      done.add(r.sku); n++; lines.push(linea(r));
+      if(o.par){ done.add(o.par); lines.push(linea(bySku.get(o.par))); }
+      if(o.nota) lines.push(`   ↳ ${o.nota}`);
+    }
+    if(n){ casos[cat]=n; out.push('', `*${ORIGEN[cat]}* (${n})`, ...lines); }
+  }
+  const mal=rvRows.map(r=>({ r, m:/Código incorrecto en sistema: ([^·]*)/.exec(r.notas||'') })).filter(x=>x.m);
+  if(mal.length) out.push('', `*Código incorrecto en sistema* (${mal.length})`, ...mal.map(x=>`• ${x.r.producto}: ${x.m[1].trim()}`));
+  const c=k=>k.reduce((t,x)=>t+(casos[x]||0),0), total=c(ORIGEN_ORDEN);
+  out.unshift(`*Recepción ${hubName(info.hub)} · ${areaName(info.area)} · ${fechaLarga(info.fecha)}*`,
+    `Recibió: ${(info.receptores||[info.receptor]).filter(Boolean).join(', ')} · ${total?`${total} error(es) en ${rows.length} producto(s)`:'sin diferencias'} de ${info.lineas||rvRows.length} en el envío`);
+  if(rows.length) out.push('', `Conteo: armado ${c(['cruce_armado','sobrante_armado'])} · captura CH ${c(['captura','cruce_captura'])} · faltante ${c(['faltante'])} · revisar ${c(['revisar'])}${c(['cruce','sin_armado'])?` · sin datos de armado ${c(['cruce','sin_armado'])}`:''}`);
+  return out.join('\n');
+}
+function openSlackMensaje(){
+  const txt=slackMensaje(RV.info, RV.rows);
+  openSheet('Mensaje para Slack', `<div class="muted" style="margin-bottom:10px">Cópialo y pégalo en el canal de abastecimiento del hub. Las conclusiones las calcula el sistema con lo armado, lo enviado y lo recibido.</div>
+    <pre class="slack-pre" id="slack-txt">${escapeHtml(txt)}</pre>
+    <button class="btn btn-primary btn-block" style="margin-top:12px" onclick="copiarSlack()">Copiar mensaje</button>`);
+}
+async function copiarSlack(){
+  const txt=document.getElementById('slack-txt').textContent;
+  try{ await navigator.clipboard.writeText(txt); }
+  catch(_){ const t=document.createElement('textarea'); t.value=txt; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  toast('✓ Mensaje copiado');
 }
 
 /* ── §6.4 Canastas (pre-sort): what was received, grouped by aisle letter. Read-only. ── */
@@ -2238,6 +2324,7 @@ function renderRecepcion(){
     <div class="info-card">Cerrada a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}${I.entregas?` · en ${I.entregas} entregas`:''}<br>
       ${I.lineas||0} productos · ${I.diferencias?`<b style="color:var(--orange)">${I.diferencias} con diferencia</b>`:'sin diferencias'}${I.no_esperados?` · ${I.no_esperados} no esperado(s)`:''}${I.fecha_corta?` · <b style="color:var(--orange)">${I.fecha_corta} con fecha corta</b>`:''}
       <div>${(I.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div></div>`)+`
+    ${P?'':`<button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="openSlackMensaje()">Mensaje para Slack</button>`}
     <button class="btn btn-secondary btn-block" onclick="descargarReporte()">Descargar CSV</button>
     <input class="text-input" style="margin-top:12px" placeholder="Buscar producto…" oninput="rvSet('q',this.value)" autocomplete="off">
     <div class="filters">
