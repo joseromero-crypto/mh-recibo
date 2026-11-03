@@ -2183,6 +2183,7 @@ function origenTexto(o){ return o ? [ORIGEN[o.cat], o.nota].filter(Boolean).join
    mistakes can be tracked by where they come from. Built from the closed report (works for old reports too). ── */
 // Two paragraphs in one copy: 1) the items with a difference, one line each with A/E/R and a short cause tag;
 // 2) for the CH coordinator, how many errors of each kind and the weakest step. Short: a daily wall gets ignored.
+const SLACK_COORD_CH='@Alberto Mendoza'; // CH coordinator, tagged at the start of paragraph 2 (testing whether a pasted @ becomes a mention)
 const SLACK_CAUSAS=[ // [key, categories, tag on the item line, how paragraph 2 names it, the weakness it points to]
   ['conteo', ['sobrante_armado'], 'conteo al armar', 'conteo al armar', 'no se cuentan bien las piezas al armar'],
   ['presentacion', ['cruce_armado'], 'presentación al armar', 'presentación o variante cruzada al armar', 'no se revisa la presentación o variante al armar'],
@@ -2223,7 +2224,7 @@ function slackMensaje(info, rvRows){
     const partes=SLACK_CAUSAS.filter(c=>casos.get(c[0])).map(c=>`${casos.get(c[0])} de ${c[3]}`);
     const conCausa=SLACK_CAUSAS.filter(c=>c[4] && casos.get(c[0])), max=Math.max(0, ...conCausa.map(c=>casos.get(c[0])));
     const peores=conCausa.filter(c=>casos.get(c[0])===max);
-    let d=`*Para coordinación CH:* `;
+    let d=`${SLACK_COORD_CH} `;
     if(total) d+=`${total} error(es) de ${info.lineas||rvRows.length} productos: ${partes.join(', ')}. `;
     if(peores.length) d+=`${peores.length>1?'Puntos más débiles':'Punto más débil'}: ${peores.map(c=>c[4]).join('; ')}.`;
     if(mal.length) d+=`${total?' ':''}Además, ${mal.length} código(s) incorrecto(s) en sistema para comercial: ${mal.map(x=>`${x.r.producto} (escaneado ${x.m[1]}, sistema ${x.m[2].trim()})`).join(', ')}.`;
