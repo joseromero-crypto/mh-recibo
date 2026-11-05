@@ -1,6 +1,6 @@
 # Unify Masterview — one catalog for Armado CH, Sorting Hub, MH Recibo and Invoice Reader
 
-Status: Phases 1, 2 and 3 done 2026-11-05, and the first real upload is published. Phases 4.1 and 4.2, and Sorting Hub's and MH Recibo's parts of Phase 6, are done and committed, and go live when Jose pushes. Phases 4.3 and 4.4 are next; until then Armado CH and Invoice Reader don't read `masterview/`. Written 2026-11-03 from the code in the four repos and the all-cities export
+Status: Phases 1, 2 and 3 done 2026-11-05, and the first real upload is published. Phases 4.1, 4.2 and 4.3, and the three static apps' parts of Phase 6, are done and committed, and go live when Jose pushes. Phase 4.4 is next; until then Invoice Reader doesn't read `masterview/`. Written 2026-11-03 from the code in the four repos and the all-cities export
 (`table-data - 2026-11-03T101825.372.csv`, which had the wrong column set; see §0).
 
 This file lives in all four repos (armado-CH, sorting-hub, mh-recibo, calii-invoice-reader), as
@@ -566,6 +566,36 @@ const MV_BUCKET='masterview';
 
 ### 4.3 Armado CH (repo `armado-CH`)
 
+**Result: done 2026-11-05, committed, not pushed.** The steps below are kept as the record of what was planned.
+
+- **Differs from the plan:**
+  - The order is `masterview/`, last cached Masterview whatever its version, bundled. The old `solcitudesarmado/imagedb/` read is gone, not kept as a
+    fallback. `calii_imgdb_cache` is removed at the start of every load, and its step in `trySetLocalStorage`'s eviction went with it.
+  - No city logic: `alt` and `hubCities` are not read, so `pickEntry` and `hubCity` were not copied.
+  - `masterviewReduce` went with the upload. `pickCol` and `normHeader` stay, because Verificar captura uses them.
+  - `detectSuspiciousBarcodes` still only asks whether the key exists, not `imgUrl()`: a known barcode with no image isn't a corrupted barcode.
+  - `imgName()` was copied but nothing calls it yet: Armado shows the order's own product names.
+  - `getImgUrl` skips any entry with no `url` at every step, not only the barcode step.
+  - Images only appear in the assembly list and the item detail. The summary, Pedidos armados and Registro show text only.
+- **Checks passed, on localhost in headless Chrome against the live bucket (version `0e330dae`), with Supabase faked in memory (0 writes reached Supabase, and
+  a second block at the browser's network layer caught 0):**
+  - First load: `version.txt` + `latest.json`, nothing from `imagedb/`, 10,563 keys, 5,492 productos, `calii-masterview` written, old localStorage entry
+    gone. Second load: `version.txt` only.
+  - Full MH Contry assembly with the 19/10 order (451 rows, 152 activos: complete, partial, sobrante, faltante and fecha corta), run through the same steps on
+    the old and new builds with a fixed clock. Report path, report CSV (152 rows), all 616 writes, item order, list text, summary, Registro and Pedidos armados:
+    identical.
+  - Images: 150 of the 152 activos are the same. The other two are better: Tang has a newer photo, and Totopos Calii showed a Charras photo before.
+  - Condesa order: 7501052470245 and 75013356 (CDMX only) and 75041663 (CDMX and Guadalajara) show their images, and none of the three was in the old file.
+  - Network off and local server stopped: shell from the service worker, Masterview from the cache, and the Imágenes line still shows 05/11. With that cache
+    deleted, the bundled file gives 10,563 keys and "Masterview sin conexión · …". The old flat file still loads.
+  - Real upgrade on one origin, from the `-p6` build to this one: old shell cache removed, `calii-masterview` created, old localStorage entry gone. A later
+    `CACHE_NAME` keeps `calii-masterview` with no new download.
+- **Data to review:** 141 of the old file's 9,387 keys are not in Masterview now (62 barcodes, 79 names). `normName` is the same on both sides, so this is
+  the catalog, not the code. When such a product is ordered, the old first-word and prefix fallbacks can show another product's photo. In the 19/10 order's reserva
+  rows, Nachos Tostitos 400g (7501011173521) now shows Doritos, and Totopos Nūbe lemon pepper (767203598955) shows Charras. Barcode 767203598894, Totopos Nūbe
+  enchilados in that order, is IYL425 Chips de camote in Masterview.
+- **Not checked yet:** real phones (Android Chrome, iPhone Safari).
+
 - `loadImageDB` → `masterview/` first.
 - `masterviewReduce`'s output and the cached shape change to object entries. Use `imgUrl()`
   everywhere `S.imgDb[...]` is read as a string.
@@ -603,7 +633,7 @@ const MV_BUCKET='masterview';
 
 ## Phase 6: Remove the other upload paths (after Phase 5 is live)
 
-**Result, Sorting Hub and MH Recibo: done 2026-11-05, committed, not pushed.** Armado CH is still open.
+**Result, Sorting Hub, MH Recibo and Armado CH: done 2026-11-05, committed, not pushed.**
 
 Sorting Hub:
 
@@ -617,6 +647,16 @@ MH Recibo:
 - The two-bucket fallback is gone from `loadImageDB`, and `ARMADO_BUCKET` went with it, since nothing else used it. MH Recibo no longer reads
   either old `imagedb/` folder. It never had an upload button.
 - Bundled `imagedb.json` refreshed from version `0e330dae` (1.3 MB to 2.0 MB).
+
+Armado CH:
+
+- `uploadImageDB`, `masterviewReduce` and the upload button are gone. 🖼 Imágenes now reads "Masterview actualizado el 05/11 · se sube desde Invoice Reader (admin)",
+  from `masterview/version.txt`, or the cached version when offline, with "5,492 productos" from `count` on the line below.
+- Bundled `imagedb.json` is a full copy of `latest.json`, version `0e330dae` (1.3 MB to 2.0 MB).
+- The old `solcitudesarmado/imagedb/` files were left in place, and nothing reads them.
+- `netlify.toml` now revalidates `/imagedb.json` (`max-age=0, must-revalidate`). A phone that already holds the old file under the 30-day header keeps it until that
+  expires, and the service worker's install can precache that same copy. It only matters offline with no cached Masterview, and the loader still reads it. Sorting Hub
+  and MH Recibo still have the 30-day header.
 
 - **Armado CH:** remove `uploadImageDB` and its button from the coordinator tab. Replace them with the
   status line from Decisions §4.
