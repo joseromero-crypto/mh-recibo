@@ -1,6 +1,6 @@
 # Unify Masterview — one catalog for Armado CH, Sorting Hub, MH Recibo and Invoice Reader
 
-Status: plan, not built. Written 2026-11-03 from the code in the four repos and the all-cities export
+Status: Phases 1, 2 and 3 done 2026-11-05, and the first real upload is published. Phase 4 (the readers) is next; until then no other app reads `masterview/`. Written 2026-11-03 from the code in the four repos and the all-cities export
 (`table-data - 2026-11-03T101825.372.csv`, which had the wrong column set; see §0).
 
 This file lives in all four repos (armado-CH, sorting-hub, mh-recibo, calii-invoice-reader), as
@@ -139,11 +139,39 @@ the other three.
 
 ## Phase 1: Invoice Reader → armado-ch Supabase project (repo `calii-invoice-reader`)
 
+**Result: done 2026-11-05.** The steps below are kept as the record of what was planned.
+
+- **Where it runs:** `.env.local` and the Netlify site (`https://invoicereader.joseromero.co`) both point to
+  `uuqqtksxlgkztenojufm`. The old project is untouched. Don't delete it until Jose says so.
+- **Collisions:** none. Nothing belonging to Armado CH, Sorting Hub or MH Recibo was changed.
+- **What was applied:** `supabase/shared-project/setup.sql`, generated from `supabase/migrations`, including the
+  attempt-fence migration and explicit grants on every table (`authenticated` read, `service_role` read/write, no
+  `anon`).
+- **What's in the project now:** 1 organization (same id as the old project), 9 hubs, 4,896 products from the
+  2026-11-04 Retool export, 11 `supplier_mappings` (all linked to imported products), Jose as admin.
+  `quantity_conversions` had 0 rows, so there was nothing to carry.
+- **Checks passed:** bench `--replay` 238/238 quantities, 212 identity, 201 bulk-confirmable; 236/236 unit tests.
+  - Local read through `netlify functions:serve`: LALA CWB-02767766, 15 rows, $0.027.
+  - Live read on the Netlify site: Mission Foods 5004590079, 3 rows, $0.018.
+- **Env names differ from step 6:** the app uses `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `VITE_SUPABASE_URL` and
+  `VITE_SUPABASE_PUBLISHABLE_KEY`. On Netlify, values are per deploy context, and `VITE_*` needs a redeploy.
+- **What Phase 2 needs to know:**
+  - The database is shared: never write a migration that loops over every function or table in `public`. An
+    unscoped loop in `20261028160041_private_rls_helpers.sql` would have rewritten MH Recibo's `rec_alert_*`
+    functions, so it now lists Invoice Reader's functions by name.
+  - armado-ch limits API calls to a few seconds, so `import_masterview` (120 s) and `read_catalog_snapshot` (60 s,
+    ~11 s measured) carry their own `statement_timeout`.
+  - A Masterview import took about 29 s locally. That may be too long for a synchronous Netlify function and hasn't
+    been tried on the live site, so the importer must handle it.
+  - `import_masterview` upserts on `(org_id, external_id)`, so product ids survive a re-import.
+  - `server/auth.ts` requires exactly one organization and deletes non-@calii Google logins. That's harmless today
+    because no other app uses Supabase Auth, but it matters if one starts to.
+
 **Check first, then act.** On 2026-11-03, `.env.local` still pointed to `mudavlghievjyddtjudp` (its own
 project).
 
 1. Check `SUPABASE_URL` / `VITE_SUPABASE_URL` in `.env.local` and in the Netlify site's env vars.
-   - If both are already `https://uuqqtksxlgkztenojufm.supabase.co`, **skip to Phase 2**.
+   - If both already point to project `uuqqtksxlgkztenojufm`, **skip to Phase 2**.
    - Otherwise, continue.
 2. **Check for name collisions in the target project** before applying anything. List the existing
    tables, functions, triggers and buckets in `uuqqtksxlgkztenojufm`.
@@ -177,6 +205,43 @@ project).
 ---
 
 ## Phase 2: Shared catalog + the one importer (repo `calii-invoice-reader`)
+
+**Result: done 2026-11-05.** The steps below are kept as the record of what was planned.
+
+- **Where it runs:** deployed to `https://invoicereader.joseromero.co`. `products`, `catalog_imports`, `product_id` and the old functions
+  are retired. The deploy first failed Netlify's secret scan: this file held the full Supabase URL, which equals the
+  `SUPABASE_URL` value. Use the project ref in tracked files.
+- **First real upload:** Jose, from the Masterview screen, all four cities. The run took 70 s, and `latest.json` and `version.txt`
+  are public and agree (version `0e330dae`, 5,492 products, 48 `alt` keys, 8 hubs in `hubCities`). 72 products updated, 0 added,
+  0 retired, 36 SKUs change name between cities, 56 barcodes with more than one SKU, no warnings. ZYZ063 is in `map`. All 11
+  mappings point to current products. The 5 values that were older in the 11-03 files are current again.
+- **Not checked yet:** an invoice read and confirm on the deployed site since the switch.
+- **Left in the project:** the test import's `mv_imports` row, which is harmless.
+- **Test import report (11-03 files, before the first upload):** Monterrey 4,896 / Saltillo 4,714 (+56 exclusive, 238 missing vs Monterrey) / CDMX 4,528 (+302, 670
+  missing) / Guadalajara 4,474 (+302, 724 missing). 29 SKUs change name between cities, 56 barcodes belong to more than one
+  SKU, 0 retired, no warnings. Full report: `private/catalog/mv-test-import-report.json`.
+- **Remap:** 11 of 11 `supplier_mappings` mapped, no SKU changed, 0 unmapped. `quantity_conversions` has 0 rows.
+- **Checks passed:** bench `--replay` 238/238 quantities, 212 identity, 201 bulk-confirmable, on the old CSV and on the 11-03
+  Monterrey file through the importer's parser and whitelist (`--masterview`), with identical reports; 259/259 unit tests.
+  The new catalog read has the same 4,896 SKUs as `products`.
+- **Data:** the 11-03 files are a day older than `products` (11-04). 5 values differ for that reason alone: pieces per
+  purchase unit on VWJ653, KFE338, PSH792, PDK723, and the name of ABP084.
+- **Timing:** the four-file import took about 46 s locally, plus 11 s of upload. `read_mv_catalog` takes 1.9 s and 9 MB, down
+  from ~11 s and 22 MB. `latest.json` would be 2.0 MB, not the 1.5 MB estimated.
+- **Changed from the plan:**
+  - `product_id` is replaced by a new column `mv_product_id` instead of being swapped in place, and retiring is a separate
+    migration. So old and new code both work until the retire migration runs, and `confirm_receiving_row_v1` accepts both ids.
+  - Matching reads Monterrey rows only (`MATCH_CITY` in `lean/catalog.ts`), so it stays exactly as before. Products that exist
+    only in other cities reach matching and search in Phase 4.4.
+  - The browser uploads to `catalogs/masterview/{city}/incoming-*.csv` with signed URLs. `latest.csv` is replaced only after the
+    import commits, so a rejected file can't overwrite the last good one or break "Releer últimos archivos".
+  - The background function reports through `catalogs/masterview/job.json`, because a rejected upload leaves no `mv_imports` row.
+    That file also allows one import at a time.
+  - `alt` only lists cities the `map` entry doesn't cover. A barcode repeated inside one city stays in the report, and readers
+    keep the `map` entry there.
+  - Re-importing identical files reuses the `mv_imports` row and moves its date.
+  - `Item` keeps its exact text, including trailing spaces, because it's what gets copied back to Retool.
+  - Invoice rows saved before the switch hold Retool ids and can't be confirmed until "Actualizar coincidencias" is pressed.
 
 ### 2.1 Schema: new migration `2026110xxxxx_masterview_shared.sql`
 
@@ -365,6 +430,17 @@ alter table public.hubs add column city text;   -- seed with the table in Decisi
 ---
 
 ## Phase 3: Validate (repo `calii-invoice-reader`, script, free)
+
+**Result: done 2026-11-05, nothing to accept.** `scripts/mv-compare.ts` on the four 11-03 exports against the all-cities lean file:
+
+| City | Full / lean rows | SKU differences | `Item`, `Proveedor`, `Calii Unit`, `Source Unit` differences | No image | No barcode | Barcodes repeated in the city |
+|---|---|---|---|---|---|---|
+| Monterrey | 4,896 / 4,896 | 0 | 0 | 0 | 344 | 12 |
+| Saltillo | 4,714 / 4,714 | 0 | 0 | 0 | 323 | 8 |
+| CDMX | 4,528 / 4,528 | 0 | 0 | 0 | 310 | 7 |
+| Guadalajara | 4,474 / 4,474 | 0 | 0 | 0 | 304 | 6 |
+
+Full list: `private/catalog/mv-compare-2026-11-03.md`.
 
 `scripts/mv-compare.ts <all-cities-lean.csv> <city.csv>...`: for each per-city full export, compare it
 with that city's rows in the all-cities lean file.
