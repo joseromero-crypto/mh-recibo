@@ -144,7 +144,7 @@ h2{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.15;margin:
 .pcard-name{font-size:19px;font-weight:700;line-height:1.25;letter-spacing:-.01em;margin:14px 8px 6px}
 mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6px;box-shadow:inset 0 -2px 0 var(--c-teal)}
 .pcard-name mark{font-size:22px;font-weight:800}
-.banner mark,.cad-box.on mark{background:var(--c-white);color:var(--c-ink);box-shadow:none}
+.banner mark{background:var(--c-white);color:var(--c-ink);box-shadow:none}
 .pcard-tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
 .pres-chip{font-size:15px;font-weight:800;background:var(--c-ink);color:var(--c-white);border-radius:var(--r-pill);padding:4px 12px}
 .unit-chip{font-size:13px;font-weight:700;background:var(--c-white);border-radius:var(--r-pill);padding:4px 12px}
@@ -155,13 +155,16 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .banner.gray{background:var(--c-white);color:var(--c-muted)}
 .banner.yellow{background:var(--c-ink);color:var(--c-white)}
 .cad-box{background:var(--c-white);border-radius:var(--r-md);padding:8px 8px 8px 14px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
-.cad-box.on{background:var(--c-ink);color:var(--c-white)}
 .cad-main{flex:1;min-width:0;font-size:15px;font-weight:800;line-height:1.2;font-variant-numeric:tabular-nums}
 .cad-main small{display:block;font-size:12px;font-weight:600;color:var(--c-muted);white-space:nowrap}
-.cad-hint{font-size:12px;color:var(--c-muted);margin:-6px 4px 10px}
-.cad-box.on .cad-main small{color:var(--c-white);opacity:.8}
-.cad-btn{flex-shrink:0;min-height:40px;background:var(--c-surface);border:none;border-radius:var(--r-pill);padding:0 14px;font-size:13px;font-weight:700;cursor:pointer}
-.cad-box.on .cad-btn{background:var(--c-white);color:var(--c-ink)}
+.sep-q{font-size:13px;font-weight:600;color:var(--c-muted);margin:2px 0 6px}
+.sep-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.sep-btns .choice{min-height:44px;padding:0 10px;text-align:center;font-size:14px;background:var(--c-white)}
+.sep-btns .choice.sel{background:var(--c-ink);color:var(--c-white)}
+.sep-row{display:flex;align-items:center;gap:10px;margin-top:8px}
+.sep-row label{flex:1;font-size:14px;font-weight:700}
+.sep-row .text-input{width:96px;flex-shrink:0;margin:0;text-align:center}
+.sep-sum{font-size:13px;font-weight:700;margin-top:8px;min-height:18px}
 .sib-row{display:flex;gap:8px;align-items:center;margin-top:8px;font-weight:600;font-size:13px}
 .sib-row img,.sib-row .thumb-none{width:52px;height:52px;object-fit:contain;flex-shrink:0;border-radius:var(--r-xs);background:var(--c-white)}
 .unit-pick{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
@@ -1186,16 +1189,17 @@ function addEvents(evs){
   return added;
 }
 function fold(){
-  const rec=new Map(), adj=new Map(), noEsp=new Map();
+  const rec=new Map(), adj=new Map(), noEsp=new Map(), sep=new Map();
   for(const e of S.events){
     if(e.tipo!=='scan' && e.tipo!=='ajuste') continue;
     const q=Number(e.cantidad)||0;
     rec.set(e.sku_key, round2((rec.get(e.sku_key)||0)+q));
     if(e.tipo==='ajuste' && e.detalle && e.detalle.ref) adj.set(e.detalle.ref, round2((adj.get(e.detalle.ref)||0)+q));
+    if(e.tipo==='ajuste' && e.detalle && e.detalle.ref && e.detalle.separar) sep.set(e.detalle.ref, e.detalle.separar); // latest wins
     if(e.tipo==='scan' && !S.lines.has(e.sku_key) && !noEsp.has(e.sku_key))
       noEsp.set(e.sku_key, { producto:e.producto, kgpz:(e.detalle&&e.detalle.kgpz)||'Pz' });
   }
-  S.recibido=rec; S.adjByRef=adj; S.noEsperados=noEsp; // noEsperados feed the Phase 3 summary
+  S.recibido=rec; S.adjByRef=adj; S.sepByRef=sep; S.noEsperados=noEsp; // noEsperados feed the Phase 3 summary
 }
 function recibidoDe(sku){ return S.recibido.get(sku)||0; }
 
@@ -1215,7 +1219,7 @@ function openRecibir(data, opts={}){
   S.hub=INI.hub; S.area=INI.area; S.receptor=INI.receptor;
   S.session={ id:data.session_id, fecha:data.session_fecha };
   setEnvio(data);
-  S.events=[]; S.eventUids=new Set(); S.current=null; S.corrigiendo=null; S.staleAsked=false; S.recentAll=false; S.resumenOrder=new Map(); S.lastId=0; S.closedInfo=null; S.armado=null; S.conParciales=!!opts.parciales;
+  S.events=[]; S.eventUids=new Set(); S.current=null; S.corrigiendo=null; S.separando=null; S.staleAsked=false; S.recentAll=false; S.resumenOrder=new Map(); S.lastId=0; S.closedInfo=null; S.armado=null; S.conParciales=!!opts.parciales;
   buildCatalog();
   const m=latestMirror(S.hub, S.area);
   if(m && m.envio && m.envio.session_id===S.session.id) addEvents(m.events);
@@ -1507,37 +1511,63 @@ function openCard(p, metodo, det={}){
   document.getElementById('card-area').scrollIntoView({ block:'start', behavior:'smooth' });
 }
 function cancelCard(){ S.current=null; renderCard(); focusScan(); }
-/* ── Caducidad mínima: «Vida anaquel usuarios (min. días)» from the envío file + the day it's received (server,
-   Monterrey). Shown on the card; "Viene con fecha menor" flags that scan (still counted as received). ── */
+/* ── Caducidad mínima + Separar: «Vida anaquel usuarios (min. días)» from the envío file + the day it's received
+   (server, Monterrey) is shown on the card. The quantity is ALWAYS the total that arrived; "Fecha corta" and
+   "Dañadas" then say how many OF THAT TOTAL get separated for merma (MNA), so every hub records 5 received + 1
+   dañada the same way. Separated pieces never lower Recibido (rule 8). Stored on the scan: fecha_corta +
+   fecha_corta_pz, danadas. Old scans have fecha_corta alone = the whole scan. ── */
 function vidaDiasOf(p){ const l=S.lines.get(p.sku_key), v=l?l.vida_dias:p.vida_dias; return Number.isFinite(v)?v:null; }
 function caducidadMin(p){ const d=vidaDiasOf(p); return d==null ? null : new Date(Date.parse(todayStr()+'T12:00:00Z')+d*86400000).toISOString().slice(0,10); }
 function dmy(ymd){ const [y,m,d]=String(ymd).split('-'); return d?`${d}/${m}/${y}`:String(ymd||''); }
 function cadBoxHtml(c){
   const cad=c.recount?null:caducidadMin(c.p); if(!cad) return '';
-  const on=!!c.det.fecha_corta;
-  // One row so the quantity field stays above the keyboard
-  return `<div class="cad-box ${on?'on':''}"><div class="cad-main"><small>${on?'Fecha corta':'Caducidad mínima'}</small>${dmy(cad)}</div>
-    <button class="cad-btn" onclick="toggleFechaCorta()">${on?'Quitar':'Fecha menor'}</button></div>${on?'<div class="cad-hint">Se reciben igual y se separan para merma (MNA). Si no son todas, regístralas en otro escaneo.</div>':''}`;
+  return `<div class="cad-box"><div class="cad-main"><small>Caducidad mínima</small>${dmy(cad)}</div></div>`;
 }
-function toggleFechaCorta(){
+const SEP_LABEL={ fc:'Fecha corta', dan:'Dañadas' };
+function sepHtml(c){
+  if(c.recount) return '';
+  const sep=c.sep||(c.sep={}), kinds=(caducidadMin(c.p)?['fc']:[]).concat('dan'), kg=c.p.kgpz==='Kg';
+  return `<div class="sep-q">De ese total, ¿alguna se separa?</div>
+    <div class="sep-btns" ${kinds.length<2?'style="grid-template-columns:1fr"':''}>${kinds.map(k=>`<button class="choice ${k in sep?'sel':''}" onclick="toggleSep('${k}')">${SEP_LABEL[k]}</button>`).join('')}</div>
+    ${kinds.filter(k=>k in sep).map(k=>`<div class="sep-row"><label for="sep-${k}">${SEP_LABEL[k]}, de ese total</label><input id="sep-${k}" class="text-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}"></div>`).join('')}
+    <div class="sep-sum" id="sep-sum"></div>`;
+}
+function toggleSep(k){
   const c=S.current; if(!c) return;
-  if(c.det.fecha_corta) delete c.det.fecha_corta; else c.det.fecha_corta=true;
-  renderCard(); const q=document.getElementById('qty-input'); if(q) q.focus();
+  if(k in c.sep) delete c.sep[k]; else c.sep[k]='';
+  renderCard();
+  const i=document.getElementById(k in c.sep?'sep-'+k:'qty-input'); if(i) i.focus();
 }
-// Received pieces flagged short-dated (Corregir on a flagged scan changes it; never above what was received)
-function fechaCortaDe(sku){
-  let n=0; for(const e of S.events) if(e.tipo==='scan' && e.sku_key===sku && e.detalle && e.detalle.fecha_corta) n+=scanQtyNow(e);
-  return round2(Math.max(0, Math.min(n, recibidoDe(sku))));
+// Says back what will be stored, so nobody has to guess whether the total includes the separated pieces
+function updSepSum(){
+  const c=S.current, el=document.getElementById('sep-sum'); if(!c || !el) return;
+  const ks=Object.keys(c.sep||{}); if(!ks.length){ el.textContent=''; return; }
+  const u=unitOf(c.p.kgpz), t=parseQty(c.val, c.p.kgpz), n=round2(ks.reduce((a,k)=>a+(parseQty(c.sep[k], c.p.kgpz)||0),0));
+  el.textContent = t==null ? 'Primero escribe el total que llegó.' : `Se reciben ${fmtQty(t,c.p.kgpz)} ${u}. De esas, a MNA: ${fmtQty(n,c.p.kgpz)} ${u}.`;
 }
-function caducidadDe(sku){ let c=''; for(const e of S.events) if(e.tipo==='scan' && e.sku_key===sku && e.detalle && e.detalle.caducidad_min && (!c || e.detalle.fecha_corta)) c=e.detalle.caducidad_min; return c; }
+// A scan's separated pieces, never above what the scan holds now (Corregir can lower it)
+function separadasDe(ev){
+  const d=ev.detalle||{}, s=S.sepByRef.get(d.uid), now=Math.max(0, scanQtyNow(ev));
+  const fc=s?s.fecha_corta:(d.fecha_corta?(d.fecha_corta_pz??now):0), dan=s?s.danadas:d.danadas;
+  return { fc:Math.min(fc||0, now), dan:Math.min(dan||0, now) };
+}
+function sepSum(sku, k, entrega){
+  const ps=entrega?parciales():null; let n=0;
+  for(const e of S.events) if(e.tipo==='scan' && e.sku_key===sku && (!entrega || entregaDe(e, ps)===entrega)) n+=separadasDe(e)[k];
+  return round2(n);
+}
+function fechaCortaDe(sku){ return Math.min(sepSum(sku,'fc'), Math.max(0, recibidoDe(sku))); }
+function danadasDe(sku){ return Math.min(sepSum(sku,'dan'), Math.max(0, recibidoDe(sku))); }
+function separarDe(sku){ return Math.min(round2(sepSum(sku,'fc')+sepSum(sku,'dan')), Math.max(0, recibidoDe(sku))); }
+function caducidadDe(sku){ let c=''; for(const e of S.events) if(e.tipo==='scan' && e.sku_key===sku && e.detalle && e.detalle.caducidad_min && (!c || separadasDe(e).fc>0)) c=e.detalle.caducidad_min; return c; }
 function renderCard(){
   const el=document.getElementById('card-area');
   const c=S.current;
   if(!c){ el.innerHTML=S.events.some(e=>e.tipo==='scan')?'':'<div class="empty-hint">Escanea el primer producto para empezar.</div>'; return; }
   const p=c.p, kg=p.kgpz==='Kg', pos=positionOf(p.barcode, p.producto), pres=presentacion(p.producto), ya=recibidoDe(p.sku_key);
-  const hadFocus=document.activeElement && document.activeElement.id==='qty-input';
+  const focusId=document.activeElement && document.activeElement.id, hadFocus=focusId==='qty-input';
   const sibs=p.enEnvio===false?[]:siblingsOf(p);
-  const top = c.recount ? `<div class="banner yellow"><b>Recontar:</b> cuenta otra vez todo lo que hay de este producto y escribe el total.</div>`
+  const top = c.recount ? `<div class="banner yellow"><b>Recontar:</b> cuenta otra vez todo lo que llegó de este producto, también lo separado, y escribe el total.</div>`
     : p.enEnvio===false ? '<div class="banner red">No viene en el envío — se registra como <b>No esperado</b></div>'
     : p.enEnvio===null ? '<div class="banner gray">Sin archivo: se revisará cuando subas el envío.</div>' : '';
   el.innerHTML=`<div class="pcard ${p.enEnvio===false?'noesp':''}">
@@ -1556,16 +1586,19 @@ function renderCard(){
     ${ya>0?`<div class="banner gray">Ya registraste ${fmtQty(ya,p.kgpz||'Kg')} ${p.kgpz?unitOf(p.kgpz):''} de este producto.</div>`:''}
     ${kg?'<div class="banner blue">Pésalo en la báscula</div>':''}
     ${cadBoxHtml(c)}
-    <label class="qty-label" for="qty-input">${c.recount?(kg?'Total en kg (báscula)':'Total de piezas contadas ahora'):kg?'kg (báscula)':'Piezas contadas'}</label>
+    <label class="qty-label" for="qty-input">${c.recount?(kg?'Total en kg (báscula)':'Total de piezas contadas ahora'):kg?'Total recibido en kg (báscula), también lo dañado o de fecha corta':'Total recibido: todas las que llegaron, también dañadas o de fecha corta'}</label>
     <input id="qty-input" class="qty-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}">
     <div class="qty-err" id="qty-err"></div>
+    ${sepHtml(c)}
     <div class="pcard-actions"><button class="btn btn-secondary" onclick="cancelCard()">Cancelar</button><button class="btn btn-primary" onclick="confirmCard()">Registrar</button></div>
     ${c.det && c.det.codigo && !c.recount ? `<button class="link-btn" onclick="codigoIncorrecto()">¿No es este producto? Código incorrecto en sistema · buscar por nombre</button>` : ''}
   </div>`;
   const q=document.getElementById('qty-input');
   q.value=c.val||''; // background re-renders (sorting loaded, server sync) keep what was typed
   wireQtyInput(q);
-  if(hadFocus) q.focus();
+  for(const k of Object.keys(c.sep||{})){ const i=document.getElementById('sep-'+k); if(i) wireSepInput(i, k); }
+  updSepSum();
+  if(hadFocus) q.focus(); else if(/^sep-/.test(focusId||'')){ const i=document.getElementById(focusId); if(i) i.focus(); }
 }
 // A scanner burst that lands in the quantity field is a new scan, not a quantity.
 let _qtyScanT=null;
@@ -1578,9 +1611,24 @@ function wireQtyInput(q){
   });
   q.addEventListener('input', ()=>{
     if(S.current) S.current.val=q.value;
-    document.getElementById('qty-err').textContent='';
+    document.getElementById('qty-err').textContent=''; updSepSum();
     clearTimeout(_qtyScanT);
     if(/^\d{8,}$/.test(q.value.trim())) _qtyScanT=setTimeout(()=>{ const v=q.value; q.value=''; if(S.current) S.current.val=''; processScan(v,'scanner'); }, SCAN_AUTO_SUBMIT_MS);
+  });
+}
+function wireSepInput(i, k){
+  i.value=S.current.sep[k]||'';
+  const burst=()=>{ const v=i.value; i.value=''; if(S.current) S.current.sep[k]=''; processScan(v,'scanner'); };
+  i.addEventListener('keydown', e=>{
+    if(e.key!=='Enter') return;
+    e.preventDefault(); clearTimeout(_qtyScanT);
+    if(/^\d{8,}$/.test(i.value.trim())) burst(); else confirmCard();
+  });
+  i.addEventListener('input', ()=>{
+    if(S.current) S.current.sep[k]=i.value;
+    document.getElementById('qty-err').textContent=''; updSepSum();
+    clearTimeout(_qtyScanT);
+    if(/^\d{8,}$/.test(i.value.trim())) _qtyScanT=setTimeout(burst, SCAN_AUTO_SUBMIT_MS);
   });
 }
 // Pz: whole pieces · Kg: up to 2 decimals (§7.4). allowZero for corrections.
@@ -1650,6 +1698,13 @@ async function confirmCard(){
     err.textContent=c.p.kgpz==='Kg' ? 'Escribe el peso de la báscula (hasta 2 decimales).' : 'Escribe las piezas contadas (número entero).';
     q.focus(); return;
   }
+  const sp={};
+  for(const k of Object.keys(c.sep||{})){
+    sp[k]=parseQty(c.sep[k], c.p.kgpz);
+    if(sp[k]==null){ err.textContent=`Escribe cuántas son de «${SEP_LABEL[k]}», o quita ese botón.`; document.getElementById('sep-'+k).focus(); return; }
+  }
+  const sepN=round2((sp.fc||0)+(sp.dan||0));
+  if(sepN>qty){ err.textContent='Las separadas no pueden ser más que el total. En Total van todas las que llegaron, también las separadas.'; q.focus(); return; }
   c.busy=true;
   const ok=await guardQty(c, qty);
   c.busy=false;
@@ -1664,8 +1719,8 @@ async function confirmCard(){
   } else {
     const cad=caducidadMin(p);
     recordEvent(makeEvent('scan', { sku_key:p.sku_key, producto:p.producto, cantidad:qty, metodo:c.metodo,
-      detalle:Object.assign({ esperado:p.enEnvio, kgpz:p.kgpz }, cad?{ caducidad_min:cad }:{}, c.det) }));
-    toast(`✓ ${fmtQty(qty,p.kgpz)} ${unitOf(p.kgpz)} · ${p.producto}${c.det.fecha_corta?' · fecha corta: separar para MNA':''}`);
+      detalle:Object.assign({ esperado:p.enEnvio, kgpz:p.kgpz }, cad?{ caducidad_min:cad }:{}, c.det, sp.fc?{ fecha_corta:true, fecha_corta_pz:sp.fc }:{}, sp.dan?{ danadas:sp.dan }:{}) }));
+    toast(`✓ ${fmtQty(qty,p.kgpz)} ${unitOf(p.kgpz)} · ${p.producto}${sepN?` · separar ${fmtQty(sepN,p.kgpz)} para MNA`:''}`);
   }
   S.current=null;
   renderRecibir();
@@ -1686,15 +1741,52 @@ function renderRecent(){
   const more=all.length>10 ? `<button class="link-btn" onclick="S.recentAll=!S.recentAll;renderRecent()">${S.recentAll?'Ver solo los últimos 10':`Ver todos los escaneos (${all.length})`}</button>` : '';
   el.innerHTML=scans.map(ev=>{
     const u=ev.detalle&&ev.detalle.uid, kp=kgpzOf(ev), now=scanQtyNow(ev), orig=round2(ev.cantidad), line=S.lines.get(ev.sku_key);
-    const meta=[localHM(new Date(ev.ts)), ev.receptor!==S.receptor?escapeHtml(ev.receptor):'', ev.metodo==='manual'?'sin código':ev.metodo==='codigo_incorrecto'?'<span style="color:var(--orange);font-weight:700">código incorrecto</span>':ev.metodo==='camara'?'cámara':'', line?'':'<span style="color:var(--c-ink);font-weight:700">no esperado</span>', ev.detalle&&ev.detalle.fecha_corta?'<span style="color:var(--orange);font-weight:700">fecha corta</span>':''].filter(Boolean).join(' · ');
-    const editing=S.corrigiendo===u;
+    const meta=[localHM(new Date(ev.ts)), ev.receptor!==S.receptor?escapeHtml(ev.receptor):'', ev.metodo==='manual'?'sin código':ev.metodo==='codigo_incorrecto'?'<span style="color:var(--orange);font-weight:700">código incorrecto</span>':ev.metodo==='camara'?'cámara':'', line?'':'<span style="color:var(--c-ink);font-weight:700">no esperado</span>', sepMeta(ev, kp)].filter(Boolean).join(' · ');
+    const editing=S.corrigiendo===u, sepEdit=S.separando===u;
     return `<div class="ritem"><div class="ritem-row">
         ${line?imgTag(line.barcode, line.producto, 'thumb'):imgTag(ev.sku_key.startsWith('name:')?'':ev.sku_key, ev.producto, 'thumb')}
         <div class="ritem-main"><div class="ritem-name">${nameHtml(line?line.producto:ev.producto)}</div><div class="ritem-meta">${meta}</div></div>
         <div><div class="ritem-qty">${now!==orig?`<s>${fmtQty(orig,kp)}</s>`:''}${fmtQty(now,kp)} <small>${unitOf(kp)}</small></div>
-          ${editing?'':enEntregaCerrada(ev)?`<div class="ritem-meta">entrega ${entregaDe(ev)} cerrada</div>`:`<button class="corr-btn" onclick="startCorregir('${escapeHtml(u)}')">Corregir</button>`}</div>
-      </div>${editing?corrBoxHtml(ev, kp, now):''}</div>`;
+          ${editing||sepEdit?'':enEntregaCerrada(ev)?`<div class="ritem-meta">entrega ${entregaDe(ev)} cerrada</div>`:`<button class="corr-btn" onclick="startCorregir('${escapeHtml(u)}')">Corregir</button>${now>0?` <button class="corr-btn" onclick="startSeparar('${escapeHtml(u)}')">Separar</button>`:''}`}</div>
+      </div>${editing?corrBoxHtml(ev, kp, now):sepEdit?sepBoxHtml(ev, kp, now):''}</div>`;
   }).join('')+more;
+}
+function sepMeta(ev, kp){
+  const s=separadasDe(ev), t=[s.fc>0?`${fmtQty(s.fc,kp)} fecha corta`:'', s.dan>0?`${fmtQty(s.dan,kp)} dañadas`:''].filter(Boolean).join(' · ');
+  return t?`<span style="color:var(--orange);font-weight:700">${t}</span>`:'';
+}
+// Separar: damage or a short date found after the scan. The total doesn't change: cantidad 0 ajuste (rule 4)
+function sepBoxHtml(ev, kp, now){
+  const s=separadasDe(ev), im=kp==='Kg'?'decimal':'numeric', v=n=>n>0?fmtQty(n,kp):'';
+  return `<div class="corr-box">
+    <label class="qty-label">De las ${fmtQty(now,kp)} ${unitOf(kp)} de este escaneo, ¿cuántas se separan para MNA? El total recibido no cambia.</label>
+    ${ev.detalle.caducidad_min?`<div class="sep-row"><label for="sepe-fc">Fecha corta</label><input id="sepe-fc" class="text-input" type="text" inputmode="${im}" autocomplete="off" value="${v(s.fc)}" placeholder="0"></div>`:''}
+    <div class="sep-row"><label for="sepe-dan">Dañadas</label><input id="sepe-dan" class="text-input" type="text" inputmode="${im}" autocomplete="off" value="${v(s.dan)}" placeholder="0"></div>
+    <div class="qty-err" id="sepe-err"></div>
+    <div class="pcard-actions"><button class="btn btn-secondary" onclick="cancelSeparar()">Cancelar</button><button class="btn btn-primary" onclick="saveSeparar()">Guardar</button></div>
+  </div>`;
+}
+function startSeparar(u){
+  if(S.current) cancelCard();
+  S.corrigiendo=null; S.separando=u; renderRecent();
+  const i=document.getElementById('sepe-dan'); if(i) setTimeout(()=>i.focus(),40);
+}
+function cancelSeparar(){ S.separando=null; renderRecent(); focusScan(); }
+function saveSeparar(){
+  if(S.closedInfo){ toast('Esta recepción ya se cerró'); cancelSeparar(); return; }
+  const ev=S.events.find(e=>e.tipo==='scan' && e.detalle && e.detalle.uid===S.separando); if(!ev) return;
+  if(enEntregaCerrada(ev)){ toast('Esa entrega ya se cerró', 4000); cancelSeparar(); return; }
+  const kp=kgpzOf(ev), now=scanQtyNow(ev), cur=separadasDe(ev), err=document.getElementById('sepe-err');
+  const read=id=>{ const i=document.getElementById(id); return !i || !i.value.trim() ? 0 : parseQty(i.value, kp, true); };
+  const fc=read('sepe-fc'), dan=read('sepe-dan');
+  if(fc==null || dan==null){ err.textContent=kp==='Kg'?'Escribe el peso (hasta 2 decimales).':'Escribe piezas enteras.'; return; }
+  if(round2(fc+dan)>now){ err.textContent=`Las separadas no pueden ser más que las ${fmtQty(now,kp)} ${unitOf(kp)} de este escaneo.`; return; }
+  if(fc===cur.fc && dan===cur.dan){ err.textContent='Es lo mismo que ya tenía.'; return; }
+  recordEvent(makeEvent('ajuste', { sku_key:ev.sku_key, producto:ev.producto, cantidad:0, metodo:ev.metodo,
+    detalle:{ ref:ev.detalle.uid, separar:{ fecha_corta:fc, danadas:dan }, motivo:'Separadas', kgpz:kp } }));
+  S.separando=null; renderRecibir();
+  toast(`✓ Separar ${fmtQty(round2(fc+dan),kp)} ${unitOf(kp)} para MNA · el total no cambió`);
+  focusScan();
 }
 function corrBoxHtml(ev, kp, now){
   return `<div class="corr-box">
@@ -1707,7 +1799,7 @@ function corrBoxHtml(ev, kp, now){
 }
 function startCorregir(u){
   if(S.current) cancelCard();
-  S.corrigiendo=u; renderRecent();
+  S.separando=null; S.corrigiendo=u; renderRecent();
   const i=document.getElementById('corr-qty'); if(i) setTimeout(()=>i.focus(),40);
 }
 function cancelCorregir(){ S.corrigiendo=null; renderRecent(); focusScan(); }
@@ -1893,7 +1985,10 @@ function sumRowHtml(r, inner, org){
   return `<div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
       <div class="ritem-meta">${pos?escapeHtml(pos.full)+' · ':''}${r.kgpz}${r.barcode?'':' · sin código'}</div></div>
       <span class="estado ${ESTADO_CLS[r.estado]}">${escapeHtml(r.estado)}</span></div>
-    ${(()=>{ const a=armadoDe(r), oo=org&&org.get(r.sku), o=oo&&oo.cat!=='sin_armado'?origenTexto(oo):''; const fc=fechaCortaDe(r.sku); return (a!=null?`<div class="ritem-meta" style="margin-top:4px">Armado en CH: <b>${fmtQty(a,r.kgpz)}</b> ${u}</div>`:'')+(o?`<div class="ritem-meta" style="color:var(--c-ink);font-weight:700">${escapeHtml(o)}</div>`:'')+(fc>0?`<div class="ritem-meta" style="color:var(--orange);font-weight:700">${fmtQty(fc,r.kgpz)} ${u} con fecha corta (caducidad antes del ${dmy(caducidadDe(r.sku))}): separar para MNA</div>`:''); })()}
+    ${(()=>{ const a=armadoDe(r), oo=org&&org.get(r.sku), o=oo&&oo.cat!=='sin_armado'?origenTexto(oo):''; const fc=fechaCortaDe(r.sku), dn=danadasDe(r.sku), sp=separarDe(r.sku); return (a!=null?`<div class="ritem-meta" style="margin-top:4px">Armado en CH: <b>${fmtQty(a,r.kgpz)}</b> ${u}</div>`:'')+(o?`<div class="ritem-meta" style="color:var(--c-ink);font-weight:700">${escapeHtml(o)}</div>`:'')+(fc>0?`<div class="ritem-meta" style="color:var(--orange);font-weight:700">${fmtQty(fc,r.kgpz)} ${u} con fecha corta (caducidad antes del ${dmy(caducidadDe(r.sku))}): separar para MNA</div>`:'')
+      +(dn>0?`<div class="ritem-meta" style="color:var(--orange);font-weight:700">${fmtQty(dn,r.kgpz)} ${u} dañadas: separar para MNA</div>`:'')
+      // 4 + 1 dañada when 5 arrived: the total was typed without the separated pieces
+      +(isDelta(r) && r.dif<0 && sp>0 && round2(r.rec+sp)>=r.env?`<div class="ritem-meta" style="color:var(--c-ink);font-weight:700">¿Las separadas están en el total? Si no, usa Recontar y escribe todas las que llegaron.</div>`:''); })()}
     <div class="sum-nums"><div><b>${r.env?fmtQty(r.env,r.kgpz):'—'}</b><span>Enviado (${u})</span></div><div class="big"><b>${fmtQty(r.rec,r.kgpz)}</b><span>Recibido (${u})</span></div>
       <div><b style="color:${r.dif?'var(--c-ink)':'inherit'}">${sign}${fmtQty(r.dif,r.kgpz)}</b><span>Diferencia</span></div></div>${inner||''}`;
 }
@@ -1911,9 +2006,9 @@ function renderResumen(){
     <div class="stat"><div class="stat-n">${deltas.length}</div><div class="stat-l">con diferencia</div></div>
     <div class="stat"><div class="stat-n" style="color:${pend.length?'var(--orange)':'var(--green-dark)'}">${pend.length}</div><div class="stat-l">por confirmar</div></div></div>`;
   if(OUTBOX.length) h+=`<div class="warn-box">Hay ${OUTBOX.length} registro(s) sin subir. Conéctate a internet para poder cerrar.</div>`;
-  const fcs=rows.filter(r=>fechaCortaDe(r.sku)>0); // complete lines sit in the collapsed list, so name them here
-  if(fcs.length) h+=`<div class="warn-box"><b>Separar para merma (MNA) · ${fcs.length}</b><br>Fecha corta: se reciben completas y no cuentan como faltante. Después de registrar la recepción, regístralas como merma y sepáralas.
-    ${fcs.map(r=>`<div style="margin-top:4px">${escapeHtml(r.producto)}: <b>${fmtQty(fechaCortaDe(r.sku),r.kgpz)} ${unitOf(r.kgpz)}</b></div>`).join('')}</div>`;
+  const seps=rows.filter(r=>separarDe(r.sku)>0); // complete lines sit in the collapsed list, so name them here
+  if(seps.length) h+=`<div class="warn-box"><b>Separar para merma (MNA) · ${seps.length}</b><br>Fecha corta y dañadas ya están en el total recibido y no cuentan como faltante. Después de registrar la recepción, regístralas como merma y sepáralas.
+    ${seps.map(r=>{ const u=unitOf(r.kgpz), f=fechaCortaDe(r.sku), d=danadasDe(r.sku); return `<div style="margin-top:4px">${escapeHtml(r.producto)}: ${[f>0?`<b>${fmtQty(f,r.kgpz)} ${u}</b> fecha corta`:'', d>0?`<b>${fmtQty(d,r.kgpz)} ${u}</b> dañadas`:''].filter(Boolean).join(' · ')}</div>`; }).join('')}</div>`;
   if(rev.length) h+=`<button class="btn btn-warn btn-block" style="margin-bottom:10px" onclick="backToRecibir();openRevisar()">Revisar ahora · ${rev.length}</button>`;
   if(deltas.length){
     h+=`<div class="section-title">Diferencias · ${deltas.length}</div><div class="muted" style="margin-bottom:8px">Contesta cada una: recuenta el producto o confirma la diferencia.</div>`;
@@ -1969,7 +2064,7 @@ async function cerrarRecepcion(){
     for(const o of org.values()) origenes[o.cat]=(origenes[o.cat]||0)+1;
     const ev=makeEvent('cerrar', { detalle:{ reporte:path, envio:S.envio._path, lineas:S.lines.size, recibidas:rows.filter(r=>r.env>0 && r.rec>0).length,
       diferencias:deltas.length, no_esperados:rows.filter(r=>r.estado==='No esperado').length, badges, receptores,
-      fecha_corta:rows.filter(r=>fechaCortaDe(r.sku)>0).length||undefined,
+      fecha_corta:rows.filter(r=>fechaCortaDe(r.sku)>0).length||undefined, danadas:rows.filter(r=>danadasDe(r.sku)>0).length||undefined,
       entregas:parciales().length?parciales().length+1:undefined, origenes,
       errores:deltas.map(r=>{ const o=org.get(r.sku), a=armadoDe(r); return { sku_key:r.sku, producto:r.producto, kgpz:r.kgpz, armado:a, enviado:r.env, recibido:r.rec, origen:o.cat, par:o.par||undefined }; }) } });
     recordEvent(ev); S.closedInfo=closedState(); await flushAndWait();
@@ -2000,18 +2095,12 @@ function porEntrega(){
   }
   return out;
 }
-// Short-dated pieces scanned in entrega n
-function fechaCortaEntrega(sku, n){
-  const ps=parciales(); let t=0;
-  for(const e of S.events) if(e.tipo==='scan' && e.sku_key===sku && e.detalle && e.detalle.fecha_corta && entregaDe(e, ps)===n) t+=scanQtyNow(e);
-  return round2(t);
-}
 function entregaActualRows(){
   const n=parciales().length+1, m=porEntrega().get(n)||new Map(), rows=[];
   for(const [sku, q] of m){
     if(!q) continue;
     const l=S.lines.get(sku), ne=S.noEsperados.get(sku);
-    rows.push({ sku, producto:l?l.producto:ne?ne.producto:sku, barcode:l?l.barcode:(sku.startsWith('name:')?'':sku), kgpz:l?l.kgpz:ne?ne.kgpz:'Pz', q, total:recibidoDe(sku), esperado:!!l, corta:fechaCortaEntrega(sku, n) });
+    rows.push({ sku, producto:l?l.producto:ne?ne.producto:sku, barcode:l?l.barcode:(sku.startsWith('name:')?'':sku), kgpz:l?l.kgpz:ne?ne.kgpz:'Pz', q, total:recibidoDe(sku), esperado:!!l, corta:sepSum(sku,'fc',n), dan:sepSum(sku,'dan',n) });
   }
   return rows.sort((a,b)=>normName(a.producto).localeCompare(normName(b.producto)));
 }
@@ -2029,17 +2118,17 @@ function openParcial(){
       <div class="stat"><div class="stat-n">${got} / ${total}</div><div class="stat-l">del envío ya recibidos</div></div></div>
     ${OUTBOX.length?`<div class="warn-box">Hay ${OUTBOX.length} registro(s) sin subir. Conéctate a internet para poder cerrar la entrega.</div>`:''}
     ${rows.map(r=>`<div class="ritem"><div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
-      <div class="ritem-meta">${r.esperado?'':'<span style="color:var(--c-ink);font-weight:700">no esperado</span>'}${r.corta?`<span style="color:var(--orange);font-weight:700">${r.esperado?'':' · '}${fmtQty(r.corta,r.kgpz)} con fecha corta</span>`:''}</div></div>
+      <div class="ritem-meta">${r.esperado?'':'<span style="color:var(--c-ink);font-weight:700">no esperado</span>'}${r.corta?`<span style="color:var(--orange);font-weight:700">${r.esperado?'':' · '}${fmtQty(r.corta,r.kgpz)} con fecha corta</span>`:''}${r.dan?`<span style="color:var(--orange);font-weight:700">${r.esperado&&!r.corta?'':' · '}${fmtQty(r.dan,r.kgpz)} dañadas</span>`:''}</div></div>
       <div class="ritem-qty">${fmtQty(r.q,r.kgpz)} <small>${unitOf(r.kgpz)}</small></div></div></div>`).join('')}
     <button class="btn btn-primary btn-block" id="parcial-btn" style="margin-top:16px" onclick="cerrarParcial()">Cerrar entrega parcial ${n}</button>
     <div class="muted" style="margin-top:8px;text-align:center">Cuando llegue lo demás, entra de nuevo y toca «Continuar recepción». Al terminar todo, usa «Terminé todo: revisar y cerrar».</div>`);
 }
-const PARCIAL_COLS=['Hub','Área','Fecha','Entrega','Fecha de entrega','Receptor(es)','Producto','Código de barras','Kg/Pz','Posición','Recibido','Recibido acumulado','Fecha corta','Caducidad mínima'];
+const PARCIAL_COLS=['Hub','Área','Fecha','Entrega','Fecha de entrega','Receptor(es)','Producto','Código de barras','Kg/Pz','Posición','Recibido','Recibido acumulado','Fecha corta','Caducidad mínima','Dañadas'];
 function buildParcialCsv(n, hoy, rows, receptores){
   const head=PARCIAL_COLS.map(csvCell).join(',');
   const body=rows.map(r=>{ const pos=positionOf(r.barcode, r.producto);
     return [hubName(S.hub), areaName(S.area), S.session.fecha, n, hoy, receptores.join(', '), r.producto, r.barcode, r.kgpz, pos?pos.full:'',
-      fmtQty(r.q,r.kgpz), fmtQty(r.total,r.kgpz), r.corta?fmtQty(r.corta,r.kgpz):'', caducidadDe(r.sku)?dmy(caducidadDe(r.sku)):''].map(csvCell).join(','); });
+      fmtQty(r.q,r.kgpz), fmtQty(r.total,r.kgpz), r.corta?fmtQty(r.corta,r.kgpz):'', caducidadDe(r.sku)?dmy(caducidadDe(r.sku)):'', r.dan?fmtQty(r.dan,r.kgpz):''].map(csvCell).join(','); });
   return [head].concat(body).join('\r\n')+'\r\n';
 }
 async function cerrarParcial(){
@@ -2072,19 +2161,21 @@ async function cerrarParcial(){
 }
 
 /* ── Report CSV (§9): all cells quoted, CRLF; the BOM is added only on browser download ── */
-const REPORT_COLS=['Hub','Área','Fecha','Receptor(es)','Producto','Código de barras','Kg/Pz','Posición','Armado','Enviado','Recibido','Diferencia','Estado','Notas (correcciones / confirmaciones)','Alertas','Fecha corta','Caducidad mínima','Origen de la diferencia'];
+const REPORT_COLS=['Hub','Área','Fecha','Receptor(es)','Producto','Código de barras','Kg/Pz','Posición','Armado','Enviado','Recibido','Diferencia','Estado','Notas (correcciones / confirmaciones)','Alertas','Fecha corta','Caducidad mínima','Origen de la diferencia','Dañadas'];
 function csvCell(v){ return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'; }
 function notasDe(sku, kgpz, o){
   const n=[];
   for(const e of S.events){
     if(e.sku_key!==sku || !e.detalle) continue;
-    const d=e.detalle, u=unitOf(kgpz);
+    const d=e.detalle, u=unitOf(kgpz), sp=e.tipo==='scan'?separadasDe(e):null;
+    if(e.tipo==='ajuste' && d.separar) continue; // shows through the scan it edits
     if(e.tipo==='ajuste') n.push(`${d.motivo||'Corrección'}: ${fmtQty(d.antes,kgpz)}→${fmtQty(d.despues,kgpz)} ${u} (${e.receptor||''})`);
     else if(e.tipo==='confirmacion' && d.diferencia) n.push(`Diferencia confirmada con ${fmtQty(d.recibido,kgpz)} ${u} (${e.receptor||''})`);
     else if(e.tipo==='confirmacion' && d.revisar) n.push(`Revisado sin archivo (${e.receptor||''})`);
     else if(e.tipo==='scan' && d.reatribuido_de) n.push(`Escaneado como «${d.reatribuido_de.producto}»`);
     else if(e.tipo==='scan' && d.sobrante) n.push('Se registró arriba de lo enviado tras recontar');
-    if(e.tipo==='scan' && d.fecha_corta) n.push(`Fecha corta: ${fmtQty(scanQtyNow(e),kgpz)} ${u} con caducidad antes del ${dmy(d.caducidad_min)} (${e.receptor||''})`);
+    if(sp && sp.fc>0) n.push(`Fecha corta: ${fmtQty(sp.fc,kgpz)} ${u} con caducidad antes del ${dmy(d.caducidad_min)} (${e.receptor||''})`);
+    if(sp && sp.dan>0) n.push(`Dañadas: ${fmtQty(sp.dan,kgpz)} ${u} (${e.receptor||''})`);
     if(e.tipo==='scan' && d.codigo_incorrecto) n.push(`Código incorrecto en sistema: se escaneó ${d.codigo_incorrecto.escaneado}, el sistema tiene ${d.codigo_incorrecto.codigo_sistema||'(sin código)'}`);
   }
   if(o && o.nota) n.push(o.nota);
@@ -2098,7 +2189,7 @@ function buildReportCsv(rows, badges, receptores){
   const body=rows.map(r=>{ const pos=positionOf(r.barcode, r.producto), arm=armadoDe(r), o=org.get(r.sku);
     return [hubName(S.hub), areaName(S.area), S.session.fecha, receptores.join(', '), r.producto, r.barcode, r.kgpz, pos?pos.full:'',
       arm==null?'—':fmtQty(arm,r.kgpz), r.env?fmtQty(r.env,r.kgpz):'0', fmtQty(r.rec,r.kgpz), fmtQty(r.dif,r.kgpz), r.estado, notasDe(r.sku, r.kgpz, o), badges.join(' · '),
-      fechaCortaDe(r.sku)>0?fmtQty(fechaCortaDe(r.sku),r.kgpz):'', caducidadDe(r.sku)?dmy(caducidadDe(r.sku)):'', o?ORIGEN[o.cat]:'']
+      fechaCortaDe(r.sku)>0?fmtQty(fechaCortaDe(r.sku),r.kgpz):'', caducidadDe(r.sku)?dmy(caducidadDe(r.sku)):'', o?ORIGEN[o.cat]:'', danadasDe(r.sku)>0?fmtQty(danadasDe(r.sku),r.kgpz):'']
       .concat(ent.map(n=>fmtQty((pe.get(n)&&pe.get(n).get(r.sku))||0, r.kgpz))).map(csvCell).join(','); });
   return [head].concat(body).join('\r\n')+'\r\n';
 }
@@ -2199,6 +2290,7 @@ const SLACK_CAUSAS=[ // [key, categories, tag on the item line, how paragraph 2 
   ['captura', ['captura','cruce_captura'], 'captura CH', 'captura al registrar la salida en CH', 'errores de tecleo o de producto al capturar la salida'],
   ['faltante', ['faltante'], 'faltante', 'faltante (armado o traslado)', 'faltan piezas que sí se registraron como armadas: conteo al armar o traslado'],
   ['fecha_corta', [], 'fecha corta', 'fecha corta', 'no se revisa la caducidad al armar'], // counted from r.corta, not from a difference
+  ['danadas', [], 'dañadas', 'piezas dañadas (armado o traslado)', 'llegan piezas dañadas: revisar el estado al armar y el empaque'], // counted from r.dan
   ['revisar', ['revisar'], 'revisar', 'sin conclusión (armado, enviado y recibido no coinciden)', null],
   ['sin_armado', ['cruce','sin_armado'], 'sin datos de armado', 'sin datos de armado', null],
 ];
@@ -2229,8 +2321,11 @@ function slackMensaje(info, rvRows, tags){
   const cortas=rvRows.filter(r=>r.corta>0);
   if(cortas.length) casos.set('fecha_corta', cortas.length);
   for(const r of cortas) items.push(`• ${r.producto}: ${fmtQty(r.corta,r.kgpz)} ${unitOf(r.kgpz)}${r.cad?` con caducidad antes del ${r.cad}`:''} → fecha corta, separar para MNA`);
+  const danadas=rvRows.filter(r=>r.dan>0);
+  if(danadas.length) casos.set('danadas', danadas.length);
+  for(const r of danadas) items.push(`• ${r.producto}: ${fmtQty(r.dan,r.kgpz)} ${unitOf(r.kgpz)} → dañadas, separar para MNA`);
   const total=[...casos.values()].reduce((a,b)=>a+b,0), quien=(info.receptores||[info.receptor]).filter(Boolean).join(', ');
-  const out=[`*${hubName(info.hub)} · ${areaName(info.area)} · ${fechaLarga(info.fecha)}*: ${rows.length?`${rows.length} producto(s) con diferencia`:'sin diferencias'}${cortas.length?` · ${cortas.length} con fecha corta`:''}${quien?' · recibió '+quien:''}`, ...items];
+  const out=[`*${hubName(info.hub)} · ${areaName(info.area)} · ${fechaLarga(info.fecha)}*: ${rows.length?`${rows.length} producto(s) con diferencia`:'sin diferencias'}${cortas.length?` · ${cortas.length} con fecha corta`:''}${danadas.length?` · ${danadas.length} con dañadas`:''}${quien?' · recibió '+quien:''}`, ...items];
   if(items.some(l=>/ A\d| E\d/.test(l))) out.push('_A armado · E enviado · R recibido_');
   // Paragraph 2: the diagnosis for the CH coordinator
   if(total){
@@ -2264,20 +2359,20 @@ function openCanastas(){
     const rec=recibidoDe(sku); if(!(rec>0)) return;
     const pos=positionOf(barcode, producto), k=pos?pos.letra:'Sin posición';
     if(!groups.has(k)) groups.set(k, []);
-    groups.get(k).push({ producto, barcode, kgpz, rec, pos, corta:fechaCortaDe(sku) });
+    groups.get(k).push({ producto, barcode, kgpz, rec, pos, separar:separarDe(sku) });
   };
   for(const l of S.lines.values()) add(l.sku_key, l.producto, l.barcode, l.kgpz);
   for(const [sku, ne] of S.noEsperados) add(sku, ne.producto, sku.startsWith('name:')?'':sku, ne.kgpz);
   const keys=[...groups.keys()].sort((a,b)=>a==='Sin posición'?1:b==='Sin posición'?-1:a.localeCompare(b,'es',{numeric:true}));
   if(!keys.length){ openSheet('Canastas', '<div class="empty-hint">Todavía no hay productos recibidos.</div>'); return; }
-  const ncortas=[...groups.values()].flat().filter(x=>x.corta>0).length;
+  const nsep=[...groups.values()].flat().filter(x=>x.separar>0).length;
   openSheet('Canastas', `<div class="muted" style="margin-bottom:10px">Lo recibido agrupado por pasillo, para acomodarlo.</div>`
-    +(ncortas?`<div class="warn-box">${ncortas} producto(s) traen piezas con fecha corta. Esas piezas no se acomodan: sepáralas para merma (MNA).</div>`:'')
+    +(nsep?`<div class="warn-box">${nsep} producto(s) traen piezas con fecha corta o dañadas. Esas piezas no se acomodan: sepáralas para merma (MNA).</div>`:'')
     +keys.map(k=>{ const it=groups.get(k).sort((a,b)=>(a.pos?a.pos.full:'').localeCompare(b.pos?b.pos.full:'','es',{numeric:true}));
       return `<details class="info-card" style="padding:10px 12px"><summary style="cursor:pointer;display:flex;align-items:center;gap:10px">
         <span class="res-pos" style="font-size:28px">${escapeHtml(k==='Sin posición'?'—':k)}</span><b style="flex:1">${escapeHtml(k==='Sin posición'?'Sin posición':(FREEZER_AISLE_RE.test(k)?'Congelador ':'Pasillo ')+k)}</b><span>${it.length} producto${it.length===1?'':'s'}</span></summary>
         ${it.map(x=>`<div class="ritem-row" style="margin-top:8px">${imgTag(x.barcode, x.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(x.producto)}</div>
-          <div class="ritem-meta">${x.pos?escapeHtml(x.pos.full):'sin posición'}${x.corta>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(x.corta,x.kgpz)} ${unitOf(x.kgpz)} separar para MNA</span>`:''}</div></div><div class="ritem-qty">${fmtQty(x.rec,x.kgpz)} <small>${unitOf(x.kgpz)}</small></div></div>`).join('')}</details>`; }).join(''));
+          <div class="ritem-meta">${x.pos?escapeHtml(x.pos.full):'sin posición'}${x.separar>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(x.separar,x.kgpz)} ${unitOf(x.kgpz)} separar para MNA</span>`:''}</div></div><div class="ritem-qty">${fmtQty(x.rec,x.kgpz)} <small>${unitOf(x.kgpz)}</small></div></div>`).join('')}</details>`; }).join(''));
 }
 
 /* ════════════════════════════════════════════════════════════════════════════════════
@@ -2315,7 +2410,7 @@ async function openRecepciones(){
       ${r.parcial?`<div class="res-name">${fechaLarga(r.fecha)} · <span class="tag orange">entrega parcial ${r.entrega}</span></div>
       <div class="res-sub">${r.fecha_entrega&&r.fecha_entrega!==r.fecha?fechaLarga(r.fecha_entrega)+', ':''}${localHM(new Date(r.ts))} · ${escapeHtml((r.receptores||[r.receptor]).join(', '))} · ${r.productos||0} productos en esta entrega</div>`
       :`<div class="res-name">${fechaLarga(r.fecha)} · cerrada ${localHM(new Date(r.ts))}${r.entregas?` · ${r.entregas} entregas`:''}</div>
-      <div class="res-sub">${escapeHtml((r.receptores||[r.receptor]).join(', '))} · ${r.lineas||0} productos · ${r.diferencias?`<b style="color:var(--orange)">${r.diferencias} con diferencia</b>`:'sin diferencias'}${r.fecha_corta?` · ${r.fecha_corta} con fecha corta`:''}</div>`}
+      <div class="res-sub">${escapeHtml((r.receptores||[r.receptor]).join(', '))} · ${r.lineas||0} productos · ${r.diferencias?`<b style="color:var(--orange)">${r.diferencias} con diferencia</b>`:'sin diferencias'}${r.fecha_corta?` · ${r.fecha_corta} con fecha corta`:''}${r.danadas?` · ${r.danadas} con dañadas`:''}</div>`}
       ${(r.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div><span style="font-size:20px">›</span></button>`).join('')
       :'<div class="empty-hint">No hay recepciones cerradas en los últimos 30 días.</div>');
 }
@@ -2339,7 +2434,7 @@ async function openRecepcion(info, from){
     const pos=g('Posición'), kgpz=g('Kg/Pz')==='Kg'?'Kg':'Pz';
     return { i, producto:g('Producto'), barcode:g('Código de barras'), kgpz, pos, pasillo:(pos.split(/[-·\s]/)[0]||'').trim(), armado:g('Armado'),
       env:parseNum(g('Enviado')), rec:parseNum(g('Recibido')), dif:parseNum(g('Diferencia')), estado:info.parcial?'Entrega '+info.entrega:g('Estado'),
-      acum:info.parcial?parseNum(g('Recibido acumulado')):null, corta:parseNum(g('Fecha corta'))||0, cad:g('Caducidad mínima'), notas:g('Notas (correcciones / confirmaciones)'), _n:normName(g('Producto')) }; });
+      acum:info.parcial?parseNum(g('Recibido acumulado')):null, corta:parseNum(g('Fecha corta'))||0, cad:g('Caducidad mínima'), dan:parseNum(g('Dañadas'))||0, notas:g('Notas (correcciones / confirmaciones)'), _n:normName(g('Producto')) }; });
   let ticks=new Set(); try{ ticks=new Set(JSON.parse(localStorage.getItem('mr_ticks_'+info.reporte)||'[]')); }catch(_){}
   RV={ info, rows, csv, ticks, f:{ q:'', solo:'', estado:'', kgpz:'', pasillo:'', sort:'archivo' } };
   renderRecepcion();
@@ -2362,14 +2457,14 @@ function renderRecepcion(){
       <div class="muted" style="margin-top:4px">Lo que falta se recibe en la siguiente entrega; las diferencias se revisan al cerrar toda la recepción.</div></div>`
     :`<h2>Recepción del ${fechaLarga(I.fecha)}</h2>
     <div class="info-card">Cerrada a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}${I.entregas?` · en ${I.entregas} entregas`:''}<br>
-      ${I.lineas||0} productos · ${I.diferencias?`<b style="color:var(--orange)">${I.diferencias} con diferencia</b>`:'sin diferencias'}${I.no_esperados?` · ${I.no_esperados} no esperado(s)`:''}${I.fecha_corta?` · <b style="color:var(--orange)">${I.fecha_corta} con fecha corta</b>`:''}
+      ${I.lineas||0} productos · ${I.diferencias?`<b style="color:var(--orange)">${I.diferencias} con diferencia</b>`:'sin diferencias'}${I.no_esperados?` · ${I.no_esperados} no esperado(s)`:''}${I.fecha_corta?` · <b style="color:var(--orange)">${I.fecha_corta} con fecha corta</b>`:''}${I.danadas?` · <b style="color:var(--orange)">${I.danadas} con dañadas</b>`:''}
       <div>${(I.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div></div>`)+`
-    ${RV.rows.some(r=>r.corta>0)?`<div class="warn-box">Registra en el sistema todo lo recibido, también lo de fecha corta. Después regístralo como merma (MNA) y sepáralo.</div>`:''}
+    ${RV.rows.some(r=>r.corta>0||r.dan>0)?`<div class="warn-box">Registra en el sistema todo lo recibido, también lo de fecha corta y lo dañado. Después regístralo como merma (MNA) y sepáralo.</div>`:''}
     ${P?'':`<button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="openSlackMensaje()">Mensaje para Slack</button>`}
     <button class="btn btn-secondary btn-block" onclick="descargarReporte()">Descargar CSV</button>
     <input class="text-input" style="margin-top:12px" placeholder="Buscar producto…" oninput="rvSet('q',this.value)" autocomplete="off">
     <div class="filters">
-      ${P&&!RV.rows.some(r=>r.corta>0)?'':`<select onchange="rvSet('solo',this.value)"><option value="">Todos</option>${P?'':'<option value="1">Solo diferencias</option>'}${RV.rows.some(r=>r.corta>0)?'<option value="corta">Solo fecha corta</option>':''}</select>`}
+      ${P&&!RV.rows.some(r=>r.corta>0||r.dan>0)?'':`<select onchange="rvSet('solo',this.value)"><option value="">Todos</option>${P?'':'<option value="1">Solo diferencias</option>'}${RV.rows.some(r=>r.corta>0)?'<option value="corta">Solo fecha corta</option>':''}${RV.rows.some(r=>r.dan>0)?'<option value="dan">Solo dañadas</option>':''}</select>`}
       ${P?'':`<select onchange="rvSet('estado',this.value)"><option value="">Estado</option>${est.map(e=>`<option>${escapeHtml(e)}</option>`).join('')}</select>`}
       <select onchange="rvSet('kgpz',this.value)"><option value="">Kg/Pz</option><option>Kg</option><option>Pz</option></select>
       <select onchange="rvSet('pasillo',this.value)"><option value="">Pasillo</option>${pas.map(p=>`<option>${escapeHtml(p)}</option>`).join('')}</select>
@@ -2381,14 +2476,14 @@ function renderRecepcion(){
 function renderRecepcionRows(){
   const f=RV.f, words=normName(f.q).split(' ').filter(Boolean);
   let rows=RV.rows.filter(r=>(!words.length || words.every(w=>r._n.includes(w)))
-    && (!f.solo || (f.solo==='corta' ? r.corta>0 : !/^Completo/.test(r.estado))) && (!f.estado || r.estado===f.estado) && (!f.kgpz || r.kgpz===f.kgpz) && (!f.pasillo || r.pasillo===f.pasillo));
+    && (!f.solo || (f.solo==='corta' ? r.corta>0 : f.solo==='dan' ? r.dan>0 : !/^Completo/.test(r.estado))) && (!f.estado || r.estado===f.estado) && (!f.kgpz || r.kgpz===f.kgpz) && (!f.pasillo || r.pasillo===f.pasillo));
   const cmp={ archivo:(a,b)=>a.i-b.i, az:(a,b)=>a._n.localeCompare(b._n), pasillo:(a,b)=>(a.pos||'~').localeCompare(b.pos||'~','es',{numeric:true})||a.i-b.i, dif:(a,b)=>Math.abs(b.dif)-Math.abs(a.dif)||a.i-b.i }[f.sort];
   rows=rows.slice().sort(cmp);
   document.getElementById('rv-count').textContent=`${rows.length} producto(s) · ${RV.ticks.size} de ${RV.rows.length} marcados`;
   document.getElementById('rv-rows').innerHTML=rows.map(r=>{ const u=unitOf(r.kgpz), on=RV.ticks.has(r.i);
     return `<div class="sum-row ${on?'ticked':''} ${r.acum!=null||/^Completo/.test(r.estado)?'':'delta'}"><div class="ritem-row">
       <input type="checkbox" class="chk" ${on?'checked':''} onchange="rvTick(${r.i})">${imgTag(r.barcode, r.producto, 'thumb')}
-      <div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div><div class="ritem-meta">${escapeHtml(r.barcode||'sin código')}${r.pos?' · '+escapeHtml(r.pos):''}${r.corta>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(r.corta,r.kgpz)} ${u} fecha corta · separar para MNA</span>`:''}</div></div>
+      <div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div><div class="ritem-meta">${escapeHtml(r.barcode||'sin código')}${r.pos?' · '+escapeHtml(r.pos):''}${r.corta>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(r.corta,r.kgpz)} ${u} fecha corta · separar para MNA</span>`:''}${r.dan>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(r.dan,r.kgpz)} ${u} dañadas · separar para MNA</span>`:''}</div></div>
       <div style="text-align:right"><div style="font-size:30px;font-weight:800;color:var(--green-dark)">${fmtQty(r.rec,r.kgpz)}</div><div class="ritem-meta">${u} recibido</div></div></div>
       ${r.acum!=null?`<div class="ritem-meta" style="margin-top:4px">Acumulado en la recepción: ${fmtQty(r.acum,r.kgpz)} ${u}</div>`:`<div class="ritem-meta" style="margin-top:4px">Enviado ${fmtQty(r.env,r.kgpz)}${r.armado&&r.armado!=='—'?' · Armado '+escapeHtml(r.armado):''} · Dif ${r.dif>0?'+':''}${fmtQty(r.dif,r.kgpz)} · <span class="estado ${ESTADO_CLS[r.estado]||'mid'}">${escapeHtml(r.estado)}</span></div>`}
       ${r.notas?`<div class="ritem-meta">${escapeHtml(r.notas)}</div>`:''}</div>`; }).join('') || '<div class="empty-hint">Nada coincide con el filtro.</div>';

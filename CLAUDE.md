@@ -90,10 +90,14 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - Borrar envío (Inicio, open reception only): typed "borrar" confirms. Appends `admin` {accion:'borrar', escaneos}
   (events stay — append-only), then deletes that envío's .json/.csv (`sbDeleteEnvio` only accepts `envios/…`).
   `findActiveEnvio` returns none when a `borrar` is newer than the newest file, so an older file never reappears. closedState/sessionClosedAt/listCerradas/Admin/Apps Script treat it as ended.
+- Separar (fecha corta + dañadas): the card's quantity is ALWAYS the total that arrived; the "Fecha corta" / "Dañadas"
+  buttons below it ask how many OF THAT TOTAL go to merma (MNA) (sum ≤ total, else blocked). Scan detalle: `fecha_corta`
+  + `fecha_corta_pz`, `danadas`; old scans with `fecha_corta` alone = the whole scan. Recent list "Separar" edits it
+  after the scan: `ajuste` with `cantidad:0` + `detalle.separar` (latest wins, `S.sepByRef`). Read through
+  `separadasDe(ev)`, `fechaCortaDe`, `danadasDe`, `separarDe`. Resumen hints at Recontar when recibido + separadas
+  covers enviado (4 + 1 when 5 arrived). Report/parcial CSV column `Dañadas`, `cerrar.danadas`, Slack cause `danadas`.
 - Caducidad mínima: `parseEnvio` keeps «Vida anaquel usuarios (min. días)» as `vida_dias` (lines and catalogo[3]; files
-  uploaded before 2026-11-02 don't have it → no box). Card shows `todayStr()` + días = minimum expiry accepted and a
-  one-row "Fecha menor" toggle (not a modal; kept short so the quantity field stays above the keyboard). Every scan stores `detalle.caducidad_min`; flagged ones `fecha_corta:true`
-  and still count as received. `fechaCortaDe(sku)` sums flagged scans (after Corregir). Shown in the recent list,
+  uploaded before 2026-11-02 don't have it → no box). Card shows `todayStr()` + días = minimum expiry accepted (no button here: the quantity field stays above the keyboard). Every scan stores `detalle.caducidad_min`; flagged pieces still count as received. `fechaCortaDe(sku)` sums flagged scans (after Corregir). Shown in the recent list,
   Resumen (row note + count), report/parcial CSV columns `Fecha corta`, `Caducidad mínima` + a note, `cerrar.fecha_corta`,
   Recepciones ("Solo fecha corta" filter).
 - Blind count: `esperado` is never rendered on Recibir, Sin código, Pendientes, Canastas or Revisar ahora; it
