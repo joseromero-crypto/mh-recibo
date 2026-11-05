@@ -133,5 +133,6 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   server from the shell and point the browser pane at the URL.
 - Real exports go in `fixtures/` (gitignored). Never commit business data.
 - Bump `CACHE_NAME` in `sw.js` on every deploy that changes `index.html`.
+- Netlify publishes the repo root: any new `.md` doc needs its own 404 rule in `netlify.toml` (no wildcard for it).
 - **Never `git push` from the terminal.** Commit locally and stop — Jose pushes with GitHub Desktop.
   Netlify (site `mh-recibo`, https://mh-recibo.joseromero.co) auto-deploys `main`.

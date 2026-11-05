@@ -29,3 +29,28 @@
   [headers.values]
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
+
+# Publish dir is the repo root, so internal docs would be served. Netlify has no /*.md wildcard: list each file.
+[[redirects]]
+  from = "/CLAUDE.md"
+  to = "/404"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/HANDOFF.md"
+  to = "/404"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/mhRecibo-v1-plan.md"
+  to = "/404"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/unifyMasterview-plan.md"
+  to = "/404"
+  status = 404
+  force = true
