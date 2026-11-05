@@ -2197,6 +2197,7 @@ const SLACK_CAUSAS=[ // [key, categories, tag on the item line, how paragraph 2 
   ['presentacion', ['cruce_armado'], 'presentación al armar', 'presentación o variante cruzada al armar', 'no se revisa la presentación o variante al armar'],
   ['captura', ['captura','cruce_captura'], 'captura CH', 'captura al registrar la salida en CH', 'errores de tecleo o de producto al capturar la salida'],
   ['faltante', ['faltante'], 'faltante', 'faltante (armado o traslado)', 'faltan piezas que sí se registraron como armadas: conteo al armar o traslado'],
+  ['fecha_corta', [], 'fecha corta', 'fecha corta', 'no se revisa la caducidad al armar'], // counted from r.corta, not from a difference
   ['revisar', ['revisar'], 'revisar', 'sin conclusión (armado, enviado y recibido no coinciden)', null],
   ['sin_armado', ['cruce','sin_armado'], 'sin datos de armado', 'sin datos de armado', null],
 ];
@@ -2223,19 +2224,21 @@ function slackMensaje(info, rvRows, tags){
       else items.push(`• ${neg.producto}: ${nums(neg)} → ${tag} (llegó ${nombreDif(neg.producto, pos.producto)} en su lugar)`, `• ${pos.producto}: ${nums(pos)} → ${tag}`);
     }
   }
+  // Short-dated products can be complete lines too, so they're listed apart from the differences
+  const cortas=rvRows.filter(r=>r.corta>0);
+  if(cortas.length) casos.set('fecha_corta', cortas.length);
+  for(const r of cortas) items.push(`• ${r.producto}: ${fmtQty(r.corta,r.kgpz)} ${unitOf(r.kgpz)}${r.cad?` con caducidad antes del ${r.cad}`:''} → fecha corta`);
   const total=[...casos.values()].reduce((a,b)=>a+b,0), quien=(info.receptores||[info.receptor]).filter(Boolean).join(', ');
-  const out=[`*${hubName(info.hub)} · ${areaName(info.area)} · ${fechaLarga(info.fecha)}*: ${rows.length?`${rows.length} producto(s) con diferencia`:'sin diferencias'}${quien?' · recibió '+quien:''}`, ...items];
+  const out=[`*${hubName(info.hub)} · ${areaName(info.area)} · ${fechaLarga(info.fecha)}*: ${rows.length?`${rows.length} producto(s) con diferencia`:'sin diferencias'}${cortas.length?` · ${cortas.length} con fecha corta`:''}${quien?' · recibió '+quien:''}`, ...items];
   if(items.some(l=>/ A\d| E\d/.test(l))) out.push('_A armado · E enviado · R recibido_');
   // Paragraph 2: the diagnosis for the CH coordinator
-  const mal=rvRows.map(r=>({ r, m:/Código incorrecto en sistema: se escaneó (\S+), el sistema tiene ([^·]*)/.exec(r.notas||'') })).filter(x=>x.m);
-  if(total || mal.length){
+  if(total){
     const partes=SLACK_CAUSAS.filter(c=>casos.get(c[0])).map(c=>`${casos.get(c[0])} de ${c[3]}`);
     const conCausa=SLACK_CAUSAS.filter(c=>c[4] && casos.get(c[0])), max=Math.max(0, ...conCausa.map(c=>casos.get(c[0])));
     const peores=conCausa.filter(c=>casos.get(c[0])===max);
     let d=tags && tags.length ? tags.join(' ')+' ' : `*Para coordinación CH:* `;
-    if(total) d+=`${total} error(es) de ${info.lineas||rvRows.length} productos: ${partes.join(', ')}. `;
+    d+=`${total} error(es) de ${info.lineas||rvRows.length} productos: ${partes.join(', ')}. `;
     if(peores.length) d+=`${peores.length>1?'Puntos más débiles':'Punto más débil'}: ${peores.map(c=>c[4]).join('; ')}.`;
-    if(mal.length) d+=`${total?' ':''}Además, ${mal.length} código(s) incorrecto(s) en sistema para comercial: ${mal.map(x=>`${x.r.producto} (escaneado ${x.m[1]}, sistema ${x.m[2].trim()})`).join(', ')}.`;
     out.push('', d.trim());
   }
   return out.join('\n');
@@ -2333,7 +2336,7 @@ async function openRecepcion(info, from){
     const pos=g('Posición'), kgpz=g('Kg/Pz')==='Kg'?'Kg':'Pz';
     return { i, producto:g('Producto'), barcode:g('Código de barras'), kgpz, pos, pasillo:(pos.split(/[-·\s]/)[0]||'').trim(), armado:g('Armado'),
       env:parseNum(g('Enviado')), rec:parseNum(g('Recibido')), dif:parseNum(g('Diferencia')), estado:info.parcial?'Entrega '+info.entrega:g('Estado'),
-      acum:info.parcial?parseNum(g('Recibido acumulado')):null, corta:parseNum(g('Fecha corta'))||0, notas:g('Notas (correcciones / confirmaciones)'), _n:normName(g('Producto')) }; });
+      acum:info.parcial?parseNum(g('Recibido acumulado')):null, corta:parseNum(g('Fecha corta'))||0, cad:g('Caducidad mínima'), notas:g('Notas (correcciones / confirmaciones)'), _n:normName(g('Producto')) }; });
   let ticks=new Set(); try{ ticks=new Set(JSON.parse(localStorage.getItem('mr_ticks_'+info.reporte)||'[]')); }catch(_){}
   RV={ info, rows, csv, ticks, f:{ q:'', solo:'', estado:'', kgpz:'', pasillo:'', sort:'archivo' } };
   renderRecepcion();

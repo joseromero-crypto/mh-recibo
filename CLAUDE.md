@@ -108,7 +108,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   nota. Shown in Resumen, CSV column `Origen de la diferencia`, `cerrar.origenes` (counts) + `cerrar.errores`
   (per delta: armado/enviado/recibido/origen/par) for tracking. "Mensaje para Slack" (closed reception view,
   not parciales) rebuilds it from the report CSV (old reports too) in a fixed format and copies it.
-  Two paragraphs: items (A/E/R + cause tag), then the CH diagnosis (counts per cause + weakest step) opening with
+  Two paragraphs: items (A/E/R + cause tag, then fecha corta products), then the CH diagnosis (counts per cause,
+  fecha corta included as a cause; weakest step; wrong barcodes stay out, those live in Admin → Códigos) opening with
   the tags from `config/slack.json` `{ tags:[…] }` (Admin → Slack; default `@alberto`; the aux adds the hub
   coordinator and Jose by hand). Tags
   must be Slack @usernames: a pasted "@Alberto Mendoza" mentions @alberto and leaves "Mendoza" as text.
