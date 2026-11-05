@@ -1,5 +1,21 @@
 # MH Recibo — handoff
 
+## 2026-11-05 — no photo beats a wrong photo
+- `getImgUrl` is now barcode (`pickEntry` with the hub's city), then exact name, then the no-photo box. The first-word and prefix
+  guesses are gone: products missing from Masterview got another product's photo. Same change as Armado CH commit `10c87ee`.
+- A barcode entry is skipped when its Masterview name shares no word with the product's (`nameClash`; sizes, units and `IMG_FILLER` don't
+  count, a shared brand does), since a reused barcode is another product. The check runs on the entry the city picked.
+- No name means nothing to compare, so the barcode photo stays. That covers calls with an empty `producto` and the sin-archivo
+  placeholder "Código {n}" (`codigo` is in `IMG_FILLER`, which Armado's list doesn't have). Armado's `doUpload` console count wasn't ported.
+- Old vs new, bundled `imagedb.json` (same version as the live bucket): both envío fixtures unchanged (3,747 abarrotes rows, 987 carnes rows,
+  all resolve by barcode or exact name). 19/10 Contry order: 3 of 451 rows lost a photo, all reserva, same in the 4 cities: Nachos Tostitos
+  400g (showed Doritos), Totopos de maíz lemon pepper Nūbe 300g (showed Charras), Totopos de maíz enchilados Nūbe 300g (showed Chips de
+  camote). No row changed to a different photo. Real `envios/` files in Supabase were not read.
+- Browser check on a copy that blocked every non-GET: `imgTag` gives the no-photo box for those three and keeps the photo for a normal row,
+  an empty name and "Código {n}". 0 writes attempted, nothing to clean up. The Recibir flow itself was not run. **Not tested:** real phones.
+- **To know:** a shared brand counts as a match, so a barcode reused between two Calii products isn't caught. In `alt` today: Huevo rojo /
+  Galleta cookies and cream, and Galleta brownie / Gelato de Lotus. Those only show if such a product reaches a hub in the other city.
+
 ## 2026-11-05 — shared Masterview (plan Phases 4.2 and 6)
 - `loadImageDB` reads `masterview/`, then the last cached copy, then the bundled `imagedb.json`. The two-bucket "newest of"
   logic is gone, and so is the `mr_imgdb_cache` localStorage entry (removed on every load). The cache is now Cache Storage

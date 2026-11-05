@@ -24,7 +24,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - Product photos (Masterview): read-only from the public bucket `masterview` (`latest.json`, `version.txt`), uploaded only
   in Invoice Reader. `loadImageDB`: `masterview/`, then the last cached copy whatever its version, then the bundled
   `imagedb.json` (a full copy of `latest.json`). Cached in Cache Storage `calii-masterview`, not localStorage; `sw.js`
-  keeps that cache on activate. Read entries through `imgUrl`/`imgName`/`pickEntry(key, hubCity())`: `map` first, then `alt`.
+  keeps that cache on activate. Read entries through `imgUrl`/`imgName`/`pickEntry(key, hubCity())`: `map` first, then `alt`. `getImgUrl`: barcode → exact name →
+  none, never a guess; a barcode whose Masterview name shares no word with the product's is skipped (`nameClash`).
 - New tables need explicit `grant`s in the same SQL that creates them (Supabase change, 2026-10-30).
 - **Local runs write to prod.** Use `hub='test-hub'` or stub write helpers before testing write flows.
 

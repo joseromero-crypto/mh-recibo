@@ -659,7 +659,17 @@ function setDbStatus(type,msg){
   d.className='db-dot '+(type==='ok'?'ok':type==='loading'?'loading':'err');
   l.textContent=msg;
 }
-// Lookup identical to armado-CH getImgUrl (bcKey → exact name → first word → prefix ≥5 chars), memoised
+// No photo beats a wrong photo. A barcode whose Masterview name shares no real word with the product's name is another
+// product (767203598894: Totopos Nūbe in the order, Chips de camote in Masterview). "codigo" is filler so that the sin-archivo
+// placeholder "Código {n}" counts as no name, like a call with no producto: nothing to compare, so the barcode photo stays.
+const IMG_FILLER=new Set('de del la las el los con sin y para por en al un una a o e sabor tipo g gr grs gramos kg ml l lt lts litro litros pz pza pzas pieza piezas caja bolsa paquete pack codigo'.split(' '));
+function nameWords(s){ return normName(s).split(' ').filter(w=>w&&!/\d/.test(w)&&!IMG_FILLER.has(w)); }
+function nameClash(producto, mvName){
+  const a=nameWords(producto), b=new Set(nameWords(mvName));
+  return a.length>0 && b.size>0 && !a.some(w=>b.has(w)); // no name on either side = nothing to compare
+}
+function barcodeClash(entry, producto){ return !!imgUrl(entry) && nameClash(producto, imgName(entry)); }
+// Lookup as in armado-CH getImgUrl (bcKey → exact name → none) plus the hub's city, memoised
 // because the "Sin código" type-ahead asks for dozens of photos per keystroke.
 const _imgMemo=new Map();
 function getImgUrl(barcode, producto){
@@ -671,17 +681,10 @@ function getImgUrl(barcode, producto){
 }
 function _getImgUrl(barcode, producto, city){
   const bk=codeKey(barcode), name=normName(producto||'');
-  const byCode=bk ? imgUrl(pickEntry(bk, city)) : null; // url:null entries fall through to the name
+  const entry=bk ? pickEntry(bk, city) : null;
+  const byCode=barcodeClash(entry, producto) ? null : imgUrl(entry); // url:null entries fall through to the name
   if(byCode) return byCode;
-  if(name&&S.imgDb[name]) return imgUrl(S.imgDb[name]);
-  const fw=name.split(' ')[0];
-  if(fw.length>3&&S.imgDb[fw]) return imgUrl(S.imgDb[fw]);
-  // a wrong image is worse than none, so require ≥5 chars before guessing
-  for(const k of Object.keys(S.imgDb)){
-    if(k.length>5 && name.startsWith(k)) return imgUrl(S.imgDb[k]);
-    if(fw.length>=5 && k.length>5 && k.startsWith(fw)) return imgUrl(S.imgDb[k]);
-  }
-  return null;
+  return (name?imgUrl(S.imgDb[name]):null)||null; // exact name only: first-word and prefix guesses showed other products
 }
 
 /* ── UI basics ── */

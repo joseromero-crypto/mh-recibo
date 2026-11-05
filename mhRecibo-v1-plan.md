@@ -121,7 +121,7 @@ Cache per hub like Sorting Hub does (`version.txt` first). The old `sortinghub` 
 
 ### 3.3 Image DB
 Read Armado's `solcitudesarmado/imagedb/version.txt` + `latest.json`; fall back to a bundled `imagedb.json`
-(copy from armado-CH). Lookup identical to Armado (bcKey → exact name → first word → prefix ≥5 chars).
+(copy from armado-CH). Lookup identical to Armado (bcKey → exact name → none; first-word and prefix guesses removed 2026-11-05, see HANDOFF.md).
 Read with `imgUrl()`/`imgName()` helpers that accept both the `{url,name}` and plain-string shapes.
 
 ---
