@@ -1517,7 +1517,7 @@ function cadBoxHtml(c){
   const on=!!c.det.fecha_corta;
   // One row so the quantity field stays above the keyboard
   return `<div class="cad-box ${on?'on':''}"><div class="cad-main"><small>${on?'Fecha corta':'Caducidad mínima'}</small>${dmy(cad)}</div>
-    <button class="cad-btn" onclick="toggleFechaCorta()">${on?'Quitar':'Fecha menor'}</button></div>${on?'<div class="cad-hint">Si no son todas, registra las de fecha corta en otro escaneo.</div>':''}`;
+    <button class="cad-btn" onclick="toggleFechaCorta()">${on?'Quitar':'Fecha menor'}</button></div>${on?'<div class="cad-hint">Se reciben igual y se separan para merma (MNA). Si no son todas, regístralas en otro escaneo.</div>':''}`;
 }
 function toggleFechaCorta(){
   const c=S.current; if(!c) return;
@@ -1665,7 +1665,7 @@ async function confirmCard(){
     const cad=caducidadMin(p);
     recordEvent(makeEvent('scan', { sku_key:p.sku_key, producto:p.producto, cantidad:qty, metodo:c.metodo,
       detalle:Object.assign({ esperado:p.enEnvio, kgpz:p.kgpz }, cad?{ caducidad_min:cad }:{}, c.det) }));
-    toast(`✓ ${fmtQty(qty,p.kgpz)} ${unitOf(p.kgpz)} · ${p.producto}${c.det.fecha_corta?' · fecha corta':''}`);
+    toast(`✓ ${fmtQty(qty,p.kgpz)} ${unitOf(p.kgpz)} · ${p.producto}${c.det.fecha_corta?' · fecha corta: separar para MNA':''}`);
   }
   S.current=null;
   renderRecibir();
@@ -1893,7 +1893,7 @@ function sumRowHtml(r, inner, org){
   return `<div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
       <div class="ritem-meta">${pos?escapeHtml(pos.full)+' · ':''}${r.kgpz}${r.barcode?'':' · sin código'}</div></div>
       <span class="estado ${ESTADO_CLS[r.estado]}">${escapeHtml(r.estado)}</span></div>
-    ${(()=>{ const a=armadoDe(r), oo=org&&org.get(r.sku), o=oo&&oo.cat!=='sin_armado'?origenTexto(oo):''; const fc=fechaCortaDe(r.sku); return (a!=null?`<div class="ritem-meta" style="margin-top:4px">Armado en CH: <b>${fmtQty(a,r.kgpz)}</b> ${u}</div>`:'')+(o?`<div class="ritem-meta" style="color:var(--c-ink);font-weight:700">${escapeHtml(o)}</div>`:'')+(fc>0?`<div class="ritem-meta" style="color:var(--orange);font-weight:700">${fmtQty(fc,r.kgpz)} ${u} con fecha corta (caducidad antes del ${dmy(caducidadDe(r.sku))})</div>`:''); })()}
+    ${(()=>{ const a=armadoDe(r), oo=org&&org.get(r.sku), o=oo&&oo.cat!=='sin_armado'?origenTexto(oo):''; const fc=fechaCortaDe(r.sku); return (a!=null?`<div class="ritem-meta" style="margin-top:4px">Armado en CH: <b>${fmtQty(a,r.kgpz)}</b> ${u}</div>`:'')+(o?`<div class="ritem-meta" style="color:var(--c-ink);font-weight:700">${escapeHtml(o)}</div>`:'')+(fc>0?`<div class="ritem-meta" style="color:var(--orange);font-weight:700">${fmtQty(fc,r.kgpz)} ${u} con fecha corta (caducidad antes del ${dmy(caducidadDe(r.sku))}): separar para MNA</div>`:''); })()}
     <div class="sum-nums"><div><b>${r.env?fmtQty(r.env,r.kgpz):'—'}</b><span>Enviado (${u})</span></div><div class="big"><b>${fmtQty(r.rec,r.kgpz)}</b><span>Recibido (${u})</span></div>
       <div><b style="color:${r.dif?'var(--c-ink)':'inherit'}">${sign}${fmtQty(r.dif,r.kgpz)}</b><span>Diferencia</span></div></div>${inner||''}`;
 }
@@ -1911,8 +1911,9 @@ function renderResumen(){
     <div class="stat"><div class="stat-n">${deltas.length}</div><div class="stat-l">con diferencia</div></div>
     <div class="stat"><div class="stat-n" style="color:${pend.length?'var(--orange)':'var(--green-dark)'}">${pend.length}</div><div class="stat-l">por confirmar</div></div></div>`;
   if(OUTBOX.length) h+=`<div class="warn-box">Hay ${OUTBOX.length} registro(s) sin subir. Conéctate a internet para poder cerrar.</div>`;
-  const nfc=rows.filter(r=>fechaCortaDe(r.sku)>0).length;
-  if(nfc) h+=`<div class="warn-box">${nfc} producto(s) llegaron con fecha corta. Se cuentan como recibidos y quedan marcados en el reporte.</div>`;
+  const fcs=rows.filter(r=>fechaCortaDe(r.sku)>0); // complete lines sit in the collapsed list, so name them here
+  if(fcs.length) h+=`<div class="warn-box"><b>Separar para merma (MNA) · ${fcs.length}</b><br>Fecha corta: se reciben completas y no cuentan como faltante. Después de registrar la recepción, regístralas como merma y sepáralas.
+    ${fcs.map(r=>`<div style="margin-top:4px">${escapeHtml(r.producto)}: <b>${fmtQty(fechaCortaDe(r.sku),r.kgpz)} ${unitOf(r.kgpz)}</b></div>`).join('')}</div>`;
   if(rev.length) h+=`<button class="btn btn-warn btn-block" style="margin-bottom:10px" onclick="backToRecibir();openRevisar()">Revisar ahora · ${rev.length}</button>`;
   if(deltas.length){
     h+=`<div class="section-title">Diferencias · ${deltas.length}</div><div class="muted" style="margin-bottom:8px">Contesta cada una: recuenta el producto o confirma la diferencia.</div>`;
@@ -2227,7 +2228,7 @@ function slackMensaje(info, rvRows, tags){
   // Short-dated products can be complete lines too, so they're listed apart from the differences
   const cortas=rvRows.filter(r=>r.corta>0);
   if(cortas.length) casos.set('fecha_corta', cortas.length);
-  for(const r of cortas) items.push(`• ${r.producto}: ${fmtQty(r.corta,r.kgpz)} ${unitOf(r.kgpz)}${r.cad?` con caducidad antes del ${r.cad}`:''} → fecha corta`);
+  for(const r of cortas) items.push(`• ${r.producto}: ${fmtQty(r.corta,r.kgpz)} ${unitOf(r.kgpz)}${r.cad?` con caducidad antes del ${r.cad}`:''} → fecha corta, separar para MNA`);
   const total=[...casos.values()].reduce((a,b)=>a+b,0), quien=(info.receptores||[info.receptor]).filter(Boolean).join(', ');
   const out=[`*${hubName(info.hub)} · ${areaName(info.area)} · ${fechaLarga(info.fecha)}*: ${rows.length?`${rows.length} producto(s) con diferencia`:'sin diferencias'}${cortas.length?` · ${cortas.length} con fecha corta`:''}${quien?' · recibió '+quien:''}`, ...items];
   if(items.some(l=>/ A\d| E\d/.test(l))) out.push('_A armado · E enviado · R recibido_');
@@ -2263,18 +2264,20 @@ function openCanastas(){
     const rec=recibidoDe(sku); if(!(rec>0)) return;
     const pos=positionOf(barcode, producto), k=pos?pos.letra:'Sin posición';
     if(!groups.has(k)) groups.set(k, []);
-    groups.get(k).push({ producto, barcode, kgpz, rec, pos });
+    groups.get(k).push({ producto, barcode, kgpz, rec, pos, corta:fechaCortaDe(sku) });
   };
   for(const l of S.lines.values()) add(l.sku_key, l.producto, l.barcode, l.kgpz);
   for(const [sku, ne] of S.noEsperados) add(sku, ne.producto, sku.startsWith('name:')?'':sku, ne.kgpz);
   const keys=[...groups.keys()].sort((a,b)=>a==='Sin posición'?1:b==='Sin posición'?-1:a.localeCompare(b,'es',{numeric:true}));
   if(!keys.length){ openSheet('Canastas', '<div class="empty-hint">Todavía no hay productos recibidos.</div>'); return; }
+  const ncortas=[...groups.values()].flat().filter(x=>x.corta>0).length;
   openSheet('Canastas', `<div class="muted" style="margin-bottom:10px">Lo recibido agrupado por pasillo, para acomodarlo.</div>`
+    +(ncortas?`<div class="warn-box">${ncortas} producto(s) traen piezas con fecha corta. Esas piezas no se acomodan: sepáralas para merma (MNA).</div>`:'')
     +keys.map(k=>{ const it=groups.get(k).sort((a,b)=>(a.pos?a.pos.full:'').localeCompare(b.pos?b.pos.full:'','es',{numeric:true}));
       return `<details class="info-card" style="padding:10px 12px"><summary style="cursor:pointer;display:flex;align-items:center;gap:10px">
         <span class="res-pos" style="font-size:28px">${escapeHtml(k==='Sin posición'?'—':k)}</span><b style="flex:1">${escapeHtml(k==='Sin posición'?'Sin posición':(FREEZER_AISLE_RE.test(k)?'Congelador ':'Pasillo ')+k)}</b><span>${it.length} producto${it.length===1?'':'s'}</span></summary>
         ${it.map(x=>`<div class="ritem-row" style="margin-top:8px">${imgTag(x.barcode, x.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(x.producto)}</div>
-          <div class="ritem-meta">${x.pos?escapeHtml(x.pos.full):'sin posición'}</div></div><div class="ritem-qty">${fmtQty(x.rec,x.kgpz)} <small>${unitOf(x.kgpz)}</small></div></div>`).join('')}</details>`; }).join(''));
+          <div class="ritem-meta">${x.pos?escapeHtml(x.pos.full):'sin posición'}${x.corta>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(x.corta,x.kgpz)} ${unitOf(x.kgpz)} separar para MNA</span>`:''}</div></div><div class="ritem-qty">${fmtQty(x.rec,x.kgpz)} <small>${unitOf(x.kgpz)}</small></div></div>`).join('')}</details>`; }).join(''));
 }
 
 /* ════════════════════════════════════════════════════════════════════════════════════
@@ -2361,6 +2364,7 @@ function renderRecepcion(){
     <div class="info-card">Cerrada a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}${I.entregas?` · en ${I.entregas} entregas`:''}<br>
       ${I.lineas||0} productos · ${I.diferencias?`<b style="color:var(--orange)">${I.diferencias} con diferencia</b>`:'sin diferencias'}${I.no_esperados?` · ${I.no_esperados} no esperado(s)`:''}${I.fecha_corta?` · <b style="color:var(--orange)">${I.fecha_corta} con fecha corta</b>`:''}
       <div>${(I.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div></div>`)+`
+    ${RV.rows.some(r=>r.corta>0)?`<div class="warn-box">Registra en el sistema todo lo recibido, también lo de fecha corta. Después regístralo como merma (MNA) y sepáralo.</div>`:''}
     ${P?'':`<button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="openSlackMensaje()">Mensaje para Slack</button>`}
     <button class="btn btn-secondary btn-block" onclick="descargarReporte()">Descargar CSV</button>
     <input class="text-input" style="margin-top:12px" placeholder="Buscar producto…" oninput="rvSet('q',this.value)" autocomplete="off">
@@ -2384,7 +2388,7 @@ function renderRecepcionRows(){
   document.getElementById('rv-rows').innerHTML=rows.map(r=>{ const u=unitOf(r.kgpz), on=RV.ticks.has(r.i);
     return `<div class="sum-row ${on?'ticked':''} ${r.acum!=null||/^Completo/.test(r.estado)?'':'delta'}"><div class="ritem-row">
       <input type="checkbox" class="chk" ${on?'checked':''} onchange="rvTick(${r.i})">${imgTag(r.barcode, r.producto, 'thumb')}
-      <div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div><div class="ritem-meta">${escapeHtml(r.barcode||'sin código')}${r.pos?' · '+escapeHtml(r.pos):''}${r.corta>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(r.corta,r.kgpz)} ${u} fecha corta</span>`:''}</div></div>
+      <div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div><div class="ritem-meta">${escapeHtml(r.barcode||'sin código')}${r.pos?' · '+escapeHtml(r.pos):''}${r.corta>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(r.corta,r.kgpz)} ${u} fecha corta · separar para MNA</span>`:''}</div></div>
       <div style="text-align:right"><div style="font-size:30px;font-weight:800;color:var(--green-dark)">${fmtQty(r.rec,r.kgpz)}</div><div class="ritem-meta">${u} recibido</div></div></div>
       ${r.acum!=null?`<div class="ritem-meta" style="margin-top:4px">Acumulado en la recepción: ${fmtQty(r.acum,r.kgpz)} ${u}</div>`:`<div class="ritem-meta" style="margin-top:4px">Enviado ${fmtQty(r.env,r.kgpz)}${r.armado&&r.armado!=='—'?' · Armado '+escapeHtml(r.armado):''} · Dif ${r.dif>0?'+':''}${fmtQty(r.dif,r.kgpz)} · <span class="estado ${ESTADO_CLS[r.estado]||'mid'}">${escapeHtml(r.estado)}</span></div>`}
       ${r.notas?`<div class="ritem-meta">${escapeHtml(r.notas)}</div>`:''}</div>`; }).join('') || '<div class="empty-hint">Nada coincide con el filtro.</div>';

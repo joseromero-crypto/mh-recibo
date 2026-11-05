@@ -34,6 +34,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 4. `rec_events` is append-only and the source of truth; corrections are `ajuste` rows.
 5. Dates via `serverNow()` + America/Monterrey helpers — never the device clock.
 6. Never write to Retool.
+8. Everything that physically arrived is received, whatever its date or state. Fecha corta never lowers Recibido or
+   changes the estado: those pieces are received, then registered as merma (MNA) and separated.
 
 ## Status (2026-10-30)
 - **Phases 0–5b built; full QA run with both real files passed (see HANDOFF.md)**. "Empezar sin archivo" is
