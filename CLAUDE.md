@@ -18,11 +18,13 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 
 ## Supabase — SHARED with Armado CH (production)
 - Project `uuqqtksxlgkztenojufm` (Armado CH's). This app owns only bucket `recibo` and tables `rec_*`.
-- It only **reads** Armado's `picks` table and `solcitudesarmado/imagedb/*`, `solcitudesarmado/reports/*`.
+- It only **reads** Armado's `picks` table, `solcitudesarmado/reports/*` and the public `masterview` bucket.
   Never write, alter or delete anything outside `recibo` / `rec_*`.
 - Sorting positions: read-only from bucket `sorting-hub` in this same project (Sorting Hub migrated here 2026-10-29).
-- Product photos (Masterview image map): read-only from `solcitudesarmado/imagedb/` **and** `sorting-hub/imagedb/`;
-  `loadImageDB` compares both `version.txt` and uses the newest upload, then the bundled `imagedb.json`.
+- Product photos (Masterview): read-only from the public bucket `masterview` (`latest.json`, `version.txt`), uploaded only
+  in Invoice Reader. `loadImageDB`: `masterview/`, then the last cached copy whatever its version, then the bundled
+  `imagedb.json` (a full copy of `latest.json`). Cached in Cache Storage `calii-masterview`, not localStorage; `sw.js`
+  keeps that cache on activate. Read entries through `imgUrl`/`imgName`/`pickEntry(key, hubCity())`: `map` first, then `alt`.
 - New tables need explicit `grant`s in the same SQL that creates them (Supabase change, 2026-10-30).
 - **Local runs write to prod.** Use `hub='test-hub'` or stub write helpers before testing write flows.
 
@@ -53,7 +55,10 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 ## How the code is laid out (index.html)
 - Helpers copied from armado-CH sit at the top, each block labelled. Our additions: `codeKey` (cleanBC + strip
   inner spaces + bcKey — one export has `083078 003623`), `skuKeyOf`, `presentacion`/`nameHtml`, `familyKey` (§7.2).
-- `test-hub` appears **only on localhost**, borrows MH Contry's sorting (`SORTING_SLUG`) and Armado picks (`ARMADO_HUB`).
+- `test-hub` appears **only on localhost**, borrows MH Contry's sorting and city (`SORTING_SLUG`) and Armado picks (`ARMADO_HUB`).
+- City: `hubCity()` reads `hubCities` from the JSON; without it, all city logic is skipped. A code Masterview knows never reaches
+  "Código no reconocido" (`resolveCode` makes it a product), so "Este producto no se vende en {Ciudad}" (`noSeVendeEn`) lives in
+  the not-in-envío modal. Advisory only.
 - Envío upload writes `envios/{slug}/{area}/{fecha}__{epochMs}.csv` (raw) then `.json` (projection: `lines`,
   `catalogo` = non-envío rows for "Sin código", `session_id`, `session_fecha`, `stats`). JSON is written last;
   **active envío = newest `.json` in the folder**. "Empezar sin archivo" writes a placeholder JSON

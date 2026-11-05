@@ -368,13 +368,13 @@ const APP_VERSION = 'v1 · tema Calii';
 
 /* ════════════════════════════════════════════════════════════════════════════════════
    SUPABASE — shared project with Armado CH + Sorting Hub (plan §3). This app writes ONLY to bucket
-   'recibo' and tables rec_*. Armado's bucket and Sorting Hub's bucket are read-only from here.
+   'recibo' and tables rec_*. Sorting Hub's bucket and masterview are read-only from here.
    ════════════════════════════════════════════════════════════════════════════════════ */
 const SB_URL = 'https://uuqqtksxlgkztenojufm.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1cXF0a3N4bGdrenRlbm9qdWZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxODc0NDIsImV4cCI6MjA5Mzc2MzQ0Mn0.Ifj0QKO4oTcIz3IgSD3fMWwdQz_QG_561d4sQAgWG2U';
 const BUCKET = 'recibo';                    // ours
-const ARMADO_BUCKET = 'solcitudesarmado';   // read-only: imagedb/*, reports/*
 const SORTING_BUCKET = 'sorting-hub';       // read-only: sorting/{slug}/*
+const MV_BASE = `${SB_URL}/storage/v1/object/public/masterview/`; // shared catalog, read-only: latest.json, version.txt
 
 const HUBS = [
   { name:'MH Contry',      slug:'mh-contry' },
@@ -489,7 +489,7 @@ async function sbDeleteEnvio(paths){
   });
   if(!r.ok){ const e=await r.text(); throw new Error(`${r.status}: ${e}`); }
 }
-// Public read from any bucket (ours, Armado's imagedb, Sorting Hub's sorting)
+// Public read from any bucket (ours, Sorting Hub's sorting)
 async function sbPublic(path, bucket=BUCKET){
   const r = await sbReq(`${SB_URL}/storage/v1/object/public/${bucket}/${path}`,{cache:'no-store'});
   if(!r.ok){ const e=new Error(`${r.status}`); e.status=r.status; throw e; }
@@ -567,9 +567,9 @@ function codeKey(raw){ return bcKey(cleanBC(raw).replace(/\s+/g,'')); }
 function skuKeyOf(barcode, producto){ const k=codeKey(barcode); return k ? k : 'name:'+normName(producto); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-/* ── IMAGE DB (plan §3.3) — loader copied from armado-CH; imgUrl/imgName from sorting-hub read both the
-   plain-string and {url,name} entry shapes. ── */
-const S = { imgDb:{} };
+/* ── IMAGE DB (plan §3.3) — Masterview cache, loadImageDB, imgUrl/imgName and pickEntry copied from sorting-hub.
+   Masterview is uploaded only in Invoice Reader; imgUrl/imgName read every entry shape. ── */
+const S = { imgDb:{}, imgAlt:{}, hubCities:{}, imgCount:0 };
 function normalizeImgDbKeys(db){
   const out={};
   for(const k in db){
@@ -578,39 +578,81 @@ function normalizeImgDbKeys(db){
   }
   return out;
 }
-function imgUrl(entry){ return typeof entry==='string' ? entry : (entry && entry.url) || null; }
-function imgName(entry){ return typeof entry==='string' ? null : (entry && entry.name) || null; }
+// Masterview lives in Cache Storage, not localStorage: 2 MB would crowd the outbox and the session mirror
+// near iPhone Safari's limit. sw.js keeps this cache across deploys.
+const MV_CACHE='calii-masterview';
+async function mvCacheRead(){
+  try{
+    const res=await (await caches.open(MV_CACHE)).match(MV_BASE+'latest.json');
+    return res ? { v:res.headers.get('x-mv-version'), res } : null;
+  }catch(_){ return null; }
+}
+async function mvCacheWrite(ver, text){
+  try{
+    const res=new Response(text,{ headers:{ 'Content-Type':'application/json', 'x-mv-version':ver } });
+    await (await caches.open(MV_CACHE)).put(MV_BASE+'latest.json', res);
+  }catch(_){}
+}
+function applyMasterview(j){
+  S.imgDb=normalizeImgDbKeys(j.map);
+  S.imgAlt=j.alt||{};
+  S.hubCities=j.hubCities||{};
+  S.imgCount=j.count||0;
+}
+function imgDbCount(){ return (S.imgCount||Math.round(Object.keys(S.imgDb).length/2)).toLocaleString('es-MX'); }
 async function loadImageDB(){
   setDbStatus('loading','Cargando base de imágenes…');
-  const CK='mr_imgdb_cache';
-  // 1. Masterview is uploaded both in Armado CH and in Sorting Hub, each to its own imagedb/ (read-only here).
-  //    Use whichever was uploaded last: compare the tiny version.txt (ISO timestamps), cache the 1.3 MB body.
+  try{ localStorage.removeItem('mr_imgdb_cache'); }catch(_){} // old copy, replaced by MV_CACHE
+  // 1. masterview/ (published by Invoice Reader) — tiny version.txt checked first, 2 MB body cached
+  const cached=await mvCacheRead();
   try{
-    const vers=await Promise.all([ARMADO_BUCKET, SORTING_BUCKET].map(b=>
-      fetch(`${SB_URL}/storage/v1/object/public/${b}/imagedb/version.txt`,{cache:'no-store'})
-        .then(r=>r.ok?r.text():'').then(t=>({ b, v:t.trim() }), ()=>({ b, v:'' }))));
-    const top=vers.filter(x=>x.v).sort((a,b)=>b.v.localeCompare(a.v))[0];
-    if(!top) throw 0;
-    const base=`${SB_URL}/storage/v1/object/public/${top.b}/imagedb/`, ver=top.b+'|'+top.v;
-    let cached=null; try{ cached=JSON.parse(localStorage.getItem(CK)||'null'); }catch(_){}
-    let map;
-    if(cached && cached.v===ver && cached.map){ map=cached.map; }
+    const ver=(await fetch(MV_BASE+'version.txt',{cache:'no-store'}).then(r=>{ if(!r.ok) throw 0; return r.text(); })).trim();
+    let j;
+    if(cached && cached.v===ver){ j=await cached.res.clone().json(); }
     else{
-      const j=await fetch(base+'latest.json',{cache:'no-store'}).then(r=>{ if(!r.ok) throw 0; return r.json(); });
-      map=j.map||j;
-      try{ localStorage.setItem(CK, JSON.stringify({v:ver, map})); }catch(_){}
+      const text=await fetch(MV_BASE+'latest.json',{cache:'no-store'}).then(r=>{ if(!r.ok) throw 0; return r.text(); });
+      j=JSON.parse(text);
+      if(!j.map) throw 0;
+      await mvCacheWrite(ver, text);
     }
-    S.imgDb=normalizeImgDbKeys(map);
-    setDbStatus('ok',`Base de imágenes (${Math.round(Object.keys(S.imgDb).length/2).toLocaleString('es-MX')} productos)`);
+    applyMasterview(j);
+    setDbStatus('ok',`Base de imágenes (${imgDbCount()} productos)`);
     return;
   }catch(_){}
-  // 2. Fallback: the file bundled in the repo (the floor, not the source)
+  // 2. Offline or mid-flight failure: the last Masterview this phone downloaded, whatever its version
+  if(cached){
+    try{
+      applyMasterview(await cached.res.clone().json());
+      setDbStatus('ok',`Base de imágenes (${imgDbCount()} productos)`);
+      return;
+    }catch(_){}
+  }
+  // 3. Fallback: the file bundled in the repo (the floor, not the source)
   try{
     const res=await fetch('./imagedb.json');
     if(!res.ok) throw new Error('HTTP '+res.status);
-    S.imgDb=normalizeImgDbKeys(await res.json());
-    setDbStatus('ok',`Base de imágenes incluida (${Math.round(Object.keys(S.imgDb).length/2).toLocaleString('es-MX')} productos)`);
+    const j=await res.json();
+    if(j.map) applyMasterview(j); else S.imgDb=normalizeImgDbKeys(j); // a phone's HTTP cache can still hold the old flat file
+    setDbStatus('ok',`Base de imágenes incluida (${imgDbCount()} productos)`);
   }catch(e){ S.imgDb={}; setDbStatus('err','Sin imágenes'); }
+}
+// Reads every entry shape: Masterview barcode entries {url, name, sku, c}, name entries and the old
+// bundled barcode entries as plain URL strings.
+function imgUrl(entry){ return typeof entry==='string' ? entry : (entry && entry.url) || null; }
+function imgName(entry){ return typeof entry==='string' ? null : (entry && entry.name) || null; }
+// The hub's city comes from the published JSON only; undefined (old copy) skips all city logic.
+// INI.hub, not S.hub: Recepciones shows photos without opening Recibir. test-hub borrows MH Contry's city.
+function hubCity(){ return S.hubCities[SORTING_SLUG[INI.hub]||INI.hub]; }
+// A barcode repeated inside one city stays on its map entry, even if alt lists that city too.
+function pickEntry(key, city){
+  const entry=S.imgDb[key];
+  if(!city || (entry && entry.c && entry.c.includes(city))) return entry;
+  return (S.imgAlt[key]||[]).find(e=>e.c && e.c.includes(city)) || entry;
+}
+// Advisory only (plan §4.2): the city when Masterview knows the barcode and it isn't sold there, else null
+function noSeVendeEn(barcode){
+  const city=hubCity(), k=codeKey(barcode), entry=city && k ? pickEntry(k, city) : null;
+  return entry && entry.c && !entry.c.includes(city) ? city : null;
 }
 function setDbStatus(type,msg){
   const d=document.getElementById('db-dot'), l=document.getElementById('db-label'); if(!d||!l) return;
@@ -621,15 +663,16 @@ function setDbStatus(type,msg){
 // because the "Sin código" type-ahead asks for dozens of photos per keystroke.
 const _imgMemo=new Map();
 function getImgUrl(barcode, producto){
-  const memoKey=(barcode||'')+'|'+(producto||'');
+  const city=hubCity(), memoKey=(city||'')+'|'+(barcode||'')+'|'+(producto||'');
   if(_imgMemo.has(memoKey)) return _imgMemo.get(memoKey);
-  const res=_getImgUrl(barcode, producto);
+  const res=_getImgUrl(barcode, producto, city);
   if(Object.keys(S.imgDb).length) _imgMemo.set(memoKey,res);
   return res;
 }
-function _getImgUrl(barcode, producto){
+function _getImgUrl(barcode, producto, city){
   const bk=codeKey(barcode), name=normName(producto||'');
-  if(bk&&S.imgDb[bk]) return imgUrl(S.imgDb[bk]);
+  const byCode=bk ? imgUrl(pickEntry(bk, city)) : null; // url:null entries fall through to the name
+  if(byCode) return byCode;
   if(name&&S.imgDb[name]) return imgUrl(S.imgDb[name]);
   const fw=name.split(' ')[0];
   if(fw.length>3&&S.imgDb[fw]) return imgUrl(S.imgDb[fw]);
@@ -1395,7 +1438,7 @@ function focusScan(){
 function resolveCode(raw){
   const k=codeKey(raw); if(!k) return null;
   if(S.lines.has(k)) return { line:S.lines.get(k) };
-  const known=S.catByCode.get(k) || (()=>{ const n=imgName(S.imgDb[k]); return n ? { sku_key:k, producto:n, barcode:k, kgpz:'Pz' } : null; })();
+  const known=S.catByCode.get(k) || (()=>{ const n=imgName(pickEntry(k, hubCity())); return n ? { sku_key:k, producto:n, barcode:k, kgpz:'Pz' } : null; })();
   if(known){
     // A barcode the export left blank on an envío line: same product name → that line.
     const byName=S.lines.get('name:'+normName(known.producto));
@@ -1475,8 +1518,10 @@ async function notInEnvio(p, metodo, det){
     +looks.map((l,i)=>{ const pos=positionOf(l.barcode, l.producto);
       return `<button class="look-item" data-mv="look:${i}">${imgTag(l.barcode, l.producto, 'thumb')}<div style="flex:1;min-width:0"><div class="res-name">${nameHtml(l.producto)}</div>`
         +`<div class="res-sub">${pos?escapeHtml(pos.palabra+' '+pos.full):'sin posición'}</div></div><span class="look-cta">Era este otro</span></button>`; }).join('') : '';
+  const noVende=noSeVendeEn(p.barcode);
   const v=await showModal({ title:'Este producto no viene en el envío.',
-    html:`<div class="modal-prod">${imgTag(p.barcode, p.producto, 'thumb')}<div class="res-name">${nameHtml(p.producto)}</div></div>${looksHtml}`,
+    html:`<div class="modal-prod">${imgTag(p.barcode, p.producto, 'thumb')}<div class="res-name">${nameHtml(p.producto)}</div></div>`
+      +(noVende?`<p style="margin:12px 0 0;font-weight:700;color:var(--gray-900)">Este producto no se vende en ${escapeHtml(noVende)}</p>`:'')+looksHtml,
     buttons:[{label:'Volver a escanear', value:'again', kind:'primary'}, {label:'Sí, llegó este producto', value:'yes', kind:'danger'}]
       .concat(det && det.codigo && !det.codigo_incorrecto ? [{label:'Código incorrecto en sistema · buscar por nombre', value:'mal', kind:'secondary'}] : []) });
   if(v==='yes') openCard({ ...p, enEnvio:false }, metodo, det);

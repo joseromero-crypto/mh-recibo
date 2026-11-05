@@ -1,5 +1,19 @@
 # MH Recibo — handoff
 
+## 2026-11-05 — shared Masterview (plan Phases 4.2 and 6)
+- `loadImageDB` reads `masterview/`, then the last cached copy, then the bundled `imagedb.json`. The two-bucket "newest of"
+  logic is gone, and so is the `mr_imgdb_cache` localStorage entry (removed on every load). The cache is now Cache Storage
+  `calii-masterview`, which `sw.js` keeps across deploys.
+- Barcodes use `pickEntry` with the hub's city (`map` first, then `alt`). test-hub borrows MH Contry's city.
+- The not-in-envío modal adds "Este producto no se vende en {Ciudad}" when Masterview knows the code and the hub's city isn't in
+  its `c`. Nothing else in the flow changes. It isn't in "Código no reconocido": a code Masterview knows never reaches that modal.
+- `imagedb.json` is now a full copy of `latest.json` (version `0e330dae`, 1.3 MB to 2.0 MB).
+- Tested on localhost in headless Chrome against the live bucket, with `recibo` / `rec_*` faked in memory: 0 writes reached
+  Supabase, so there's nothing to clean up. Results are in `unifyMasterview-plan.md` (4.2 result).
+- **Not tested:** real phones (Android Chrome, iPhone Safari).
+- **To know:** `netlify.toml` caches `/imagedb.json` for 30 days, so a phone can keep the old flat file for a while. The loader still
+  reads it, without city logic. This only matters offline on a phone with no cached Masterview. Sorting Hub has the same header.
+
 ## 2026-10-30 — entregas parciales
 For hubs that receive a big shipment once every week or two (Condesa, Zapopan; available to every hub).
 - Recibir has **📦 Cerrar entrega parcial (sigo después)** above **✅ Terminé todo: revisar y cerrar**. It lists what
