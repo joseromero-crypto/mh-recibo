@@ -128,6 +128,9 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - Admin (§6.8/6.9): PIN in memory only; writes `rec_events` (admin), `config/receptores.json`, `config/slack.json`, envío copies
   (restore), `rec_alert_config` (upsert via `pgUpsert`, `on_conflict=hub,area`). Alerts are written only by the
   Apps Script through the RPCs.
+- Recepciones (closed view): tabs Diferencias (default) / Sin diferencia / Todos (`RV.f.vista`, `rvDistinto`), not on
+  parciales. Diferencias = Recibido ≠ Enviado, so scale variances count (unlike `isDelta`): they must be typed, not
+  approved with the rest. A search, or the fecha corta/dañadas and estado filters, look at all products.
 - Judgement calls: upload warnings (§5.2) are inline buttons, not modals; Corregir is inline; Sin código /
   Pendientes / Canastas / Revisar ahora are dismissable sheets; scans shorter than 4 chars are ignored; a scanner
   burst (≥8 digits) in the quantity field becomes a new scan; without a file an unknown code can be registered as

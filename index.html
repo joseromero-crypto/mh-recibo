@@ -226,6 +226,8 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .estado.ok{background:var(--c-teal-light);color:var(--c-teal-dark)}
 .estado.bad{background:var(--c-ink);color:var(--c-white)}
 .estado.mid{background:var(--c-white);color:var(--c-ink);box-shadow:inset 0 0 0 1.5px var(--c-ink)}
+#rv-vistas{display:flex}
+#rv-vistas .choice{flex:auto;padding:0 6px;font-size:12px;text-align:center;white-space:nowrap}
 .filters{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
 .filters select{height:40px;padding:0 12px;font-size:14px;font-weight:600;border:none;border-radius:var(--r-pill);background:var(--c-surface)}
 .chk{width:30px;height:30px;flex-shrink:0;accent-color:var(--c-teal-dark)}
@@ -2484,12 +2486,22 @@ async function openRecepcion(info, from){
       env:parseNum(g('Enviado')), rec:parseNum(g('Recibido')), dif:parseNum(g('Diferencia')), estado:info.parcial?'Entrega '+info.entrega:g('Estado'),
       acum:info.parcial?parseNum(g('Recibido acumulado')):null, corta:parseNum(g('Fecha corta'))||0, cad:g('Caducidad mínima'), dan:parseNum(g('Dañadas'))||0, notas:g('Notas (correcciones / confirmaciones)'), _n:normName(g('Producto')) }; });
   let ticks=new Set(); try{ ticks=new Set(JSON.parse(localStorage.getItem('mr_ticks_'+info.reporte)||'[]')); }catch(_){}
-  RV={ info, rows, csv, ticks, f:{ q:'', solo:'', estado:'', kgpz:'', pasillo:'', sort:'archivo' } };
+  RV={ info, rows, csv, ticks, f:{ q:'', vista:info.parcial?'todos':rows.some(rvDistinto)?'dif':'igual', solo:'', estado:'', kgpz:'', pasillo:'', sort:'archivo' } };
   renderRecepcion();
   if(PENDING_UPLOAD && from==='inicio' && info.hub===INI.hub && info.area===INI.area)
     document.getElementById('recep-body').insertAdjacentHTML('afterbegin', `<button class="btn btn-primary btn-block" style="margin-bottom:12px" onclick="resumePendingUpload()">Ahora carga el archivo nuevo (${escapeHtml(PENDING_UPLOAD.file.name)})</button>`);
 }
 function rvSet(k, v){ RV.f[k]=v; renderRecepcionRows(); }
+// Registering in the system: type the lines that differ, then approve the rest together. So a scale variance
+// counts here (it is "Completo" but Recibido ≠ Enviado): approving it would register the enviado weight.
+function rvDistinto(r){ return !!r.dif || !/^Completo/.test(r.estado); }
+function rvVista(v){
+  RV.f.vista=v; RV.f.solo=RV.f.estado='';
+  for(const id of ['rv-solo','rv-estado']){ const s=document.getElementById(id); if(s) s.value=''; }
+  renderRecepcionRows();
+}
+// These two can name lines outside the current tab (fecha corta on a complete line), so they look at all of them
+function rvFiltro(k, v){ RV.f.vista='todos'; rvSet(k, v); }
 function rvTick(i){
   RV.ticks.has(i)?RV.ticks.delete(i):RV.ticks.add(i);
   try{ localStorage.setItem('mr_ticks_'+RV.info.reporte, JSON.stringify([...RV.ticks])); }catch(_){}
@@ -2510,21 +2522,30 @@ function renderRecepcion(){
     ${RV.rows.some(r=>r.corta>0||r.dan>0)?`<div class="warn-box">Registra en el sistema todo lo recibido, también lo de fecha corta y lo dañado. Después regístralo como merma (MNA) y sepáralo.</div>`:''}
     ${P?'':`<button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="openSlackMensaje()">Mensaje para Slack</button>`}
     <button class="btn btn-secondary btn-block" onclick="descargarReporte()">Descargar CSV</button>
+    ${P?'':'<div class="tabs" id="rv-vistas" style="margin:12px 0 0"></div>'}
     <input class="text-input" style="margin-top:12px" placeholder="Buscar producto…" oninput="rvSet('q',this.value)" autocomplete="off">
     <div class="filters">
-      ${P&&!RV.rows.some(r=>r.corta>0||r.dan>0)?'':`<select onchange="rvSet('solo',this.value)"><option value="">Todos</option>${P?'':'<option value="1">Solo diferencias</option>'}${RV.rows.some(r=>r.corta>0)?'<option value="corta">Solo fecha corta</option>':''}${RV.rows.some(r=>r.dan>0)?'<option value="dan">Solo dañadas</option>':''}</select>`}
-      ${P?'':`<select onchange="rvSet('estado',this.value)"><option value="">Estado</option>${est.map(e=>`<option>${escapeHtml(e)}</option>`).join('')}</select>`}
+      ${!RV.rows.some(r=>r.corta>0||r.dan>0)?'':`<select id="rv-solo" onchange="rvFiltro('solo',this.value)"><option value="">Fecha corta / dañadas</option>${RV.rows.some(r=>r.corta>0)?'<option value="corta">Solo fecha corta</option>':''}${RV.rows.some(r=>r.dan>0)?'<option value="dan">Solo dañadas</option>':''}</select>`}
+      ${P?'':`<select id="rv-estado" onchange="rvFiltro('estado',this.value)"><option value="">Estado</option>${est.map(e=>`<option>${escapeHtml(e)}</option>`).join('')}</select>`}
       <select onchange="rvSet('kgpz',this.value)"><option value="">Kg/Pz</option><option>Kg</option><option>Pz</option></select>
       <select onchange="rvSet('pasillo',this.value)"><option value="">Pasillo</option>${pas.map(p=>`<option>${escapeHtml(p)}</option>`).join('')}</select>
       <select onchange="rvSet('sort',this.value)"><option value="archivo">Orden del archivo</option><option value="az">A-Z</option><option value="pasillo">Pasillo</option><option value="dif">Diferencia</option></select>
     </div>
-    <div class="muted" id="rv-count" style="margin-bottom:8px"></div><div id="rv-rows"></div>`;
+    <div class="muted" id="rv-hint"></div><div class="muted" id="rv-count" style="margin-bottom:8px"></div><div id="rv-rows"></div>`;
   renderRecepcionRows();
 }
 function renderRecepcionRows(){
   const f=RV.f, words=normName(f.q).split(' ').filter(Boolean);
+  const vista=words.length?'todos':f.vista, difs=RV.rows.filter(rvDistinto); // a search looks through every product
+  const tabs=document.getElementById('rv-vistas');
+  if(tabs) tabs.innerHTML=[['dif','Diferencias',difs.length],['igual','Sin diferencia',RV.rows.length-difs.length],['todos','Todos',RV.rows.length]]
+    .map(([k,n,c])=>`<button class="choice ${vista===k?'sel':''}" onclick="rvVista('${k}')">${n} · ${c}</button>`).join('');
+  const bascula=difs.filter(r=>/^Completo/.test(r.estado)).length;
+  document.getElementById('rv-hint').textContent=vista==='dif'&&difs.length?`Primero edita estas cantidades en el sistema.${bascula?` Incluye ${bascula} con variación de báscula.`:''}`
+    :vista==='igual'?'Recibido igual a lo enviado: apruébalos juntos en el sistema.':'';
   let rows=RV.rows.filter(r=>(!words.length || words.every(w=>r._n.includes(w)))
-    && (!f.solo || (f.solo==='corta' ? r.corta>0 : f.solo==='dan' ? r.dan>0 : !/^Completo/.test(r.estado))) && (!f.estado || r.estado===f.estado) && (!f.kgpz || r.kgpz===f.kgpz) && (!f.pasillo || r.pasillo===f.pasillo));
+    && (vista==='todos' || rvDistinto(r)===(vista==='dif'))
+    && (!f.solo || (f.solo==='corta' ? r.corta>0 : r.dan>0)) && (!f.estado || r.estado===f.estado) && (!f.kgpz || r.kgpz===f.kgpz) && (!f.pasillo || r.pasillo===f.pasillo));
   const cmp={ archivo:(a,b)=>a.i-b.i, az:(a,b)=>a._n.localeCompare(b._n), pasillo:(a,b)=>(a.pos||'~').localeCompare(b.pos||'~','es',{numeric:true})||a.i-b.i, dif:(a,b)=>Math.abs(b.dif)-Math.abs(a.dif)||a.i-b.i }[f.sort];
   rows=rows.slice().sort(cmp);
   document.getElementById('rv-count').textContent=`${rows.length} producto(s) · ${RV.ticks.size} de ${RV.rows.length} marcados`;
@@ -2534,7 +2555,7 @@ function renderRecepcionRows(){
       <div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div><div class="ritem-meta">${escapeHtml(r.barcode||'sin código')}${r.pos?' · '+escapeHtml(r.pos):''}${r.corta>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(r.corta,r.kgpz)} ${u} fecha corta · separar para MNA</span>`:''}${r.dan>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(r.dan,r.kgpz)} ${u} dañadas · separar para MNA</span>`:''}</div></div>
       <div style="text-align:right"><div style="font-size:30px;font-weight:800;color:var(--green-dark)">${fmtQty(r.rec,r.kgpz)}</div><div class="ritem-meta">${u} recibido</div></div></div>
       ${r.acum!=null?`<div class="ritem-meta" style="margin-top:4px">Acumulado en la recepción: ${fmtQty(r.acum,r.kgpz)} ${u}</div>`:`<div class="ritem-meta" style="margin-top:4px">Enviado ${fmtQty(r.env,r.kgpz)}${r.armado&&r.armado!=='—'?' · Armado '+escapeHtml(r.armado):''} · Dif ${r.dif>0?'+':''}${fmtQty(r.dif,r.kgpz)} · <span class="estado ${ESTADO_CLS[r.estado]||'mid'}">${escapeHtml(r.estado)}</span></div>`}
-      ${r.notas?`<div class="ritem-meta">${escapeHtml(r.notas)}</div>`:''}</div>`; }).join('') || '<div class="empty-hint">Nada coincide con el filtro.</div>';
+      ${r.notas?`<div class="ritem-meta">${escapeHtml(r.notas)}</div>`:''}</div>`; }).join('') || `<div class="empty-hint">${vista==='dif'&&!difs.length?'Sin diferencias: todo llegó igual a lo enviado.':'Nada coincide con el filtro.'}</div>`;
 }
 function descargarReporte(){
   const blob=new Blob(['﻿'+RV.csv], { type:'text/csv;charset=utf-8' });
@@ -2595,7 +2616,7 @@ async function renderAdmin(){
 async function admAlertCount(){
   try{
     const r=await pgSelect('rec_alerts', `fecha=eq.${todayStr()}&tipo=neq.digest&select=id`);
-    if(r.length!==ADM.alertCount){ ADM.alertCount=r.length; const b=[...document.querySelectorAll('.tabs .choice')].pop(); if(b) b.textContent=`Alertas${r.length?' ('+r.length+')':''}`; }
+    if(r.length!==ADM.alertCount){ ADM.alertCount=r.length; const b=[...document.querySelectorAll('#admin-body .tabs .choice')].pop(); if(b) b.textContent=`Alertas${r.length?' ('+r.length+')':''}`; }
   }catch(_){}
 }
 function hubSelectHtml(id, val, withAll){

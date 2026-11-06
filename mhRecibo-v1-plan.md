@@ -253,8 +253,11 @@ Now the expected quantities are revealed: `Producto · Enviado · Recibido · Di
 ### 6.6 Recepciones (registration view — lives in the app, like Armado's "Pedidos armados")
 List of this hub+área's closed receptions (last 30 days). Opening one shows the final summary with big Recibido
 numbers, tick boxes per row (`localStorage`), and **Descargar CSV**. Default order = the file's row order.
-Search box (matches any words in the product name) + filters: solo diferencias / estado / Kg-Pz / pasillo;
-sort by archivo, A-Z, pasillo, diferencia. (Whether the system lists products in file order is unknown —
+Tabs, always visible: **Diferencias** (opens here) / **Sin diferencia** / **Todos**, because the system is filled by
+editing the lines that differ and then approving the rest together. Diferencias means Recibido ≠ Enviado, so it
+includes "Completo (variación de báscula)" lines. Partial entregas have no tabs.
+Search box (matches any words in the product name, across all tabs) + filters: fecha corta / dañadas / estado /
+Kg-Pz / pasillo; sort by archivo, A-Z, pasillo, diferencia. (Whether the system lists products in file order is unknown —
 the filters make it irrelevant.) This is what the receptor uses later to type Recepción into the
 system — no printing, no Google Sheet.
 
