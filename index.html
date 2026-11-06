@@ -2243,28 +2243,38 @@ function buildReportCsv(rows, badges, receptores){
       .concat(ent.map(n=>fmtQty((pe.get(n)&&pe.get(n).get(r.sku))||0, r.kgpz))).map(csvCell).join(','); });
   return [head].concat(body).join('\r\n')+'\r\n';
 }
-/* ── §5.3 Armado enrichment (display only). Reads Armado's picks (read-only): the newest order_date within
-   3 days of the reception that has rows for this hub. Per sku: latest row per ronda, rondas summed
-   (Armado writes one row per confirm, so a re-confirm repeats the sku). Abarrotes only — Carnes isn't
-   assembled in Armado yet. S.armado: Map sku→qty, or null = no data ("—"). ── */
+/* ── §5.3 Armado enrichment (display only). Reads Armado's picks (read-only). Abarrotes is assembled one day and received
+   the next morning, and that day's assembly starts before the reception closes, so only orders dated BEFORE the reception
+   count, and the one that shipped is the one whose picks cover the most envío lines (real data: 98–100 %, any other ≤15 %).
+   Per sku: latest row per ronda, rondas summed (Armado writes one row per confirm, so a re-confirm repeats the sku).
+   Abarrotes only — Carnes isn't assembled in Armado yet. S.armado: Map sku→qty, or null = no data ("—"). ── */
+const ARMADO_DIAS=10, ARMADO_MIN_COINCIDE=0.8; // Condesa and Zapopan take days; below the share it isn't this shipment
 const ARMADO_HUB={ 'test-hub':'MH Contry' }; // local tests borrow MH Contry's assembly
 async function loadArmado(){
   S.armado=null; S.armadoFecha=null;
   if(S.area!=='abarrotes' || !S.session) return;
+  if(!S.lines.size) return;
   const hub=ARMADO_HUB[S.hub]||hubName(S.hub), hasta=S.session.fecha;
-  const desde=localDateStr(new Date(Date.parse(hasta+'T12:00:00Z')-3*86400000));
+  const desde=localDateStr(new Date(Date.parse(hasta+'T12:00:00Z')-ARMADO_DIAS*86400000));
   try{
-    const rows=await pgSelectAll('picks', `hub=eq.${encodeURIComponent(hub)}&order_date=gte.${desde}&order_date=lte.${hasta}&select=id,sku_key,cantidad,ronda,order_date,unidad`);
-    if(!rows.length) return;
-    const od=rows.reduce((m,r)=>r.order_date>m?r.order_date:m, '');
-    const last=new Map(); // `${sku}|${ronda}` → row with the highest id
-    for(const r of rows){ if(r.order_date!==od) continue; const k=r.sku_key+'|'+r.ronda, p=last.get(k); if(!p || r.id>p.id) last.set(k,r); }
-    const m=new Map();
-    for(const r of last.values()){
-      const sku=String(r.sku_key||'').startsWith('norm:') ? 'name:'+String(r.sku_key).slice(5) : codeKey(r.sku_key);
-      m.set(sku, round2((m.get(sku)||0)+(Number(r.cantidad)||0)));
+    const rows=await pgSelectAll('picks', `hub=eq.${encodeURIComponent(hub)}&order_date=gte.${desde}&order_date=lt.${hasta}&select=id,sku_key,cantidad,ronda,order_date,unidad`);
+    const porOrden=new Map();
+    for(const r of rows){
+      if(!porOrden.has(r.order_date)) porOrden.set(r.order_date, new Map());
+      const last=porOrden.get(r.order_date), k=r.sku_key+'|'+r.ronda, p=last.get(k); if(!p || r.id>p.id) last.set(k,r); // `${sku}|${ronda}` → row with the highest id
     }
-    S.armado=m; S.armadoFecha=od;
+    let best=null, bestPct=0, bestOd=null;
+    for(const [od,last] of porOrden){
+      const m=new Map();
+      for(const r of last.values()){
+        const sku=String(r.sku_key||'').startsWith('norm:') ? 'name:'+String(r.sku_key).slice(5) : codeKey(r.sku_key);
+        m.set(sku, round2((m.get(sku)||0)+(Number(r.cantidad)||0)));
+      }
+      const pct=[...S.lines.keys()].filter(k=>m.get(k)>0).length/S.lines.size;
+      if(pct>bestPct){ best=m; bestPct=pct; bestOd=od; }
+    }
+    if(bestPct<ARMADO_MIN_COINCIDE) return;
+    S.armado=best; S.armadoFecha=bestOd;
   }catch(_){ S.armado=null; }
 }
 function armadoDe(r){ if(!S.armado) return null; return S.armado.get(r.sku) ?? 0; }

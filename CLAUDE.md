@@ -110,8 +110,11 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   appears only in Resumen y cierre and Recepciones.
 - Multi-device: `syncServerEvents()` reads `id=gt.S.lastId` every 15 s while Recibir/Resumen is visible;
   `onRemoteEvents` reloads a file replaced elsewhere and locks scanning when another phone closed it.
-- Armado enrichment (`loadArmado`): Abarrotes only; picks of the newest `order_date` within 3 days ≤ reception
-  date; latest row per (sku, ronda), rondas summed. picks.hub is the display name ("MH Contry"), sku_key is
+- Armado enrichment (`loadArmado`): Abarrotes only. Abarrotes is assembled one day and received the next morning, and that
+  day's assembly starts before the reception closes, so only `order_date` < reception date, within 10 days (`ARMADO_DIAS`),
+  and of those the order covering the most envío lines, at least 80 % (`ARMADO_MIN_COINCIDE`; else no Armado data). Latest
+  row per (sku, ronda), rondas summed. Receptions closed before 2026-11-06 can hold A from the wrong assembly in
+  `cerrar.errores`; Armado CH recomputes it. picks.hub is the display name ("MH Contry"), sku_key is
   cleanBC or `norm:`+name.
 - Origen de la diferencia (`clasificarDiferencias`, replaces `origenDif`): A=armado, E=enviado, R=recibido.
   A=R≠E → `captura`; A=E, R>E → `sobrante_armado`; A=E, R<E → `faltante` (armado or traslado, can't tell);
