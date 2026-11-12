@@ -1,7 +1,8 @@
 # MH Recibo — Proveedor Directo plan
 
-Status: plan only. Written 2026-11-12 from the MH Contry sheet ("Recepcion Contry") and Jose's answers (two rounds,
-same day). Nothing built yet. Read `mhRecibo-v1-plan.md` and `CLAUDE.md` first: everything here reuses that app and
+Status: plan final, ready to build (2026-11-12). Written from the MH Contry sheet ("Recepcion Contry", file id
+`1C8Vb9OE8uVZVidNRs7D7aDbwdPK56U2OW0nYFJ3eKoE`, tab «OC Con») and Jose's answers (four rounds, same day). Nothing
+built yet. Phases 1–4 can start with the Contry file alone; §10 only blocks rollout to other hubs and Phase 5 details. Read `mhRecibo-v1-plan.md` and `CLAUDE.md` first: everything here reuses that app and
 only lists what changes.
 
 ## 1. Why
@@ -34,8 +35,8 @@ Quirks the reader must handle:
 
 ## 3. Decisions (Jose, 2026-11-12)
 
-1. **Blind count stays.** The receptor never sees Pedido while scanning — except in the one alert of §4 (recibido
-   over pedido), which appears only after the count is typed.
+1. **Blind count stays.** The receptor never sees Pedido while scanning — except in the two alerts of §4 (count over or
+   under Pedido), which appear only after the count is typed.
 2. **Supplier list comes from the orders**, not a hand-kept list.
 3. **Contacts = Comercial and Compras.** Every warning names both: the Comercial from Encargados and the Comprador
    from the order lines (column Comprador; if the supplier has no lines, the last comprador seen for it in the
@@ -53,8 +54,8 @@ Quirks the reader must handle:
 7. **Temperature is shown only** (target temp on the card). The receptor checks the truck; nothing is typed.
 8. **Nothing is written to the sheets or Retool.** Report = Recepciones view (to type into Retool by hand) + a
    generated Slack message (copy button; may or may not be used).
-9. **Rechazo instead of MNA.** Unlike CH, unfit pieces are **rejected** (go back on the truck) and are not received.
-   CH rule 8 (everything that arrived is received, fecha corta → MNA) stays CH-only.
+9. **Rechazo instead of MNA.** Unlike CH, unfit pieces are **rejected** (set aside while counting, go back on the
+   truck) and are not received. CH rule 8 (everything that arrived is received, fecha corta → MNA) stays CH-only.
 10. **The receptor counts physical pieces, never the invoice.** Suppliers deliver less than they invoice and more
     than was ordered. The app tells the receptor, before the truck leaves, what to reject and what to have corrected
     on the invoice, so Calii is never charged for more than it received nor more than it ordered. A typed invoice
