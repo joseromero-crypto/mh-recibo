@@ -47,44 +47,64 @@ Quirks the reader must handle:
 5. **No order → no reception.** «No hay orden cargada para {Proveedor}. Contacta a {Comercial} o {Comprador}.»
    The receptor can't start until the order shows up. A **«Volver a leer la orden»** button re-reads the sheet,
    because compras will be loading it by hand while the truck waits.
-6. **Nothing not ordered is received.** Agreement with compras: a product not in the order is asked about; if nobody
-   answers in **10 minutes**, it is rejected (§6.3).
+6. **We trust the order 100 %.** If the order exists and a product isn't in it, that product is **rejected
+   automatically** — nobody is called. Comercial/Compras are contacted only when the whole order is missing or
+   clearly the wrong one (§6.3). (The compras agreement — no answer in 10 minutes → reject — applies to that call.)
 7. **Temperature is shown only** (target temp on the card). The receptor checks the truck; nothing is typed.
 8. **Nothing is written to the sheets or Retool.** Report = Recepciones view (to type into Retool by hand) + a
    generated Slack message (copy button; may or may not be used).
 9. **Rechazo instead of MNA.** Unlike CH, unfit pieces are **rejected** (go back on the truck) and are not received.
    CH rule 8 (everything that arrived is received, fecha corta → MNA) stays CH-only.
-10. **The invoice number is pending.** For now Factura = what arrived. A typed invoice count (or merging Invoice
-    Reader in here) is a later phase (§9).
+10. **The receptor counts physical pieces, never the invoice.** Suppliers deliver less than they invoice and more
+    than was ordered. The app tells the receptor, before the truck leaves, what to reject and what to have corrected
+    on the invoice, so Calii is never charged for more than it received nor more than it ordered. A typed invoice
+    count (or merging Invoice Reader in here) is a later phase (§9).
 
-## 4. Quantities per product
+## 4. Counting: one method for every rejection
 
-Four numbers. The receptor types one count; everything else follows.
+**The rule the receptor learns:** *the quantity is only the good pieces you counted. Anything unfit goes aside and
+is entered with Rechazar, never inside the quantity.* The app handles everything above the order by itself.
 
-| Name | Comes from | Meaning |
-|---|---|---|
-| **Pedido** | sheet | Ordered |
-| **Factura** | the receptor's scan + count (blind) | Everything that came with the invoice |
-| **Rechazado** | computed: Fecha corta + Dañada + Excedente | Back on the truck |
-| **Recibido** | computed: Factura − Rechazado | Into stock — **never more than Pedido** |
+What the receptor types per product:
+- **Buenas** — the quantity field: fit pieces counted (blind).
+- **No aptas** — the Rechazar button under the quantity, by motivo: **Fecha corta** (expiry before the sheet's
+  Fecha de Caducidad) or **Dañada**. These are counted *apart from* Buenas, so nothing is ever subtracted twice.
 
-Always **Factura = Recibido + Rechazado**.
+What the app computes (never typed, never stored — always from the current order, §7):
 
-Rechazo reasons:
-- **Fecha corta** — expiry before the sheet's Fecha de Caducidad. Typed with the "Rechazar" button under the
-  quantity (like Separar on CH): «¿Cuántas de las {n}?»
-- **Dañada** — physically unfit. Same button.
-- **Excedente** — computed, never typed: Factura − Fecha corta − Dañada − Pedido, when above 0. Products not in the
-  order have Pedido 0, so all of it is excedente (= «no solicitado»).
+| Number | Formula |
+|---|---|
+| **Pedido** | from the order (0 when the product isn't in it) |
+| **Llegaron** | Buenas + No aptas — everything physically delivered |
+| **Excedente** | max(0, Buenas − Pedido) |
+| **Recibido** | Buenas − Excedente = min(Buenas, Pedido) — never above Pedido |
+| **Rechazado** | No aptas + Excedente |
+| **Faltante** | max(0, Pedido − Recibido) |
 
-**The big alert** (the strongest in the app): when a count would leave Recibido above Pedido, the card stops with
-«Solo se solicitaron 6 piezas. Rechaza el sobrante (2).» The receptor confirms the rejection (the only way on) or
-corrects the count. It applies on every change (scan, Corregir, Recontar, a re-read order that lowers Pedido).
-Order of the guards: typo guard first (as CH), then this one. Kg: same tolerance as CH's over-enviado guard
-(±max(5 %, 0.10 kg)) before it counts as excedente.
+Always **Llegaron = Recibido + Rechazado**, whatever the reason.
 
-Slack line per product with a rejection or a shortfall:
-`Queso panela LALA 400g — Pedido 10 · Factura 15 · Recibido 10 · Rechazado 5 (excedente)`
+Example: order 8, the receptor counts 12 good ones and sets aside 1 broken one.
+Buenas 12, No aptas 1 → Llegaron 13, Excedente 4, Recibido 8, Rechazado 5 (4 excedente + 1 dañada).
+
+**Why the app subtracts the excess instead of making the receptor type 8 again:** the 12 is the evidence. If the
+receptor retypes 8, the report no longer shows that 13 pieces arrived, which is what the supplier's invoice has to
+be argued against. And because unfit pieces are never in Buenas, subtracting the excess can't double-count them.
+
+**The big alert** (the strongest in the app): when Buenas > Pedido the card stops with «Solo se solicitaron 8
+piezas. Separa 4 piezas para rechazo (excedente).» The only way on is confirming **«Ya separé las 4»** or correcting
+the count. The receptor never re-types; the 4 are recorded as excedente. It re-checks on every change (scan,
+Corregir, Recontar, a re-read order). Order of the guards: typo guard first (as CH), then this one. Kg: CH's
+over-enviado tolerance (±max(5 %, 0.10 kg)) before any excedente is asked for.
+
+**Before the truck leaves** (Resumen y cierre): the receptor sees every line where something must be fixed with the
+driver:
+- **Rechazado** → «Devolver {n}: {motivos}».
+- **Faltante** → «Faltan {n}: que no se facture».
+- Then one line per product for the invoice: **«Facturar: {Recibido}»**, so the driver/supplier corrects the invoice
+  to what was actually received (never more than received, never more than ordered).
+
+Slack / report line per product with a difference:
+`Queso panela LALA 400g — Pedido 8 · Llegaron 13 · Recibido 8 · Rechazado 5 (4 excedente, 1 dañada) · Facturar 8`
 
 ## 5. The bridge: Apps Script web app
 
@@ -146,25 +166,24 @@ closing and report, and all the existing machinery works for them without new co
   Canastas/sorting positions as today where the hub has them.
 - Card extras: **Temp** chip (Ambiente / Refrigerado 1 °C / Congelado −18 °C), **Caducidad mínima {fecha}** from the
   sheet, **Rechazar** button (Fecha corta / Dañada, §4).
-- **Not in the order** (no line for that code) → card «No solicitado» with the count field (pieces still have to be
-  counted so they appear on the report as rejected):
-  - It shows «Avisa a {Comercial} o {Comprador}» with Llamar links and starts a **10-minute timer** («Avisado a las
-    10:32 · se rechaza a las 10:42»), listed in a «Por confirmar» strip on Recibir.
-  - «Volver a leer la orden» re-reads the supplier: if compras added the line, those pieces become Recibido up to
-    the new Pedido and the strip clears.
-  - After 10 minutes the strip turns to «Rechazado: sin respuesta». Nothing is lost: if the line shows up later
-    (before Cerrar) a re-read still converts it. Cerrar treats anything still not ordered as rejected (excedente).
-- The §4 big alert replaces CH's over-enviado "Vuelve a contar".
+- **Not in the order** (the order exists, this code has no line) → card «No solicitado · se rechaza» with the count
+  field. Pedido = 0, so everything counted is Excedente and goes on the report as rejected. No call, no timer, no
+  confirmation beyond the count: the order is trusted 100 %.
+- **Whole order wrong**: if most of the first scans aren't in the order (e.g. 3 of the first 5 products), a banner
+  says «Parece que la orden no corresponde a esta entrega. Contacta a {Comercial} o {Comprador}» with Llamar links
+  and **«Volver a leer la orden»**. Advisory, not blocking. A re-read writes a new snapshot (§6.2) and every line is
+  recomputed, so pieces already counted move from Excedente to Recibido if the corrected order includes them.
+- The §4 big alert («Separa {n} piezas para rechazo») replaces CH's over-enviado "Vuelve a contar".
 - No Armado enrichment, no origen-de-la-diferencia classification.
 
 ### 6.4 Resumen y cierre, Recepciones, Slack
-- Resumen: Pedido / Factura / Recibido / Rechazado (+ motivo) per product, faltantes (Pedido > Recibido, nothing
-  arrived or short) acknowledged one by one (rule 2), then Cerrar. Cerrar re-reads the order one last time and
-  warns if it changed.
+- Resumen (done while the truck is still there): Pedido / Llegaron / Recibido / Rechazado (+ motivos) / Faltante per
+  product, and the «Devolver / Faltan / Facturar» list of §4. Faltantes acknowledged one by one (rule 2), then
+  Cerrar. Cerrar re-reads the order one last time and warns if it changed.
 - **Recepciones (for Retool)**: same view as CH — big **Recibido**, tick boxes, search, CSV — sorted the way Retool
   asks for it. Rejected lines in their own section.
-- Report CSV `reportes/{hub}/pd-{prov}/…csv`: Código, Producto, Und, Pedido, Factura, Recibido, Rechazado,
-  Fecha corta, Dañada, Excedente, Caducidad mínima, Temp.
+- Report CSV `reportes/{hub}/pd-{prov}/…csv`: Código, Producto, Und, Pedido, Llegaron, Recibido, Rechazado,
+  Fecha corta, Dañada, Excedente, Faltante, Facturar, Caducidad mínima, Temp.
 - `cerrar` detalle adds `proveedor`, `fechas_entrega`, `rechazadas`, `excedente`, `no_solicitados`.
 - An order counts as received once a closed `pd-*` session lists its `fecha_entrega` (that greys it in §6.1).
 - Slack message (copy button): header «{Hub} · {Proveedor} · entrega {fecha}», §4 lines, then the Slack tags of the
@@ -177,25 +196,27 @@ closing and report, and all the existing machinery works for them without new co
 
 ## 7. Events
 
-- New in `scan` detalle: `fecha_corta_pz`, `danadas` (already exist on CH, here they are rejections),
-  `pns:true` (code not in the order when scanned), `aviso_ts` (when the 10-minute timer started).
+- `scan.cantidad` = Buenas. New in `scan` detalle: `no_aptas: { fecha_corta, danada }` — pieces counted **apart
+  from** `cantidad` (unlike CH's `fecha_corta_pz`/`danadas`, which are part of the scan's total); `pns:true` (code not
+  in the order when scanned); `excedente_ok` (the receptor confirmed «Ya separé las {n}»).
+- Editing No aptas after the scan: `ajuste` with `cantidad:0` + `detalle.no_aptas` (latest wins), like Separar.
 - `reemplazo` with `orden_releida:true` when a re-read changes the order.
-- Excedente and Recibido are never stored: computed from Factura (fold of scans + ajustes), the manual rejections
-  and the current order snapshot, so a re-read recomputes them.
+- Llegaron, Excedente, Recibido, Rechazado and Faltante are never stored: computed from Buenas (fold of scans +
+  ajustes), No aptas and the current order snapshot, so a re-read recomputes them.
 
 ## 8. Build phases (each ends with a localhost check on `test-hub`)
 
 0. Jose: access to the master file (or the 7 hub file ids), each hub's Cedis code, the shared token (§10).
 1. Apps Script: read one hub, normalize dates/temp, contacts, JSON of §5, `&proveedor` + `&fresh`. Tested on Contry.
 2. Inicio (CH / Proveedor directo, supplier list, date and no-order warnings, re-read) + snapshot to storage.
-3. Recibir: temp chip, caducidad from the sheet, Rechazar, big alert, No solicitado + 10-minute timer + re-read.
+3. Recibir: temp chip, caducidad from the sheet, Rechazar (No aptas), big alert, No solicitado, wrong-order banner + re-read.
 4. Resumen y cierre, report CSV, cerrar.
 5. Recepciones (Retool view), Slack message, Calendario, Admin.
 6. Real-device QA at MH Contry next to the Google Sheet, with one supplier delivery.
 
 ## 9. Not in v1
 
-- A typed invoice count (Factura vs what arrived) — pending; maybe by bringing Invoice Reader into this flow.
+- A typed invoice count (invoice vs Llegaron/Facturar) — pending; maybe by bringing Invoice Reader into this flow.
 - Writing anything back to the sheets or Retool.
 - Measured temperature, photos of rejected goods, prices / money totals.
 
