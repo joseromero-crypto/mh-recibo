@@ -56,6 +56,12 @@
   force = true
 
 [[redirects]]
+  from = "/proveedorDirecto-plan.md"
+  to = "/404"
+  status = 404
+  force = true
+
+[[redirects]]
   from = "/sql/*"
   to = "/404"
   status = 404
