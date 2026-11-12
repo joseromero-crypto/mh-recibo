@@ -128,6 +128,9 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   the tags from `config/slack.json` `{ tags:[…] }` (Admin → Slack; default `@alberto`; the aux adds the hub
   coordinator and Jose by hand). Tags
   must be Slack @usernames: a pasted "@Alberto Mendoza" mentions @alberto and leaves "Mendoza" as text.
+- Admin → Calendario (view only): one hub, one month; each reception is a bar from session `fecha` to the Monterrey date
+  of its `cerrar` (teal Abarrotes, ink Carnes; dashed = sin cerrar, reaching today only for that área's newest session;
+  `borrar` sessions hidden). Legend counts the days of the month each área had a reception.
 - Admin (§6.8/6.9): PIN in memory only; writes `rec_events` (admin), `config/receptores.json`, `config/slack.json`, envío copies
   (restore), `rec_alert_config` (upsert via `pgUpsert`, `on_conflict=hub,area`). Alerts are written only by the
   Apps Script through the RPCs.

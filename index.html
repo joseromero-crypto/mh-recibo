@@ -242,6 +242,27 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .adm-row .btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .adm-row .btns .btn{min-height:36px;padding:0 14px;font-size:13px}
 .adm-row .btn-secondary{background:var(--c-white)}
+/* Admin → Calendario: one bar per reception, teal = Abarrotes, ink = Carnes (outlined = still open / sin cerrar) */
+.cal-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 8px}
+.cal-nav b{font-size:17px;text-transform:capitalize}
+.cal-nav button{min-width:44px;min-height:44px;border:none;border-radius:var(--r-pill);background:var(--c-surface);font-size:18px;font-weight:700;cursor:pointer;color:var(--c-ink)}
+.cal-dow,.cal-week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+.cal-dow div{font-size:11px;font-weight:700;color:var(--c-faint);text-align:center;padding:4px 0}
+.cal-week{grid-auto-rows:auto;row-gap:3px;border-top:1px solid var(--c-line);padding:4px 0 6px;min-height:68px;align-content:start}
+.cal-day{font-size:13px;font-weight:600;text-align:center;line-height:24px;grid-row:1}
+.cal-day span{display:inline-block;min-width:24px;height:24px;border-radius:12px}
+.cal-day.out{color:var(--c-line)} .cal-day.fut{color:var(--c-faint)}
+.cal-day.today span{background:var(--c-teal-light);color:var(--c-teal-dark);font-weight:800}
+.cal-bar{height:18px;font-size:11px;font-weight:700;line-height:16px;padding:0 6px;border:1px solid transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;margin:0 1px;text-align:left;font-family:inherit}
+.cal-bar.abarrotes{background:var(--c-teal);color:var(--c-ink);border-color:var(--c-teal)}
+.cal-bar.carnes{background:var(--c-ink);color:var(--c-white);border-color:var(--c-ink)}
+.cal-bar.open.abarrotes{background:var(--c-teal-light);color:var(--c-teal-dark);border-style:dashed;border-color:var(--c-teal-dark)}
+.cal-bar.open.carnes{background:var(--c-white);color:var(--c-ink);border-style:dashed}
+.cal-bar.s{border-top-left-radius:9px;border-bottom-left-radius:9px;margin-left:3px}
+.cal-bar.e{border-top-right-radius:9px;border-bottom-right-radius:9px;margin-right:3px}
+.cal-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--c-muted);margin:10px 0}
+.cal-legend{align-items:center} .cal-sw{display:inline-block;width:18px;height:10px;border-radius:5px;margin-right:5px;vertical-align:0;border:1px solid transparent}
+.cal-sw.abarrotes{background:var(--c-teal)} .cal-sw.carnes{background:var(--c-ink)} .cal-sw.open{border:1px dashed var(--c-muted);background:var(--c-white)}
 .day-chk{display:inline-flex;align-items:center;gap:3px;font-size:13px;margin-right:8px}
 .adm-field{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:14px;flex-wrap:wrap}
 .adm-field input[type=time],.adm-field input[type=date],.adm-field input[type=number],.adm-field select{height:40px;padding:0 10px;font-size:14px;border:2px solid var(--c-line);border-radius:var(--r-sm);background:var(--c-white)}
@@ -2617,10 +2638,10 @@ async function admLogin(){
 }
 function admTab(t){ ADM.tab=t; renderAdmin(); }
 async function renderAdmin(){
-  const tabs=[['recep','Recepciones'],['resp','Respaldos'],['recept','Receptores'],['codigos','Códigos'],['slack','Slack'],['alert',`Alertas${ADM.alertCount?' ('+ADM.alertCount+')':''}`]];
+  const tabs=[['recep','Recepciones'],['cal','Calendario'],['resp','Respaldos'],['recept','Receptores'],['codigos','Códigos'],['slack','Slack'],['alert',`Alertas${ADM.alertCount?' ('+ADM.alertCount+')':''}`]];
   document.getElementById('admin-body').innerHTML=`<div class="tabs">${tabs.map(([k,n])=>`<button class="choice ${ADM.tab===k?'sel':''}" onclick="admTab('${k}')">${n}</button>`).join('')}</div><div id="adm-tab"><div class="muted">Cargando…</div></div>`;
   admAlertCount();
-  try{ await ({ recep:admRecepciones, resp:admRespaldos, recept:admReceptores, codigos:admCodigos, slack:admSlack, alert:admAlertas })[ADM.tab](); }
+  try{ await ({ recep:admRecepciones, cal:admCalendario, resp:admRespaldos, recept:admReceptores, codigos:admCodigos, slack:admSlack, alert:admAlertas })[ADM.tab](); }
   catch(e){ document.getElementById('adm-tab').innerHTML=`<div class="err-box">${isNetErr(e)?'Sin conexión.':'Error: '+escapeHtml(e.message)}</div>`; }
 }
 async function admAlertCount(){
@@ -2666,6 +2687,78 @@ async function admRecepciones(){
         ${r.parciales.map((p,j)=>`<button class="btn btn-secondary" onclick="openRecepcion(_admRecep[${i}].parciales[${j}],'admin')">Entrega ${p.entrega}</button>`).join('')}</div></div>`;
   });
   document.getElementById('adm-tab').innerHTML=h||'<div class="empty-hint">Sin recepciones.</div>';
+}
+/* ── Calendario: view only. One hub, one month; every reception is a bar from the day it opened (session fecha) to
+   the day it closed (Monterrey date of the cerrar). Still open: dashed, up to today if it's that área's newest
+   session, else only its first day (abandoned). Borrar → not shown (it wasn't a reception). ── */
+let _admCal=[];
+function ymdAdd(ymd, n){ const d=new Date(Date.parse(ymd+'T12:00:00Z')+n*86400000); return d.toISOString().slice(0,10); }
+function ymdDow(ymd){ return (new Date(Date.parse(ymd+'T12:00:00Z')).getUTCDay()+6)%7; } // 0 = lunes
+function admCalMes(n){ const [y,m]=ADM.calMes.split('-').map(Number), d=new Date(Date.UTC(y,m-1+n,1)); ADM.calMes=d.toISOString().slice(0,7); renderAdmin(); }
+async function admCalendario(){
+  const today=todayStr(); if(!ADM.calMes) ADM.calMes=today.slice(0,7);
+  const ini=ADM.calMes+'-01', fin=ymdAdd(ymdAdd(ini,32).slice(0,7)+'-01',-1);
+  const gridIni=ymdAdd(ini,-ymdDow(ini)), gridFin=ymdAdd(fin,6-ymdDow(fin));
+  // a session that opened up to 14 days before the grid can still reach into it
+  const evs=await pgSelectAll('rec_events', `hub=eq.${encodeURIComponent(ADM.hub)}&tipo=in.(abrir,reemplazo,cerrar,admin,parcial)&fecha=gte.${ymdAdd(gridIni,-14)}&fecha=lte.${gridFin}&select=id,session_id,area,fecha,tipo,receptor,detalle,ts`);
+  const by=new Map();
+  for(const e of evs){
+    let r=by.get(e.session_id);
+    if(!r){ r={ session_id:e.session_id, hub:ADM.hub, area:e.area, fecha:e.fecha, receptores:new Set(), cerrada:null, borrada:false, parciales:0 }; by.set(e.session_id, r); }
+    if(e.fecha<r.fecha) r.fecha=e.fecha;
+    if(e.receptor && e.receptor!=='Admin') r.receptores.add(e.receptor);
+    const d=e.detalle||{};
+    if(e.tipo==='cerrar') r.cerrada=Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub||ADM.hub, area:e.area, receptor:e.receptor, session_id:e.session_id }, d);
+    if(e.tipo==='admin' && d.accion==='reabrir') r.cerrada=null;   // events come in id order: latest wins
+    if(e.tipo==='admin' && d.accion==='borrar') r.borrada=true;
+    if(e.tipo==='parcial') r.parciales++;
+  }
+  const ses=[...by.values()].filter(r=>!r.borrada && AREAS.some(a=>a.id===r.area));
+  const newest={}; ses.forEach(r=>{ if(!newest[r.area] || r.session_id>newest[r.area]) newest[r.area]=r.session_id; }); // ids end in epoch ms
+  ses.forEach(r=>{
+    r.desde=r.fecha;
+    r.hasta=r.cerrada ? localDateStr(new Date(r.cerrada.ts)) : (newest[r.area]===r.session_id ? today : r.fecha);
+    if(r.hasta<r.desde) r.hasta=r.desde;
+  });
+  ses.sort((a,b)=>AREAS.findIndex(x=>x.id===a.area)-AREAS.findIndex(x=>x.id===b.area) || a.desde.localeCompare(b.desde));
+  _admCal=ses;
+  // Days of this month (up to today) with a reception of each área
+  const cubre={}; AREAS.forEach(a=>cubre[a.id]=new Set());
+  ses.forEach(r=>{ for(let d=r.desde; d<=r.hasta; d=ymdAdd(d,1)) if(d>=ini && d<=fin) cubre[r.area].add(d); });
+  const diasMes=Math.max(0, daysBetween(ini, today<fin?today:fin)+1);
+  let h=`<div class="filters">${hubSelectHtml('adm-hub', ADM.hub)}</div>
+    <div class="cal-nav"><button onclick="admCalMes(-1)" aria-label="Mes anterior">‹</button><b>${MESES[Number(ADM.calMes.slice(5))-1]} ${ADM.calMes.slice(0,4)}</b><button onclick="admCalMes(1)" aria-label="Mes siguiente">›</button></div>
+    <div class="cal-dow">${['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d=>`<div>${d}</div>`).join('')}</div>`;
+  for(let w=gridIni; w<=gridFin; w=ymdAdd(w,7)){
+    const wEnd=ymdAdd(w,6);
+    h+=`<div class="cal-week">`;
+    for(let i=0;i<7;i++){ const d=ymdAdd(w,i);
+      h+=`<div class="cal-day${d.slice(0,7)!==ADM.calMes?' out':''}${d>today?' fut':''}${d===today?' today':''}" style="grid-column:${i+1}"><span>${Number(d.slice(8))}</span></div>`; }
+    // lanes: Abarrotes first, then Carnes; overlapping receptions of the same área take another lane
+    let row=2;
+    AREAS.forEach(a=>{
+      const lanes=[];
+      ses.forEach((r,idx)=>{
+        if(r.area!==a.id || r.hasta<w || r.desde>wEnd) return;
+        const s=r.desde<w?w:r.desde, e=r.hasta>wEnd?wEnd:r.hasta;
+        let l=lanes.findIndex(end=>end<s); if(l<0){ l=lanes.length; lanes.push(e); } else lanes[l]=e;
+        const c0=daysBetween(w,s)+1, span=daysBetween(s,e)+1;
+        const tip=`${a.name} · ${r.cerrada?'cerrada':'abierta'} · ${fechaLarga(r.desde)}${r.hasta!==r.desde?' – '+fechaLarga(r.hasta):''}`;
+        h+=`<button class="cal-bar ${a.id}${r.cerrada?'':' open'}${s===r.desde?' s':''}${e===r.hasta?' e':''}" style="grid-row:${row+l};grid-column:${c0} / span ${span}" title="${escapeHtml(tip)}" onclick="admCalVer(${idx})" aria-label="${escapeHtml(tip)}">${span>1?a.name:''}</button>`;
+      });
+      row+=Math.max(1,lanes.length);
+    });
+    h+=`</div>`;
+  }
+  h+=`<div class="cal-legend">${AREAS.map(a=>`<span><i class="cal-sw ${a.id}"></i>${a.name}: ${cubre[a.id].size} de ${diasMes} días</span>`).join('')}<span><i class="cal-sw open"></i>abierta / sin cerrar</span></div>
+    <div id="cal-detalle"><div class="muted" style="font-size:13px">Toca una barra para ver la recepción.</div></div>`;
+  document.getElementById('adm-tab').innerHTML=h;
+}
+function admCalVer(i){
+  const r=_admCal[i], c=r.cerrada;
+  document.getElementById('cal-detalle').innerHTML=`<div class="adm-row"><b>${escapeHtml(hubName(r.hub))} · ${areaName(r.area)}</b> — ${c?`<span class="tag green">✓ cerrada ${fechaLarga(r.hasta)}, ${localHM(new Date(c.ts))}</span>`:`<span class="tag orange">sin cerrar</span>`}${r.parciales?` <span class="tag orange">${r.parciales} entrega${r.parciales===1?'':'s'} parcial${r.parciales===1?'':'es'}</span>`:''}
+    <div class="muted" style="font-size:12px">Envío del ${fechaLarga(r.desde)} · ${escapeHtml([...r.receptores].join(', ')||'—')}${c?` · ${c.lineas||0} productos · ${c.diferencias||0} con diferencia`:''}</div>
+    ${c?`<div class="btns"><button class="btn btn-secondary" onclick="openRecepcion(_admCal[${i}].cerrada,'admin')">Ver</button></div>`:''}</div>`;
 }
 async function admDescargar(i){
   const c=_admRecep[i].cerrada;
