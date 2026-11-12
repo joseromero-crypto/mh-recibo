@@ -31,7 +31,25 @@ Quirks the reader must handle:
   reads «31 de diciembre de 1899»: a Date equal to 1899-12-31 means 1.
 - **Fecha de Caducidad** reads as a long Spanish date in the UI; read the raw value (`getValues()` gives a Date).
 - **Fecha de entrega** is dd/mm/yyyy text or a Date — normalize to YYYY-MM-DD.
-- Base Oc is fed by a master file Jose can't open yet (§10, Q1).
+- Base Oc is fed by the master **«Fill Rate Oc Nacional»** (`14-Wt08IJuNc7e5nKA0R_omBHc0JY2olSxu_FCCVHOLQ`), checked
+  2026-11-12 (§2.1).
+
+### 2.1 The master file (source of the script)
+
+| Tab | Holds | Use |
+|---|---|---|
+| **Base datos Compras** | Comprador, **Hub** (code), **Num Oc**, Proveedor, Sku, Item, Cod. Barras, Ud, Pedido, Cajas, **Fecha**, Entrada, **Status** | Open orders of every hub. Only `Programado` rows; an order closed in Retool leaves this tab (it moves to «Resumen» as `Cerrado`, with Entrada). The hub's «OC {hub}» tab is exactly this filtered by Hub (Contry: 151 rows on 2026-11-12, same in both). |
+| **Catalogo2** | Ciudad, Cód. de barras, Producto, Proveedor, Kg/Pz, **V Anaquel**, Comprador; plus a Hub → Ciudad table (N:O) | Caducidad mínima = Fecha + V Anaquel (checked on 4 LALA lines: 27/23/30/70 days give the hub file's dates exactly). Names/units for products not in the order. |
+| **Proveedores** | Proveedor Retool, Nombre Corto, Comprador (full name) | Fallback comprador. |
+
+- Hub codes: `Con` Contry, `Cu` Cumbres, `Gpe` Guadalupe, `SNG` San Nicolás (Mty); `Zap` Zapopan (Gdl); `Csa` Condesa
+  (CDMX); also `Mty` (the Cedis), `Sal` (Saltillo), `MH`/`SF`/`CDMX`/`Qro` without open orders. **Avícola has no code.**
+- Not in the master: **Temp**, **Comercial**, phones, «Nuevo». Temp comes from the hub file's «Inv Mty» (by barcode,
+  then «Productos Nuevos»), Comercial and phones from its «Encargados». So the script also reads **one reference hub
+  file per city** (Mty: Recepcion Contry). Other cities get orders and caducidad but no Temp/Comercial until one is set.
+- Comprador on the lines is a short name (`Borjas`, `DIEGO`, `Sofía`) matching the Encargados contacts table
+  (`Borjas`, `Diego`, `Sofia`) ignoring case and accents. An order = one **Num Oc** (two Bimbo OCs for Contry on
+  2026-11-13); 33 rows have Num Oc `-` and are grouped by supplier + date.
 
 ## 3. Decisions (Jose, 2026-11-12)
 
@@ -105,18 +123,24 @@ orders). Read-only: it never writes to any sheet.
 ```json
 {
   "leido": "2026-11-12T15:02:11Z",
-  "ordenes": [ { "proveedor": "LALA", "fecha_entrega": "2026-11-12", "comercial": "…", "comprador": "…",
+  "ordenes": [ { "num_oc": "C2613680", "proveedor": "LALA", "fecha_entrega": "2026-11-12", "comercial": "…", "comprador": "…",
                  "lineas": [ { "codigo": "7501020513134", "sku_marca": "1271", "producto": "Crema ácida entera LALA 200ml",
-                               "kgpz": "Pz", "pedido": 10, "caducidad_min": "2026-12-09", "temp": "1", "nuevo": false } ] } ],
+                               "kgpz": "Pz", "pedido": 10, "caducidad_min": "2026-12-09", "temp": "1" } ] } ],
   "contactos": { "LALA": { "comercial": "…", "comprador": "…" } },
   "telefonos": { "<nombre>": "<tel>" },
-  "proveedores": [ "2 Villas", "Absormex", "…" ]
+  "proveedores": [ "2 Villas", "Absormex", "…" ],
+  "catalogo": [ { "proveedor": "LALA", "codigo": "…", "producto": "…", "kgpz": "Pz" } ],
+  "avisos": [ "…" ]
 }
 ```
 
-- Config inside the script: `{ "mh-contry": { "file": "<id>", "tab": "OC Con" }, … }` — or, once there is access to
-  the master, `{ "master": "<id>", "cedis": { "mh-contry": "Con", … } }` (one file instead of seven).
-- Window: lines with Fecha de entrega from today − 14 to today + 14. Which were already received is the app's job.
+- Config inside the script: `MASTER` id, `HUBS` (app slug → Hub code + city), `CIUDADES` (city → reference hub file
+  for Encargados + «Inv {city}»).
+- One orden per Num Oc. Window: Fecha from today − 14 to today + 14, `Programado` only. Which were already received
+  in the app is the app's job (a Retool close removes the order from the master anyway).
+- `catalogo` (only with `&proveedor`): that supplier's Catalogo2 rows for the hub's city. `avisos`: unreadable dates,
+  missing tabs, a city without reference file.
+- `proveedores` = every supplier with rows for the hub in the master, plus the city's Catalogo2 suppliers.
 - `&proveedor=LALA` narrows the answer to one supplier (used by «Volver a leer la orden» and mid-reception
   refreshes — small and fast).
 - `CacheService` keeps the parsed answer **30 seconds** per hub (several phones starting together), and a refresh
@@ -140,8 +164,8 @@ closing and report, and all the existing machinery works for them without new co
     6 productos · programada jue 14». Already-received orders greyed with «recibida {fecha}».
   - «Otro proveedor» → search `proveedores` → no order → §3.5 message with Llamar links and «Volver a leer la orden».
   - Picking a supplier shows the date warning when needed (inline, not a modal) and **Empezar recepción**.
-  - Several orders of the same supplier in the window (e.g. Tue + Thu): the receptor ticks which arrived (default:
-    the nearest date); their lines are summed.
+  - Several orders (Num Oc) of the same supplier in the window (Tue + Thu, or two OCs the same day): the receptor
+    ticks which arrived (default: every OC of the nearest date); their lines are summed.
 
 ### 6.2 Snapshot = envío
 - Empezar recepción writes `envios/{slug}/pd-{prov}/{fecha}__{epochMs}.json` with the lines,
@@ -173,7 +197,8 @@ closing and report, and all the existing machinery works for them without new co
 - Report CSV `reportes/{hub}/pd-{prov}/…csv`: Código, Producto, Und, Pedido, Recibido, Excedente,
   Rechazadas, Motivo, Faltante, Facturar, Caducidad mínima, Temp.
 - `cerrar` detalle adds `proveedor`, `fechas_entrega`, `rechazadas`, `excedente`, `no_solicitados`.
-- An order counts as received once a closed `pd-*` session lists its `fecha_entrega` (that greys it in §6.1).
+- An order counts as received once a closed `pd-*` session lists its `num_oc` (or, without one, its `fecha_entrega`);
+  that greys it in §6.1. `cerrar` detalle also stores `num_oc:[…]`.
 - Slack message (copy button): header «{Hub} · {Proveedor} · entrega {fecha}», §4 lines, then the Slack tags of the
   supplier's Comercial and Comprador (`config/slack.json`, new key `personas: { "<nombre>": "@usuario" }`, edited in
   Admin → Slack).
@@ -194,7 +219,7 @@ closing and report, and all the existing machinery works for them without new co
 
 ## 8. Build phases (each ends with a localhost check on `test-hub`)
 
-0. Jose: access to the master file (or the 7 hub file ids), each hub's Cedis code, the shared token (§10).
+0. Jose: access to the master file (done 2026-11-12), the shared token (§10).
 1. Apps Script: read one hub, normalize dates/temp, contacts, JSON of §5, `&proveedor` + `&fresh`. Tested on Contry.
 2. Inicio (CH / Proveedor directo, supplier list, date and no-order warnings, re-read) + snapshot to storage.
 3. Recibir: temp chip, caducidad from the sheet, over-Pedido alert, No solicitado, wrong-order banner + re-read.
@@ -210,8 +235,9 @@ closing and report, and all the existing machinery works for them without new co
 
 ## 10. Open questions
 
-1. **Source**: Jose asks commercial for **read (Viewer) access to the master file** behind Base Oc → one file
-   instead of seven. Needed with it: each hub's Cedis code (`Con` = Contry; others?). Until then, the 7 hub file ids.
+1. **Source**: done — master «Fill Rate Oc Nacional» (§2.1). Still open: **MH Avícola** has no Hub code in it (no
+   supplier deliveries, or another code?); and a reference file (Encargados + Inv) for **Gdl** (Zapopan) and **CDMX**
+   (Condesa), or they go without Temp/Comercial/phones.
 2. The Retool screen where the receptor types the reception: which columns, in which order? (Sets the Recepciones
    sort and CSV columns.)
 3. Compras/Comercial Slack usernames for the tags (Admin → Slack can hold them once built).
