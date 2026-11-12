@@ -43,10 +43,14 @@ Quirks the reader must handle:
 | **Proveedores** | Proveedor Retool, Nombre Corto, Comprador (full name) | Fallback comprador. |
 
 - Hub codes: `Con` Contry, `Cu` Cumbres, `Gpe` Guadalupe, `SNG` San Nicolás (Mty); `Zap` Zapopan (Gdl); `Csa` Condesa
-  (CDMX); also `Mty` (the Cedis), `Sal` (Saltillo), `MH`/`SF`/`CDMX`/`Qro` without open orders. **Avícola has no code.**
+  (CDMX); `Sal` = **MH Avícola** (Catalogo2 city `Sal`); also `Mty` (the Cedis), `MH`/`SF`/`CDMX`/`Qro` without open
+  orders.
 - Not in the master: **Temp**, **Comercial**, phones, «Nuevo». Temp comes from the hub file's «Inv Mty» (by barcode,
   then «Productos Nuevos»), Comercial and phones from its «Encargados». So the script also reads **one reference hub
-  file per city** (Mty: Recepcion Contry). Other cities get orders and caducidad but no Temp/Comercial until one is set.
+  file per city**, and only Mty has one (Recepcion Contry). Jose (2026-11-12): no extra files for the other cities.
+  Zapopan, Condesa and Avícola get orders, caducidad and Comprador from the master, but no Temp (no chip), Comercial
+  or phones: every contact message there names the Comprador and says «Contacta al equipo comercial en el canal de
+  abastecimiento en Slack» instead of the Comercial + «Llamar» links.
 - Comprador on the lines is a short name (`Borjas`, `DIEGO`, `Sofía`) matching the Encargados contacts table
   (`Borjas`, `Diego`, `Sofia`) ignoring case and accents. An order = one **Num Oc** (two Bimbo OCs for Contry on
   2026-11-13); 33 rows have Num Oc `-` and are grouped by supplier + date.
@@ -59,7 +63,8 @@ Quirks the reader must handle:
 3. **Contacts = Comercial and Compras.** Every warning names both: the Comercial from Encargados and the Comprador
    from the order lines (column Comprador; if the supplier has no lines, the last comprador seen for it in the
    sheet, then Productos Nuevos). Phones from the Encargados contacts table become a «Llamar» link (`tel:`), never
-   copied into reports or Slack.
+   copied into reports or Slack. Where there is no Comercial (outside Mty, §2.1), the {Comercial} part of every message
+   becomes «Contacta al equipo comercial en el canal de abastecimiento en Slack».
 4. **Early or late is fine.** Any open order for the supplier shows up whatever its date. Date ≠ today → inline
    warning: «La orden de {Proveedor} está programada para el {fecha}. Puedes empezar la recepción; contacta a
    {Comercial} (comercial) o {Comprador} (compras) para confirmar que sea correcta.»
@@ -235,9 +240,8 @@ closing and report, and all the existing machinery works for them without new co
 
 ## 10. Open questions
 
-1. **Source**: done — master «Fill Rate Oc Nacional» (§2.1). Still open: **MH Avícola** has no Hub code in it (no
-   supplier deliveries, or another code?); and a reference file (Encargados + Inv) for **Gdl** (Zapopan) and **CDMX**
-   (Condesa), or they go without Temp/Comercial/phones.
+1. **Source**: done — master «Fill Rate Oc Nacional» (§2.1). Avícola = `Sal`. Outside Mty there is no Temp, Comercial
+   or phones; the app points to the abastecimiento Slack channel (§2.1).
 2. The Retool screen where the receptor types the reception: which columns, in which order? (Sets the Recepciones
    sort and CSV columns.)
 3. Compras/Comercial Slack usernames for the tags (Admin → Slack can hold them once built).

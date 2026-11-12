@@ -39,8 +39,9 @@ const CACHE_SEG = 30;
 const MASTER = '14-Wt08IJuNc7e5nKA0R_omBHc0JY2olSxu_FCCVHOLQ';
 const TABS = { ordenes: 'Base datos Compras', catalogo: 'Catalogo2', proveedores: 'Proveedores',
                encargados: 'Encargados', nuevos: 'Productos Nuevos' };
-// City → reference hub file (Encargados + Inv {city}). A city without one still gets orders and caducidad, but no
-// Comercial, phones or Temp.
+// City → reference hub file (Encargados + Inv {city}). Only Mty has one (Jose, 2026-11-12: not worth adding files per
+// city). Elsewhere orders, caducidad and comprador still come from the master; comercial/telefonos/temp stay empty and
+// the app shows «Contacta al equipo comercial en el canal de abastecimiento en Slack».
 const CIUDADES = {
   Mty: { file: '1C8Vb9OE8uVZVidNRs7D7aDbwdPK56U2OW0nYFJ3eKoE', inv: 'Inv Mty' },   // Recepcion Contry
 };
@@ -52,6 +53,7 @@ const HUBS = {
   'mh-san-nicolas': { hub: 'SNG', ciudad: 'Mty' },
   'mh-zapopan':     { hub: 'Zap', ciudad: 'Gdl' },
   'mh-condesa':     { hub: 'Csa', ciudad: 'CDMX' },
+  'mh-avicola':     { hub: 'Sal', ciudad: 'Sal' },
 };
 
 function doGet(e) {
