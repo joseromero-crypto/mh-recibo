@@ -270,6 +270,22 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .adm-row .btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .adm-row .btns .btn{min-height:36px;padding:0 14px;font-size:13px}
 .adm-row .btn-secondary{background:var(--c-white)}
+/* Admin → Proveedores */
+.pv-row{cursor:pointer}
+.pv-fechas{flex-wrap:nowrap} .pv-fechas input[type=date]{flex:1;min-width:0;padding:0 6px}
+.pv-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.pv-head b{min-width:0}
+.pv-fr{font-size:20px;font-weight:800;color:var(--c-teal-dark);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pv-bar{height:8px;border-radius:4px;background:var(--c-white);overflow:hidden;margin:6px 0}
+.pv-bar i{display:block;height:100%;background:var(--c-teal);border-radius:4px}
+.pv-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.pv-week{display:grid;grid-template-columns:56px 1fr 56px;align-items:center;gap:8px;font-size:13px;font-weight:600}
+.pv-week .pv-bar{background:var(--c-surface);margin:0}
+.pv-week b{text-align:right;font-variant-numeric:tabular-nums}
+.pv-week-sub{font-size:12px;color:var(--c-muted);margin:0 0 8px 64px}
+.pv-prod summary{list-style:none;cursor:pointer}
+.pv-prod summary::-webkit-details-marker{display:none}
+.pv-hist{font-size:13px;border-top:1px solid var(--c-line);padding-top:6px;margin-top:6px}
 /* Admin → Calendario: one bar per reception, teal = Abarrotes, ink = Carnes (outlined = still open / sin cerrar) */
 .cal-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 8px}
 .cal-nav b{font-size:17px;text-transform:capitalize}
@@ -2981,6 +2997,13 @@ function pdBuildReportCsv(rows, receptores){
       r.cad?dmy(r.cad):'', tempLabel(r.temp), r.estado, notasDe(r.sku, r.kgpz)].map(csvCell).join(','); });
   return [head].concat(body).join('\r\n')+'\r\n';
 }
+// Every order line (+ no solicitados) on the cerrar event, so Admin → Proveedores computes fill rate from rec_events
+// alone. Zero / empty fields are left out (JSON drops undefined). excedente: pieces (blind count) or true (modo botones).
+function pdLineasTodas(rows){
+  return rows.map(r=>({ sku_key:r.sku, producto:r.producto, kgpz:r.kgpz, pedido:r.pedido, contado:r.count, recibido:r.rec,
+    excedente:r.exc||(r.excFlag?true:undefined), rechazadas:r.rech||undefined, motivo:r.rech?(r.motivo||undefined):undefined,
+    faltante:r.falt||undefined, no_solicitado:r.pns||undefined }));
+}
 async function pdCerrar(){
   if(S.closing) return;
   if(pdRows().some(r=>r.pend)) return;
@@ -3009,7 +3032,8 @@ async function pdCerrar(){
       modo:S.envio.modo||undefined, excedente:rows.filter(r=>!r.pns && (r.exc>0||r.excFlag)).length, rechazadas:rows.filter(r=>r.rech>0).length,
       faltantes:rows.filter(r=>r.falt>0).length, no_solicitados:rows.filter(r=>r.pns).length,
       lineas_dif:difs.map(r=>({ sku_key:r.sku, producto:r.producto, kgpz:r.kgpz, pedido:r.pedido, contado:r.count, recibido:r.rec,
-        excedente:r.exc||(r.excFlag?true:undefined), rechazadas:r.rech||undefined, motivo:r.motivo||undefined, faltante:r.falt||undefined, no_solicitado:r.pns||undefined })) } });
+        excedente:r.exc||(r.excFlag?true:undefined), rechazadas:r.rech||undefined, motivo:r.motivo||undefined, faltante:r.falt||undefined, no_solicitado:r.pns||undefined })),
+      lineas_todas:pdLineasTodas(rows) } });
     recordEvent(ev); S.closedInfo=closedState(); await flushAndWait();
     S.closing=false;
     toast(OUTBOX.length?'Recepción cerrada — se termina de subir al reconectar':'✓ Recepción cerrada', 3500);
@@ -3566,10 +3590,10 @@ async function admLogin(){
 }
 function admTab(t){ ADM.tab=t; renderAdmin(); }
 async function renderAdmin(){
-  const tabs=[['recep','Recepciones'],['cal','Calendario'],['resp','Respaldos'],['recept','Receptores'],['codigos','Códigos'],['slack','Slack'],['alert',`Alertas${ADM.alertCount?' ('+ADM.alertCount+')':''}`]];
+  const tabs=[['recep','Recepciones'],['cal','Calendario'],['prov','Proveedores'],['resp','Respaldos'],['recept','Receptores'],['codigos','Códigos'],['slack','Slack'],['alert',`Alertas${ADM.alertCount?' ('+ADM.alertCount+')':''}`]];
   document.getElementById('admin-body').innerHTML=`<div class="tabs">${tabs.map(([k,n])=>`<button class="choice ${ADM.tab===k?'sel':''}" onclick="admTab('${k}')">${n}</button>`).join('')}</div><div id="adm-tab"><div class="muted">Cargando…</div></div>`;
   admAlertCount();
-  try{ await ({ recep:admRecepciones, cal:admCalendario, resp:admRespaldos, recept:admReceptores, codigos:admCodigos, slack:admSlack, alert:admAlertas })[ADM.tab](); }
+  try{ await ({ recep:admRecepciones, cal:admCalendario, prov:admProveedores, resp:admRespaldos, recept:admReceptores, codigos:admCodigos, slack:admSlack, alert:admAlertas })[ADM.tab](); }
   catch(e){ document.getElementById('adm-tab').innerHTML=`<div class="err-box">${isNetErr(e)?'Sin conexión.':'Error: '+escapeHtml(e.message)}</div>`; }
 }
 async function admAlertCount(){
@@ -3736,6 +3760,227 @@ function admCodigosCsv(){
   const cols=['Producto','Código escaneado','Código en sistema (Retool)','El código escaneado aparece como','Veces','Hubs','Última fecha'];
   const body=_admCod.map(r=>[r.producto, r.escaneado, r.sistema, r.dice, r.veces, [...r.hubs].join(', '), r.ultima].map(csvCell).join(','));
   downloadText(`codigos-incorrectos_${todayStr()}_${ADM.codDias||7}d.csv`, [cols.map(csvCell).join(',')].concat(body).join('\r\n')+'\r\n');
+}
+
+/* ── Proveedores: supplier insights for comercial (view only). Closed pd-* receptions whose session fecha falls in the
+   range; latest close per session (a later reabrir / borrar hides it, as listCerradas). Lines come from
+   cerrar.lineas_todas; closes saved before it existed read their report CSV (PD_REPORT_COLS); if that can't be read the
+   reception still counts (recepciones, puntualidad) but is «sin detalle». Fill rate = Σ min(recibido, pedido) ÷ Σ pedido
+   over order lines (pz and kg summed as they come). Excedente in modo botones is a flag without a quantity. ── */
+const PV={ data:null, key:'', csv:new Map(), recs:[], prods:[] };
+const PV_MOTIVO_INV={ 'fecha corta':'fecha_corta', 'dañada':'danada' };
+function pvDefaults(){ if(!ADM.pvHasta){ const t=todayStr(); ADM.pvHasta=t; ADM.pvDesde=ymdAdd(t,-27); } if(ADM.pvHub==null) ADM.pvHub=''; }
+function pvLinesFromCsv(text){
+  const p=Papa.parse(stripBOM(String(text||'')), { header:true, skipEmptyLines:true });
+  return (p.data||[]).map(r=>{
+    const g=n=>String(pickCol(r,n)||'').trim(), num=n=>{ const v=parseNum(g(n)); return isNaN(v)?0:v; };
+    const exc=g('Excedente'), mot=g('Motivo').toLowerCase();
+    return { sku_key:skuKeyOf(cleanBC(g('Código')), g('Producto')), producto:g('Producto'), kgpz:g('Und')==='Kg'?'Kg':'Pz',
+      pedido:num('Pedido'), recibido:num('Recibido'), excedente:exc==='Sí'?true:(num('Excedente')||undefined),
+      rechazadas:num('Rechazadas')||undefined, motivo:PV_MOTIVO_INV[mot]||mot||undefined,
+      faltante:num('Faltante')||undefined, no_solicitado:g('Estado')==='No solicitado'||undefined };
+  }).filter(l=>l.producto);
+}
+async function pvLoad(){
+  const key=[ADM.pvDesde, ADM.pvHasta, ADM.pvHub].join('|');
+  if(PV.data && PV.key===key) return PV.data;
+  const evs=await pgSelectAll('rec_events', `tipo=in.(cerrar,admin)&area=like.pd-*&fecha=gte.${ADM.pvDesde}&fecha=lte.${ADM.pvHasta}`
+    +`${ADM.pvHub?`&hub=eq.${encodeURIComponent(ADM.pvHub)}`:''}&select=id,session_id,hub,area,fecha,tipo,receptor,detalle,ts&order=id.desc`);
+  const seen=new Map();
+  for(const e of evs){
+    if(seen.has(e.session_id) || (e.hub==='test-hub' && !IS_LOCAL)) continue;
+    const d=e.detalle||{};
+    if(e.tipo==='cerrar'){ if(d.proveedor) PD_NAMES[e.area]=d.proveedor; seen.set(e.session_id, Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id }, d)); }
+    else if(d.accion==='reabrir' || d.accion==='borrar') seen.set(e.session_id, null);
+  }
+  const recs=[...seen.values()].filter(Boolean).map(c=>({ info:c, prov:c.proveedor||areaName(c.area), lines:Array.isArray(c.lineas_todas)?c.lineas_todas:null, fuente:Array.isArray(c.lineas_todas)?'evento':null }));
+  await Promise.all(recs.filter(r=>!r.lines && r.info.reporte).map(async r=>{
+    if(!PV.csv.has(r.info.reporte)){ try{ PV.csv.set(r.info.reporte, pvLinesFromCsv(await sbFetch(r.info.reporte))); }catch(e){ if(isNetErr(e)) throw e; PV.csv.set(r.info.reporte, null); } }
+    r.lines=PV.csv.get(r.info.reporte); if(r.lines) r.fuente='reporte';
+  }));
+  recs.sort((a,b)=>b.info.fecha.localeCompare(a.info.fecha) || Date.parse(b.info.ts)-Date.parse(a.info.ts));
+  PV.key=key; PV.data=recs; return recs;
+}
+function pvNew(){ return { recs:0, sinDet:0, hubs:new Set(), lineas:0, completas:0, ped:0, ok:0, excL:0, excFlag:0, excQ:{}, rech:{}, rechL:0, faltL:0, faltQ:{}, pnsL:0, antes:0, aTiempo:0, tarde:0, diasTarde:0, sinFecha:0 }; }
+function pvAddQ(o,k,v){ o[k]=round2((o[k]||0)+(Number(v)||0)); }
+// Days between the order's delivery date and the reception (closest of the ticked OCs): <0 early, 0 on time, >0 late
+function pvDias(info){
+  let best=null; for(const f of (info.fechas_entrega||[]).filter(Boolean)){ const d=daysBetween(f, info.fecha); if(best==null || Math.abs(d)<Math.abs(best)) best=d; }
+  return best;
+}
+function pvAddRec(a, r){
+  a.recs++; a.hubs.add(r.info.hub);
+  const d=pvDias(r.info);
+  if(d==null) a.sinFecha++; else if(d<0) a.antes++; else if(d===0) a.aTiempo++; else { a.tarde++; a.diasTarde+=d; }
+  if(!r.lines){ a.sinDet++; return; }
+  for(const l of r.lines) pvAddLine(a, l);
+}
+function pvAddLine(a, l){
+  if(l.no_solicitado){ a.pnsL++; return; }
+  const P=Number(l.pedido)||0;
+  a.lineas++; a.ped+=P; a.ok+=Math.min(Number(l.recibido)||0, P);
+  if(!l.faltante && !l.rechazadas) a.completas++;
+  if(l.excedente){ a.excL++; if(typeof l.excedente==='number') pvAddQ(a.excQ, l.kgpz, l.excedente); else a.excFlag++; }
+  if(l.rechazadas){ const m=l.motivo||'otro', x=a.rech[m]||(a.rech[m]={ l:0, q:{} }); x.l++; a.rechL++; pvAddQ(x.q, l.kgpz, l.rechazadas); }
+  if(l.faltante){ a.faltL++; pvAddQ(a.faltQ, l.kgpz, l.faltante); }
+}
+const pvFr=a=>a.ped>0 ? a.ok/a.ped : null;
+const pvPct=(n,d)=>d ? (Math.round(n*1000/d)/10)+'%' : '—';
+function pvFrTxt(a){ const f=pvFr(a); return f==null?'—':(Math.round(f*1000)/10)+'%'; }
+function pvQ(o){ const p=[]; if(o.Pz) p.push(fmtQty(o.Pz,'Pz')+' pz'); if(o.Kg) p.push(fmtQty(o.Kg,'Kg')+' kg'); return p.join(' + ')||'0'; }
+const pvWeek=ymd=>ymdAdd(ymd, -ymdDow(ymd));
+const PV_RECH=[['fecha_corta','Fecha corta'],['danada','Dañada']];
+function pvRechL(a, m){ return a.rech[m]?a.rech[m].l:0; }
+// Chips for one supplier / product: only what happened
+function pvChips(a, prod){
+  const c=[];
+  if(a.excL) c.push(prod?`Excedente ${a.excL}`:`Excedente ${a.excL} de ${a.lineas} línea${a.lineas===1?'':'s'}`);
+  for(const [m,n] of PV_RECH) if(pvRechL(a,m)) c.push(`${n} ${a.rech[m].l}`);
+  for(const m of Object.keys(a.rech)) if(!PV_RECH.some(x=>x[0]===m)) c.push(`Rechazo ${a.rech[m].l}`);
+  if(a.faltL) c.push(`Faltante ${a.faltL}`);
+  if(a.pnsL) c.push(`No solicitados ${a.pnsL}`);
+  if(a.tarde) c.push(`Tarde ${a.tarde} de ${a.recs}`);
+  return c.map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join(' ');
+}
+function pvBar(a){ const f=pvFr(a); return `<div class="pv-bar"><i style="width:${f==null?0:Math.min(100,f*100).toFixed(1)}%"></i></div>`; }
+function pvByProv(recs){
+  const m=new Map();
+  for(const r of recs){ if(!m.has(r.prov)) m.set(r.prov, pvNew()); pvAddRec(m.get(r.prov), r); }
+  return m;
+}
+// Per product of the given receptions: aggregate + history (key = proveedor|sku_key; latest name wins)
+function pvProducts(recs){
+  const m=new Map();
+  for(const r of recs){ if(!r.lines) continue;
+    for(const l of r.lines){
+      const k=r.prov+'|'+l.sku_key;
+      let p=m.get(k); if(!p){ p=Object.assign(pvNew(), { prov:r.prov, sku:l.sku_key, producto:l.producto, kgpz:l.kgpz, veces:0, hist:[] }); m.set(k, p); }
+      p.veces++; pvAddLine(p, l); p.hist.push({ r, l });
+    }
+  }
+  return [...m.values()];
+}
+const pvIssues=p=>p.excL+p.rechL+p.faltL+p.pnsL;
+function pvLineTxt(l){
+  const q=v=>fmtQty(v,l.kgpz), u=unitOf(l.kgpz);
+  if(l.no_solicitado) return 'No solicitado'+(typeof l.excedente==='number'?` · ${q(l.excedente)} ${u} devueltas`:'')+' (se rechazó)';
+  const p=[`Pedido ${q(l.pedido)} ${u}`, `Recibido ${q(l.recibido)}`];
+  if(l.excedente) p.push(typeof l.excedente==='number'?`Excedente ${q(l.excedente)} (devuelto)`:'Llegó excedente (rechazado)');
+  if(l.rechazadas) p.push(`Rechazadas ${q(l.rechazadas)} (${PD_MOTIVO[l.motivo]||l.motivo||'sin motivo'})`);
+  if(l.faltante) p.push(`Faltan ${q(l.faltante)}`);
+  return p.join(' · ');
+}
+function pvFecha(k, v){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
+  if(k==='desde') ADM.pvDesde=v; else ADM.pvHasta=v;
+  if(ADM.pvDesde>ADM.pvHasta){ if(k==='desde') ADM.pvHasta=v; else ADM.pvDesde=v; }
+  renderAdmin();
+}
+function pvRango(v){
+  const t=todayStr();
+  if(v==='mes'){ ADM.pvDesde=t.slice(0,7)+'-01'; ADM.pvHasta=t; }
+  else if(v==='mesant'){ const ini=ymdAdd(t.slice(0,7)+'-01',-1).slice(0,7)+'-01'; ADM.pvDesde=ini; ADM.pvHasta=ymdAdd(t.slice(0,7)+'-01',-1); }
+  else if(v){ ADM.pvDesde=ymdAdd(t,-(Number(v)-1)); ADM.pvHasta=t; }
+  renderAdmin();
+}
+function pvVer(i){ ADM.pvSel=PV.provs[i]; renderAdmin(); window.scrollTo(0,0); }
+function pvVolver(){ ADM.pvSel=null; renderAdmin(); }
+async function admProveedores(){
+  pvDefaults();
+  const el=document.getElementById('adm-tab'), t=todayStr();
+  const pre=[['28','Últimas 4 semanas'],['56','Últimas 8 semanas'],['91','Últimas 13 semanas'],['mes','Este mes'],['mesant','Mes pasado']];
+  const preSel=pre.find(([k])=>k==='mes'?ADM.pvDesde===t.slice(0,7)+'-01'&&ADM.pvHasta===t:k==='mesant'?false:ADM.pvHasta===t&&ADM.pvDesde===ymdAdd(t,-(Number(k)-1)));
+  const filtros=`<div class="filters"><select onchange="ADM.pvHub=this.value;renderAdmin()" aria-label="Hub"><option value="">Todos los hubs</option>${ADM_HUBS().map(x=>`<option value="${x.slug}" ${ADM.pvHub===x.slug?'selected':''}>${escapeHtml(x.name)}</option>`).join('')}</select>
+      <select onchange="pvRango(this.value)" aria-label="Periodo"><option value="">${preSel?'Otro periodo':'Periodo elegido'}</option>${pre.map(([k,n])=>`<option value="${k}" ${preSel&&preSel[0]===k?'selected':''}>${n}</option>`).join('')}</select></div>
+    <div class="adm-field pv-fechas" style="margin:0 0 6px"><span>Del</span><input type="date" value="${ADM.pvDesde}" onchange="pvFecha('desde',this.value)" aria-label="Desde"><span>al</span><input type="date" value="${ADM.pvHasta}" onchange="pvFecha('hasta',this.value)" aria-label="Hasta"></div>`;
+  el.innerHTML=filtros+'<div class="muted">Cargando recepciones…</div>';
+  const recs=await pvLoad();
+  if(ADM.tab!=='prov') return;
+  const byProv=pvByProv(recs);
+  PV.provs=[...byProv.keys()];
+  if(ADM.pvSel && byProv.has(ADM.pvSel)) return pvDetalle(el, filtros, recs.filter(r=>r.prov===ADM.pvSel), byProv.get(ADM.pvSel));
+  ADM.pvSel=null;
+  const tot=pvNew(); recs.forEach(r=>pvAddRec(tot, r));
+  let h=filtros+`<div class="muted" style="font-size:13px">Recepciones de proveedor directo cerradas, por fecha de la recepción. Fill rate = lo recibido (sin pasar de lo pedido) ÷ lo pedido.</div>`;
+  if(!recs.length){ el.innerHTML=h+'<div class="empty-hint" style="margin-top:12px">Sin recepciones de proveedor cerradas en este periodo.</div>'; return; }
+  h+=`<div class="stat-grid">
+    <div class="stat"><div class="stat-n" style="color:var(--c-teal-dark)">${pvFrTxt(tot)}</div><div class="stat-l">fill rate</div></div>
+    <div class="stat"><div class="stat-n">${tot.recs}</div><div class="stat-l">recepciones · ${byProv.size} proveedor${byProv.size===1?'':'es'}</div></div>
+    <div class="stat"><div class="stat-n">${pvPct(tot.excL, tot.lineas)}</div><div class="stat-l">líneas con excedente</div></div>
+    <div class="stat"><div class="stat-n">${pvPct(tot.aTiempo, tot.recs-tot.sinFecha)}</div><div class="stat-l">entregas el día programado</div></div></div>`;
+  if(tot.sinDet) h+=`<div class="warn-box">${tot.sinDet} recepción(es) sin detalle por producto (no se pudo leer su reporte): cuentan en recepciones y puntualidad, no en fill rate.</div>`;
+  h+=`<div class="row2" style="margin-bottom:6px"><button class="btn btn-secondary" onclick="pvCsv('prov')">CSV por proveedor</button><button class="btn btn-secondary" onclick="pvCsv('prod')">CSV por producto</button></div>`;
+  const orden=[...byProv.entries()].map(([p,a],i)=>({ p, a, i:PV.provs.indexOf(p) })).sort((x,y)=>(pvFr(x.a)??2)-(pvFr(y.a)??2) || y.a.recs-x.a.recs || x.p.localeCompare(y.p));
+  h+=`<div class="section-title">Proveedores · peor fill rate primero</div>`+orden.map(({p,a,i})=>`<div class="adm-row pv-row" role="button" tabindex="0" onclick="pvVer(${i})" onkeydown="if(event.key==='Enter')pvVer(${i})">
+      <div class="pv-head"><b>${escapeHtml(p)}</b><span class="pv-fr">${pvFrTxt(a)}</span></div>${pvBar(a)}
+      <div class="muted" style="font-size:12px">${a.recs} recepci${a.recs===1?'ón':'ones'} · ${a.lineas} líneas · ${escapeHtml([...a.hubs].map(hubName).join(', '))}${a.sinDet?` · ${a.sinDet} sin detalle`:''}</div>
+      <div class="pv-chips">${pvChips(a)||'<span class="tag green">Sin diferencias</span>'}</div></div>`).join('');
+  el.innerHTML=h;
+}
+function pvDetalle(el, filtros, recs, a){
+  const prov=ADM.pvSel, prods=pvProducts(recs);
+  prods.sort((x,y)=>(pvFr(x)??2)-(pvFr(y)??2) || pvIssues(y)-pvIssues(x) || x.producto.localeCompare(y.producto));
+  PV.recs=recs; PV.prods=prods;
+  const conFecha=a.recs-a.sinFecha;
+  let h=`<button class="link-btn" style="margin:0 0 4px;padding-left:0" onclick="pvVolver()">← Todos los proveedores</button>${filtros}
+    <h2>${escapeHtml(prov)}</h2><div class="muted" style="font-size:13px">${fechaLarga(ADM.pvDesde)} – ${fechaLarga(ADM.pvHasta)} · ${escapeHtml([...a.hubs].map(hubName).join(', '))}</div>
+    <div class="stat-grid">
+    <div class="stat"><div class="stat-n" style="color:var(--c-teal-dark)">${pvFrTxt(a)}</div><div class="stat-l">fill rate · ${a.lineas} líneas</div></div>
+    <div class="stat"><div class="stat-n">${a.recs}</div><div class="stat-l">recepciones${a.sinDet?` · ${a.sinDet} sin detalle`:''}</div></div>
+    <div class="stat"><div class="stat-n">${pvPct(a.completas, a.lineas)}</div><div class="stat-l">líneas completas</div></div>
+    <div class="stat"><div class="stat-n">${pvPct(a.excL, a.lineas)}</div><div class="stat-l">líneas con excedente · ${a.excL} de ${a.lineas}${Object.keys(a.excQ).length?` · ${pvQ(a.excQ)} de más`:''}</div></div>
+    ${PV_RECH.map(([m,n])=>`<div class="stat"><div class="stat-n">${pvRechL(a,m)}</div><div class="stat-l">líneas con rechazo: ${n.toLowerCase()}${pvRechL(a,m)?' · '+pvQ(a.rech[m].q):''}</div></div>`).join('')}
+    <div class="stat"><div class="stat-n">${a.faltL}</div><div class="stat-l">líneas con faltante${a.faltL?' · '+pvQ(a.faltQ):''}</div></div>
+    <div class="stat"><div class="stat-n">${a.pnsL}</div><div class="stat-l">productos no solicitados</div></div>
+    <div class="stat" style="grid-column:1 / -1"><div class="stat-n">${pvPct(a.aTiempo, conFecha)}</div><div class="stat-l">el día programado (${a.aTiempo} de ${conFecha}) · ${a.antes} antes · ${a.tarde} tarde${a.tarde?` (promedio ${Math.round(a.diasTarde*10/a.tarde)/10} día${a.diasTarde===a.tarde?'':'s'})`:''}</div></div></div>`
+    +(a.excFlag?`<div class="muted" style="font-size:12px">${a.excFlag} línea${a.excFlag===1?'':'s'} con excedente sin cantidad: en las recepciones con botones el excedente se marca, no se cuenta.</div>`:'');
+  // Weekly trend: every week of the range, Monday first
+  const wk=new Map(); recs.forEach(r=>{ const w=pvWeek(r.info.fecha); if(!wk.has(w)) wk.set(w, pvNew()); pvAddRec(wk.get(w), r); });
+  h+=`<div class="section-title">Por semana (fill rate)</div>`;
+  for(let w=pvWeek(ADM.pvHasta); w>=pvWeek(ADM.pvDesde); w=ymdAdd(w,-7)){
+    const x=wk.get(w);
+    h+=`<div class="pv-week"><span>${fechaLarga(w).replace(/ de (\w{3})\w*/,' $1')}</span>${x?pvBar(x):'<div class="pv-bar"></div>'}<b>${x?pvFrTxt(x):''}</b></div>
+      <div class="pv-week-sub">${x?`${x.recs} recepci${x.recs===1?'ón':'ones'}${x.excL?` · excedente ${x.excL}`:''}${x.rechL?` · rechazo ${x.rechL}`:''}${x.faltL?` · faltante ${x.faltL}`:''}${x.tarde?` · ${x.tarde} tarde`:''}`:'sin entregas'}</div>`;
+  }
+  h+=`<div class="section-title">Recepciones · ${recs.length}</div>`+recs.map((r,i)=>{ const x=pvNew(); pvAddRec(x, r); const d=pvDias(r.info);
+    return `<div class="adm-row"><div class="pv-head"><b>${fechaLarga(r.info.fecha)} · ${escapeHtml(hubName(r.info.hub))}</b><span class="pv-fr">${pvFrTxt(x)}</span></div>
+      <div class="muted" style="font-size:12px">${r.info.num_oc&&r.info.num_oc.length?'OC '+r.info.num_oc.map(escapeHtml).join(', ')+' · ':''}${d==null?'sin fecha programada':d===0?'el día programado':d<0?`${-d} día${d===-1?'':'s'} antes`:`${d} día${d===1?'':'s'} tarde`}${r.info.modo==='botones'?' · botones':''}${!r.lines?' · sin detalle':r.fuente==='reporte'?' · leído del reporte':''}</div>
+      <div class="pv-chips">${pvChips(Object.assign(x,{tarde:0}))}</div>
+      <div class="btns"><button class="btn btn-secondary" onclick="openRecepcion(PV.recs[${i}].info,'admin')">Ver</button></div></div>`; }).join('');
+  h+=`<div class="section-title">Productos · ${prods.length} · peor fill rate primero</div>
+    <button class="btn btn-secondary btn-block" style="margin-bottom:8px" onclick="pvCsv('prod', ${PV.provs.indexOf(prov)})">CSV de productos de ${escapeHtml(prov)}</button>`
+    +prods.map(p=>`<details class="adm-row pv-prod"><summary><div class="pv-head"><b>${nameHtml(p.producto)}</b><span class="pv-fr">${p.lineas?pvFrTxt(p):'—'}</span></div>
+      <div class="muted" style="font-size:12px">${p.lineas?`Pedido ${p.lineas} ve${p.lineas===1?'z':'ces'} · ${pvQ({[p.kgpz]:p.ped})} pedidas · ${pvQ({[p.kgpz]:p.ok})} recibidas`:'No estaba en la orden'}</div>
+      <div class="pv-chips">${pvChips(p, true)}</div></summary>
+      ${p.hist.map(({r,l})=>`<div class="pv-hist"><b>${fechaLarga(r.info.fecha)} · ${escapeHtml(hubName(r.info.hub))}</b> — ${escapeHtml(pvLineTxt(l))}</div>`).join('')}</details>`).join('');
+  el.innerHTML=h;
+}
+function pvCsv(kind, provIdx){
+  const recs=PV.data||[], rango=`${ADM.pvDesde}_${ADM.pvHasta}`, hub=ADM.pvHub?hubName(ADM.pvHub):'Todos los hubs';
+  const n=v=>String(round2(v)), pct=(a,b)=>b?String(Math.round(a*1000/b)/10):'', q=(o,k)=>o[k]?n(o[k]):'';
+  let cols, rows, name;
+  if(kind==='prov'){
+    cols=['Proveedor','Hubs','Desde','Hasta','Recepciones','Recepciones sin detalle','Líneas pedidas','Pedido','Recibido (hasta lo pedido)','Fill rate %','Líneas completas %',
+      'Líneas con excedente','Líneas con excedente %','Excedente contado pz','Excedente contado kg','Excedente sin cantidad (líneas)',
+      'Rechazo fecha corta (líneas)','Rechazo fecha corta pz','Rechazo fecha corta kg','Rechazo dañada (líneas)','Rechazo dañada pz','Rechazo dañada kg',
+      'Faltante (líneas)','Faltante pz','Faltante kg','No solicitados (líneas)','Entregas el día programado','Entregas antes','Entregas tarde','Días tarde promedio'];
+    rows=[...pvByProv(recs).entries()].sort((x,y)=>x[0].localeCompare(y[0])).map(([p,a])=>{ const R=m=>a.rech[m]||{ l:0, q:{} };
+      return [p, [...a.hubs].map(hubName).join(', '), ADM.pvDesde, ADM.pvHasta, a.recs, a.sinDet, a.lineas, n(a.ped), n(a.ok), a.ped?pct(a.ok,a.ped):'', pct(a.completas,a.lineas),
+        a.excL, pct(a.excL,a.lineas), q(a.excQ,'Pz'), q(a.excQ,'Kg'), a.excFlag||'',
+        R('fecha_corta').l, q(R('fecha_corta').q,'Pz'), q(R('fecha_corta').q,'Kg'), R('danada').l, q(R('danada').q,'Pz'), q(R('danada').q,'Kg'),
+        a.faltL, q(a.faltQ,'Pz'), q(a.faltQ,'Kg'), a.pnsL, a.aTiempo, a.antes, a.tarde, a.tarde?String(Math.round(a.diasTarde*10/a.tarde)/10):'']; });
+    name=`proveedores_${fileSafe(hub)}_${rango}.csv`;
+  } else {
+    const prov=provIdx==null?null:PV.provs[provIdx];
+    cols=['Proveedor','Código','Producto','Und','Veces pedido','Pedido','Recibido (hasta lo pedido)','Fill rate %','Veces completo','Veces con excedente','Excedente contado',
+      'Veces con rechazo fecha corta','Rechazadas fecha corta','Veces con rechazo dañada','Rechazadas dañada','Veces con faltante','Faltante','Veces no solicitado','Hubs','Desde','Hasta'];
+    rows=pvProducts(prov?recs.filter(r=>r.prov===prov):recs).sort((x,y)=>x.prov.localeCompare(y.prov) || x.producto.localeCompare(y.producto)).map(p=>{ const R=m=>p.rech[m]||{ l:0, q:{} };
+      return [p.prov, p.sku.startsWith('name:')?'':p.sku, p.producto, p.kgpz, p.lineas, n(p.ped), n(p.ok), p.ped?pct(p.ok,p.ped):'', p.completas, p.excL, q(p.excQ,p.kgpz),
+        R('fecha_corta').l, q(R('fecha_corta').q,p.kgpz), R('danada').l, q(R('danada').q,p.kgpz), p.faltL, q(p.faltQ,p.kgpz), p.pnsL,
+        [...new Set(p.hist.map(x=>hubName(x.r.info.hub)))].join(', '), ADM.pvDesde, ADM.pvHasta]; });
+    name=`productos-proveedor_${fileSafe(prov||hub)}_${rango}.csv`;
+  }
+  downloadText(name, [cols.map(csvCell).join(',')].concat(rows.map(r=>r.map(csvCell).join(','))).join('\r\n')+'\r\n');
 }
 
 /* ── Respaldos: every uploaded envío file stays in storage; an old one can be made active again ── */

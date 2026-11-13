@@ -120,6 +120,16 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   cerrar, report, Slack, Recepciones serve both modes). Scan → `pdBScan` (jump to the line, or flag `no_solicitado`).
   `pdBRenderResumen`; «Copiar lista para el sistema» (`pdCopiarFacturar`). Report Excedente = «Sí». Receptions opened
   before keep the count flow.
+- **Supplier insights (2026-11-13)** — every pd `cerrar` stores `detalle.lineas_todas` (`pdLineasTodas`): one object per
+  order line + no solicitados {sku_key, producto, kgpz, pedido, contado, recibido, excedente (pieces, or `true` in modo
+  botones), rechazadas, motivo, faltante, no_solicitado}; zero fields omitted. `lineas_dif` stays for old readers. No motivo
+  for separated excess (it would cost the receptor a step in both modes). Admin → **Proveedores** (`admProveedores`, view
+  only, state `ADM.pvDesde/pvHasta/pvHub/pvSel`, data `PV`): closed `pd-*` sessions by session fecha (latest cerrar; reabrir/
+  borrar hide it); closes without `lineas_todas` read their report CSV (`pvLinesFromCsv`, cached in `PV.csv`), else «sin
+  detalle» (counted in recepciones/puntualidad only). Fill rate = Σ min(recibido, pedido) ÷ Σ pedido over order lines (pz
+  and kg summed as they come); puntualidad = session fecha vs the closest `fechas_entrega` (antes / el día / tarde).
+  Supplier list (worst fill rate first) → detail (`pvDetalle`: KPIs, weekly trend Monday-first, receptions, products with
+  per-reception history) and CSVs `pvCsv('prov'|'prod'[, provIdx])`.
 
 ## How the code is laid out (index.html)
 - Helpers copied from armado-CH sit at the top, each block labelled. Our additions: `codeKey` (cleanBC + strip

@@ -224,6 +224,12 @@ Answers = `confirmacion` with `detalle.marca` (completo|faltante|excedente|recha
 to answer, the differences (editable) and «Antes de que se vaya el camión» with «Copiar lista para el sistema» (Código,
 Producto, Recibido for Retool). Report: Excedente column = «Sí» for the flag; `cerrar.modo='botones'`.
 
+### 6.7 Supplier insights (2026-11-13)
+`cerrar.lineas_todas` keeps every order line, so fill rate comes from `rec_events` alone (older closes: the report CSV).
+Admin → Proveedores, per supplier with hub + date filters: recepciones, fill rate, líneas completas, % líneas con excedente
+(pieces only where they were counted; botones marks it without a quantity), rechazos by motivo, faltantes, no solicitados,
+puntualidad vs the programmed date, a weekly trend, a product drill-down and CSVs (per supplier, per product) for comercial.
+
 ## 7. Events
 
 - `scan.cantidad` = the counted pieces. New in `scan` detalle: `pns:true` (code not in the order when scanned),
