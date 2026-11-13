@@ -162,6 +162,12 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .banner.blue{background:var(--c-white);color:var(--c-ink);font-size:16px;font-weight:700}
 .banner.gray{background:var(--c-white);color:var(--c-muted)}
 .banner.yellow{background:var(--c-ink);color:var(--c-white)}
+.temp-chip{font-size:13px;font-weight:700;background:var(--c-teal-light);color:var(--c-teal-dark);border-radius:var(--r-pill);padding:4px 12px}
+.pd-exc{background:var(--c-ink);color:var(--c-white);border-radius:var(--r-md);padding:16px;margin:4px 0 10px}
+.pd-exc-big{font-size:24px;font-weight:800;letter-spacing:-.02em;line-height:1.15}
+.pd-exc p{margin:6px 0 12px;font-size:14px;line-height:1.4}
+.pd-exc .btn-warn{background:var(--c-white);color:var(--c-ink)}
+.pd-exc .btn+.btn{margin-top:8px}
 .cad-box{background:var(--c-white);border-radius:var(--r-md);padding:8px 8px 8px 14px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
 .cad-main{flex:1;min-width:0;font-size:15px;font-weight:800;line-height:1.2;font-variant-numeric:tabular-nums}
 .cad-main small{display:block;font-size:12px;font-weight:600;color:var(--c-muted);white-space:nowrap}
@@ -1156,23 +1162,27 @@ function pdContactos(prov){
   const comprador=(ords.find(o=>o.comprador)||{}).comprador || (c&&c[1].comprador) || '';
   return { comercial, comprador };
 }
-function pdTel(nombre){
-  const t=(INI.pd&&INI.pd.data&&INI.pd.data.telefonos)||{};
-  const k=Object.keys(t).find(n=>sameName(n, nombre));
-  return k ? String(t[k]).replace(/[^\d+]/g,'') : '';
-}
 const NOMBRE_TITLE=s=>String(s||'').toLowerCase().replace(/(^|\s)\S/g,m=>m.toUpperCase());
 // «Contacta a Catalina (comercial) o Borjas (compras)» + Llamar links. No Comercial → the abastecimiento Slack channel.
-function pdContactoHtml(prov){
-  const { comercial, comprador }=pdContactos(prov);
+function pdContactoHtml(prov){ return pdContactoFrom(pdContactos(prov), (INI.pd&&INI.pd.data&&INI.pd.data.telefonos)||{}); }
+
+function isPd(){ return !!(S.envio && S.envio.origen==='proveedor'); }
+// Temp from the sheet: «Ambiente», «1» (refrigerado), «-18» (congelado)
+function tempLabel(t){
+  const s=String(t||'').trim(); if(!s) return '';
+  if(/^amb/i.test(s)) return 'Ambiente';
+  const n=Number(s); if(!isFinite(n)) return '';
+  return (n<=-5?'Congelado ':'Refrigerado ')+String(n).replace('-','−')+' °C';
+}
+// Contact line for Recibir (names from the snapshot, phones from the live bridge answer only)
+function pdContactoFrom({ comercial, comprador }, telefonos){
+  const tel=n=>{ const k=Object.keys(telefonos||{}).find(x=>sameName(x, n)); return k?String(telefonos[k]).replace(/[^\d+]/g,''):''; };
   const comp=comprador?NOMBRE_TITLE(comprador):'';
-  let txt;
-  if(comercial) txt=`contacta a <b>${escapeHtml(comercial)}</b> (comercial)${comp?` o <b>${escapeHtml(comp)}</b> (compras)`:''}`;
-  else txt=`contacta al equipo comercial en el canal de abastecimiento en Slack${comp?` o a <b>${escapeHtml(comp)}</b> (compras)`:''}`;
-  const links=[comercial, comp].filter(Boolean).map(n=>{ const tel=pdTel(n); return tel?`<a class="btn pd-call" href="tel:${escapeHtml(tel)}">Llamar a ${escapeHtml(n)}</a>`:''; }).join('');
+  const txt = comercial ? `contacta a <b>${escapeHtml(comercial)}</b> (comercial)${comp?` o <b>${escapeHtml(comp)}</b> (compras)`:''}`
+    : `contacta al equipo comercial en el canal de abastecimiento en Slack${comp?` o a <b>${escapeHtml(comp)}</b> (compras)`:''}`;
+  const links=[comercial, comp].filter(Boolean).map(n=>{ const t=tel(n); return t?`<a class="btn pd-call" href="tel:${escapeHtml(t)}">Llamar a ${escapeHtml(n)}</a>`:''; }).join('');
   return { txt, links: links?`<div style="display:flex;gap:8px;margin-top:10px">${links}</div>`:'' };
 }
-
 function pdStepHtml(){
   const P=INI.pd;
   if(P===undefined) return `<div class="muted">Leyendo las órdenes de proveedor…</div>`;
@@ -1270,8 +1280,22 @@ async function pdEmpezar(){
       INI.pd.data.ordenes=INI.pd.data.ordenes.filter(o=>!sameName(o.proveedor, prov)).concat(d.ordenes);
       pdDefaultSel(); toast('La orden cambió en el archivo de compras: revisa y vuelve a empezar', 4500); return;
     }
+    const now=serverNow(), fecha=localDateStr(now);
+    const session_id=`${slug}__${area}__${fecha}__${now.getTime()}`;
+    const data=pdBuildEnvio({ slug, prov, area, ocs, d, session_id, session_fecha:fecha, receptor:INI.receptor, comercial:pdContactos(prov).comercial, comprador:pdContactos(prov).comprador });
+    await sbUpload(data._path, JSON.stringify(data), 'application/json');
+    INI.area=area;
+    openRecibir(data);
+    recordEvent(makeEvent('abrir', { detalle:{ envio:data._path, origen:'proveedor', proveedor:prov, ocs:data.orden.ocs.map(o=>o.key),
+      num_oc:data.orden.num_oc, fechas_entrega:data.orden.fechas_entrega, lineas:data.lines.length } }));
+    toast(`✓ Recepción de ${prov}. Empieza a escanear.`);
+  }catch(e){
+    toast(isNetErr(e)?'Sin conexión: no se pudo empezar. Intenta de nuevo.':'No se pudo empezar ('+e.message+')', 4500);
+  }finally{ INI.pdBusy=false; if(screenActive('screen-inicio')) renderInicio(); }
+}
+// The reception's envío = a copy of the ticked OCs (§6.2): lines summed per sku_key, catalog for products not ordered.
+function pdBuildEnvio({ slug, prov, area, ocs, d, session_id, session_fecha, receptor, comercial, comprador }){
     const now=serverNow(), epochMs=now.getTime(), fecha=localDateStr(now);
-    // lines of every ticked OC, summed per product
     const by=new Map();
     for(const o of ocs) for(const l of o.lineas){
       const barcode=cleanBC(l.codigo).replace(/\s+/g,''), sku_key=skuKeyOf(barcode, l.producto);
@@ -1282,26 +1306,78 @@ async function pdEmpezar(){
     }
     const lines=[...by.values()];
     const catalogo=(d.catalogo||[]).filter(c=>!by.has(skuKeyOf(cleanBC(c.codigo), c.producto))).map(c=>[c.producto, cleanBC(c.codigo), normKgPz(c.kgpz), null]);
-    const { comercial, comprador }=pdContactos(prov);
-    const session_id=`${slug}__${area}__${fecha}__${epochMs}`, base=`envios/${slug}/${area}/${fecha}__${epochMs}`;
+    const base=`envios/${slug}/${area}/${fecha}__${epochMs}`;
     const ocInfo=ocs.map(o=>({ num_oc:o.num_oc||'', fecha_entrega:o.fecha_entrega, key:pdKey(o) }));
-    const data={ v:1, origen:'proveedor', hub:slug, area, fecha, epochMs, uploadedAt:now.toISOString(), receptor:INI.receptor,
-      sourceFile:'', session_id, session_fecha:fecha,
+    const data={ v:1, origen:'proveedor', hub:slug, area, fecha, epochMs, uploadedAt:now.toISOString(), receptor,
+      sourceFile:'', session_id, session_fecha,
       // names only: phones stay in the bridge's live answer (never stored)
       orden:{ proveedor:prov, ocs:ocInfo, num_oc:ocInfo.map(o=>o.num_oc).filter(Boolean), fechas_entrega:[...new Set(ocs.map(o=>o.fecha_entrega))].sort(),
               leido:d.leido||null, comercial, comprador },
       stats:{ lineas:lines.length, kg:lines.filter(l=>l.kgpz==='Kg').length, sinCodigo:lines.filter(l=>!l.barcode).length, catalogo:catalogo.length, renglones:ocs.reduce((n,o)=>n+o.lineas.length,0) },
       lines, catalogo };
-    await sbUpload(base+'.json', JSON.stringify(data), 'application/json');
     data._path=base+'.json';
-    INI.area=area;
-    openRecibir(data);
-    recordEvent(makeEvent('abrir', { detalle:{ envio:base+'.json', origen:'proveedor', proveedor:prov, ocs:ocInfo.map(o=>o.key),
-      num_oc:data.orden.num_oc, fechas_entrega:data.orden.fechas_entrega, lineas:lines.length } }));
-    toast(`✓ Recepción de ${prov}. Empieza a escanear.`);
+    return data;
+}
+const pdFirma=lines=>lines.map(l=>l.sku_key+'='+l.esperado+'@'+(l.caducidad_min||'')).sort().join('|');
+
+/* ── Recibir extras (§6.3): live contacts, re-read, other open orders of the same supplier ── */
+async function pdRecibirLive(){
+  if(!isPd()) return;
+  const sid=S.session.id, prov=S.envio.orden.proveedor;
+  try{
+    const [d, ses]=await Promise.all([ pdFetch(S.hub, { prov }), pdSesiones(S.hub).catch(()=>null) ]);
+    if(!S.session || S.session.id!==sid) return;
+    S.pdTel=d.telefonos; S.pdLeido=d.leido;
+    pdOtrasDe(d, ses); renderRecibir();
+  }catch(_){}
+}
+function pdOtrasDe(d, ses){
+  const keys=new Set(S.envio.orden.ocs.map(o=>o.key));
+  S.pdOtras=d.ordenes.filter(o=>!keys.has(pdKey(o)) && !(ses && ses.recibidas.has(pdKey(o))));
+}
+// «Volver a leer la orden»: same OCs, fresh from the sheet. A change writes a new snapshot in the same session
+// (reemplazo, orden_releida) and every line is recomputed; the counts never move (they are physical).
+async function pdReleerRecepcion(extraKey){
+  if(!isPd() || S.pdBusy) return;
+  if(S.closedInfo){ toast('Esta recepción ya se cerró'); return; }
+  const sid=S.session.id, prov=S.envio.orden.proveedor, slug=S.hub, area=S.area;
+  S.pdBusy=true; renderRecibir();
+  try{
+    const [d, ses]=await Promise.all([ pdFetch(slug, { prov, fresh:true }), pdSesiones(slug).catch(()=>null) ]);
+    if(!S.session || S.session.id!==sid) return;
+    S.pdTel=d.telefonos; S.pdLeido=d.leido;
+    const keys=new Set(S.envio.orden.ocs.map(o=>o.key)); if(extraKey) keys.add(extraKey);
+    const ocs=d.ordenes.filter(o=>keys.has(pdKey(o)));
+    if(!ocs.length){ pdOtrasDe(d, ses); toast('La orden ya no aparece en el archivo de compras. Se conserva la copia actual.', 5000); return; }
+    const data=pdBuildEnvio({ slug, prov, area, ocs, d, session_id:sid, session_fecha:S.session.fecha, receptor:S.receptor,
+      comercial:S.envio.orden.comercial, comprador:S.envio.orden.comprador });
+    const cambio=pdFirma(data.lines)!==pdFirma(S.envio.lines) || ocs.length!==S.envio.orden.ocs.length;
+    if(!cambio){ pdOtrasDe(d, ses); toast('La orden no cambió'); return; }
+    await sbUpload(data._path, JSON.stringify(data), 'application/json');
+    const anterior=S.envio._path;
+    setEnvio(data); buildCatalog(); fold(); pdOtrasDe(d, ses);
+    if(S.current && !S.current.recount){ const l=S.lines.get(S.current.p.sku_key); S.current.p = l ? Object.assign({}, l, { enEnvio:true }) : Object.assign({}, S.current.p, { enEnvio:false, pns:true }); S.current.exc=null; }
+    recordEvent(makeEvent('reemplazo', { detalle:{ envio:data._path, anterior, orden_releida:true, ocs:data.orden.ocs.map(o=>o.key),
+      num_oc:data.orden.num_oc, fechas_entrega:data.orden.fechas_entrega, lineas:data.lines.length, proveedor:prov } }));
+    toast(extraKey?'✓ Orden agregada: todo se volvió a comparar':'✓ Orden actualizada: todo se volvió a comparar', 3500);
   }catch(e){
-    toast(isNetErr(e)?'Sin conexión: no se pudo empezar. Intenta de nuevo.':'No se pudo empezar ('+e.message+')', 4500);
-  }finally{ INI.pdBusy=false; if(screenActive('screen-inicio')) renderInicio(); }
+    toast(isNetErr(e)?'Sin conexión: no se pudo leer la orden':'No se pudo leer la orden ('+e.message+')', 4500);
+  }finally{ S.pdBusy=false; if(S.session && S.session.id===sid) renderRecibir(); }
+}
+// «Parece que la orden no corresponde»: 3 of the first 5 products scanned aren't in it (advisory, §6.3)
+function pdOrdenDudosa(){
+  const seen=[];
+  for(const e of S.events){ if(e.tipo!=='scan' || seen.includes(e.sku_key)) continue; seen.push(e.sku_key); if(seen.length===5) break; }
+  return seen.filter(k=>!S.lines.has(k)).length>=3;
+}
+function pdRecibirBannerHtml(){
+  const o=S.envio.orden, c=pdContactoFrom(o, S.pdTel);
+  let h='';
+  if(pdOrdenDudosa()) h+=`<div class="warn-box"><b>Parece que la orden no corresponde a esta entrega.</b> ${c.txt.replace(/^c/,'C')}.${c.links}
+    <button class="btn btn-warn btn-block" ${S.pdBusy?'disabled':''} onclick="pdReleerRecepcion()">${S.pdBusy?'Leyendo la orden…':'Volver a leer la orden'}</button></div>`;
+  for(const x of (S.pdOtras||[])) h+=`<div class="note">También hay otra orden de <b>${escapeHtml(o.proveedor)}</b>: ${x.num_oc?'OC '+escapeHtml(x.num_oc)+' · ':''}${x.lineas.length} producto${x.lineas.length===1?'':'s'} · ${pdFechaLabel(x.fecha_entrega)}. Si también llegó, agrégala.
+    <button class="btn btn-secondary btn-block" style="margin-top:8px;background:var(--c-white)" ${S.pdBusy?'disabled':''} onclick="pdReleerRecepcion('${escapeHtml(pdKey(x)).replace(/'/g,'&#39;')}')">Agregar a esta recepción</button></div>`;
+  return h;
 }
 
 /* ════════════════════════════════════════════════════════════════════════════════════
@@ -1611,7 +1687,9 @@ function openRecibir(data, opts={}){
   showScreen('screen-recibir');
   renderRecibir(); focusScan();
   loadSorting(S.hub).then(()=>{ buildCatalog(); renderRecibir(); });
+  S.pdTel={}; S.pdOtras=[]; S.pdBusy=false;
   syncServerEvents().then(()=>{ if(opts.revisar && revisarItems().length) openRevisar(); });
+  pdRecibirLive();
   flushOutbox();
   if(!opts.noStale) staleCheck();
 }
@@ -1713,6 +1791,7 @@ function renderRecibir(){
   if(sinArch) banner+=`<div class="note"><b>Recibiendo sin archivo.</b> Escanea y cuenta normal; cuando el envío esté listo, súbelo desde Inicio → Subir envío y la app revisará todo lo escaneado.</div>`;
   const rev=sinArch?[]:revisarItems();
   if(rev.length) banner+=`<button class="btn btn-warn btn-block" style="margin-bottom:10px" onclick="openRevisar()">Revisar ahora · ${rev.length}</button>`;
+  if(isPd()) banner+=pdRecibirBannerHtml();
   if(S.sortStatus==='none') banner+=`<div class="note">${escapeHtml(hubName(S.hub))} todavía no tiene archivo en Sorting Hub: las tarjetas no mostrarán canasta.</div>`;
   else if(S.sortStatus==='err') banner+=`<div class="note">No se pudo cargar el sorting de este hub: las tarjetas no mostrarán canasta.</div>`;
   if(S.closedInfo && S.closedInfo.borrada) banner=`<div class="err-box"><b>Este envío se borró</b> (${escapeHtml(S.closedInfo.receptor||'')}, ${localHM(new Date(S.closedInfo.ts))}). Ya no se puede escanear.
@@ -1725,7 +1804,8 @@ function renderRecibir(){
   document.getElementById('rec-footer').innerHTML = S.closedInfo ? '' : sinArch
     ? `<div class="muted" style="text-align:center">Para cerrar la recepción, primero sube el archivo del envío.</div>`
     : `<button class="btn btn-secondary btn-block" style="margin-bottom:10px" onclick="openParcial()">Cerrar entrega parcial (sigo después)</button>
-       <button class="btn btn-primary btn-block" onclick="openResumen()">Terminé todo: revisar y cerrar</button>`;
+       <button class="btn btn-primary btn-block" onclick="openResumen()">Terminé todo: revisar y cerrar</button>`
+      +(isPd()?`<button class="link-btn" ${S.pdBusy?'disabled':''} onclick="pdReleerRecepcion()">${S.pdBusy?'Leyendo la orden…':'Volver a leer la orden'}</button>`:'');
   renderCard(); renderRecent(); renderNet();
 }
 
@@ -1851,6 +1931,8 @@ function lookAlikes(p){
 }
 // §7.1 — not in the envío: photo of what was scanned + up to 3 envío look-alikes ("Era este otro")
 async function notInEnvio(p, metodo, det){
+  // Proveedor directo (§6.3): not in the order → card «No solicitado · se rechaza», Pedido 0. No modal, no call.
+  if(isPd()){ openCard({ ...p, enEnvio:false }, metodo, det); return; }
   const looks=lookAlikes(p);
   const looksHtml=looks.length ? `<p style="margin:12px 0 0;font-weight:700;color:var(--gray-900)">¿Era alguno de estos? Sí vienen en el envío:</p>`
     +looks.map((l,i)=>{ const pos=positionOf(l.barcode, l.producto);
@@ -1900,7 +1982,9 @@ function cancelCard(){ S.current=null; renderCard(); focusScan(); }
    dañada the same way. Separated pieces never lower Recibido (rule 8). Stored on the scan: fecha_corta +
    fecha_corta_pz, danadas. Old scans have fecha_corta alone = the whole scan. ── */
 function vidaDiasOf(p){ const l=S.lines.get(p.sku_key), v=l?l.vida_dias:p.vida_dias; return Number.isFinite(v)?v:null; }
-function caducidadMin(p){ const d=vidaDiasOf(p); return d==null ? null : new Date(Date.parse(todayStr()+'T12:00:00Z')+d*86400000).toISOString().slice(0,10); }
+function caducidadMin(p){
+  if(isPd()){ const l=S.lines.get(p.sku_key); return (l && l.caducidad_min) || null; } // straight from the order (Fecha + V Anaquel)
+  const d=vidaDiasOf(p); return d==null ? null : new Date(Date.parse(todayStr()+'T12:00:00Z')+d*86400000).toISOString().slice(0,10); }
 function dmy(ymd){ const [y,m,d]=String(ymd).split('-'); return d?`${d}/${m}/${y}`:String(ymd||''); }
 function cadBoxHtml(c){
   const cad=c.recount?null:caducidadMin(c.p); if(!cad) return '';
@@ -1950,7 +2034,9 @@ function renderCard(){
   const p=c.p, kg=p.kgpz==='Kg', pos=positionOf(p.barcode, p.producto), pres=presentacion(p.producto), ya=recibidoDe(p.sku_key);
   const focusId=document.activeElement && document.activeElement.id, hadFocus=focusId==='qty-input';
   const sibs=p.enEnvio===false?[]:siblingsOf(p);
+  const pd=isPd(), line=S.lines.get(p.sku_key);
   const top = c.recount ? `<div class="banner yellow"><b>Recontar:</b> cuenta otra vez todo lo que llegó de este producto, también lo separado, y escribe el total.</div>`
+    : pd && p.enEnvio===false ? '<div class="banner red"><b>No solicitado · se rechaza.</b> No viene en la orden: cuenta las piezas y sepáralas para regresarlas al camión.</div>'
     : p.enEnvio===false ? '<div class="banner red">No viene en el envío — se registra como <b>No esperado</b></div>'
     : p.enEnvio===null ? '<div class="banner gray">Sin archivo: se revisará cuando subas el envío.</div>' : '';
   el.innerHTML=`<div class="pcard ${p.enEnvio===false?'noesp':''}">
@@ -1962,18 +2048,21 @@ function renderCard(){
         : `<div class="basket-none">Sin posición en el sorting de ${escapeHtml(hubName(S.hub))}</div>`}</div>
     </div>
     <div class="pcard-name">${nameHtml(p.producto)}</div>
-    <div class="pcard-tags">${pres?`<span class="pres-chip">${escapeHtml(pres.t)}</span>`:''}${p.kgpz?`<span class="unit-chip ${kg?'kg':''}">${kg?'Kg':'Pz'}</span>`:''}${p.barcode?'':'<span class="tag">sin código</span>'}</div>
+    <div class="pcard-tags">${pres?`<span class="pres-chip">${escapeHtml(pres.t)}</span>`:''}${p.kgpz?`<span class="unit-chip ${kg?'kg':''}">${kg?'Kg':'Pz'}</span>`:''}${pd&&line&&tempLabel(line.temp)?`<span class="temp-chip">${tempLabel(line.temp)}</span>`:''}${p.barcode?'':'<span class="tag">sin código</span>'}</div>
     <div id="sibling-slot">${sibs.length?`<div class="banner yellow">Ojo: también vienen ${sibs.map(s=>'<b>'+escapeHtml(s.producto)+'</b>').join(', ')}. Cuenta por separado.
       ${sibs.slice(0,3).map(s=>`<div class="sib-row">${imgTag(s.barcode, s.producto, 'thumb')}<span>${nameHtml(s.producto)}</span></div>`).join('')}</div>`:''}</div>
     ${p.kgpzUnknown?`<div class="qty-label">¿Cómo se recibe?</div><div class="unit-pick">${['Pz','Kg'].map(u=>`<button class="choice ${p.kgpz===u?'sel':''}" onclick="pickUnit('${u}')">${u==='Kg'?'Por peso (Kg)':'Por pieza (Pz)'}</button>`).join('')}</div>`:''}
     ${ya>0?`<div class="banner gray">Ya registraste ${fmtQty(ya,p.kgpz||'Kg')} ${p.kgpz?unitOf(p.kgpz):''} de este producto.</div>`:''}
     ${kg?'<div class="banner blue">Pésalo en la báscula</div>':''}
     ${cadBoxHtml(c)}
-    <label class="qty-label" for="qty-input">${c.recount?(kg?'Total en kg (báscula)':'Total de piezas contadas ahora'):kg?'Total recibido en kg (báscula), también lo dañado o de fecha corta':'Total recibido: todas las que llegaron, también dañadas o de fecha corta'}</label>
-    <input id="qty-input" class="qty-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}">
+    <label class="qty-label" for="qty-input">${c.recount?(kg?'Total en kg (báscula)':'Total de piezas contadas ahora')
+      : pd && p.enEnvio===false ? (kg?'Kg que llegaron de este producto (báscula)':'Piezas que llegaron de este producto')
+      : pd ? (kg?'Kg que aceptas (báscula). Lo de fecha corta o dañado sepáralo y no lo peses.':'Piezas que aceptas. Las de fecha corta o dañadas sepáralas y no las cuentes.')
+      : kg?'Total recibido en kg (báscula), también lo dañado o de fecha corta':'Total recibido: todas las que llegaron, también dañadas o de fecha corta'}</label>
+    <input id="qty-input" class="qty-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}" ${c.exc?'readonly':''}>
     <div class="qty-err" id="qty-err"></div>
-    ${sepHtml(c)}
-    <div class="pcard-actions"><button class="btn btn-secondary" onclick="cancelCard()">Cancelar</button><button class="btn btn-primary" onclick="confirmCard()">Registrar</button></div>
+    ${pd?'':sepHtml(c)}
+    ${c.exc ? pdExcHtml(c) : `<div class="pcard-actions"><button class="btn btn-secondary" onclick="cancelCard()">Cancelar</button><button class="btn btn-primary" onclick="confirmCard()">Registrar</button></div>`}
     ${c.det && c.det.codigo && !c.recount ? `<button class="link-btn" onclick="codigoIncorrecto()">¿No es este producto? Código incorrecto en sistema · buscar por nombre</button>` : ''}
   </div>`;
   const q=document.getElementById('qty-input');
@@ -1981,6 +2070,7 @@ function renderCard(){
   wireQtyInput(q);
   for(const k of Object.keys(c.sep||{})){ const i=document.getElementById('sep-'+k); if(i) wireSepInput(i, k); }
   updSepSum();
+  if(c.exc) return;
   if(hadFocus) q.focus(); else if(/^sep-/.test(focusId||'')){ const i=document.getElementById(focusId); if(i) i.focus(); }
 }
 // A scanner burst that lands in the quantity field is a new scan, not a quantity.
@@ -2035,6 +2125,17 @@ async function typoOk(c, qty){
   if(v!=='yes'){ clearQty(c); return false; }
   c.typoOk=qty; return true;
 }
+// §4 over Pedido (proveedor directo): the card stops at once. Pedido is revealed for this one product, only now.
+function pdExcHtml(c){
+  const x=c.exc, kp=c.p.kgpz, u=unitOf(kp), n=fmtQty(x.n,kp);
+  const msg = x.pedido>0 ? `Solo se solicitaron ${fmtQty(x.pedido,kp)} ${u==='pz'?'piezas':u}${x.prev>0?`; ya habías registrado ${fmtQty(x.prev,kp)}`:''}.`
+    : 'No se solicitó este producto.';
+  return `<div class="pd-exc"><div class="pd-exc-big">Separa ${n} ${u} para rechazo</div><p>${msg} Regrésalas al camión.</p>
+    <button class="btn btn-warn btn-block" onclick="pdExcOk()">Ya separé ${x.pedido>0?'las':'las'} ${n}</button>
+    <button class="btn btn-secondary btn-block" onclick="pdExcCorregir()">Corregir la cantidad</button></div>`;
+}
+function pdExcOk(){ const c=S.current; if(!c || !c.exc) return; c.excOk=c.exc.qty; c.det.excedente_ok=c.exc.n; c.exc=null; confirmCard(); }
+function pdExcCorregir(){ const c=S.current; if(!c) return; c.exc=null; c.val=''; renderCard(); const q=document.getElementById('qty-input'); if(q){ q.value=''; q.focus(); } }
 // §7.2-qty + §7.4 — blocking only to stop a wrong number; the enviado number is never shown (still blind).
 async function guardQty(c, qty){
   const p=c.p, line=p.enEnvio ? S.lines.get(p.sku_key) : null, kg=p.kgpz==='Kg', u=unitOf(p.kgpz);
@@ -2045,7 +2146,13 @@ async function guardQty(c, qty){
     // Carnes file has a 65.11 kg line, and a correct 63.81 kg weighing must not be questioned.
     const e=line.esperado, big = qty>3*e || (qty>(kg?50:200) && qty>1.5*e);
     if(big && c.typoOk!==qty && !(await typoOk(c, qty))) return false;
-    if(overEnviado(line, total)){
+    if(isPd() && !c.recount){
+      // §4 count > Pedido: separate the excess now (Kg: beyond the scale tolerance)
+      if(overEnviado(line, total) && c.excOk!==qty){
+        const prev=recibidoDe(p.sku_key);
+        c.exc={ qty, prev, pedido:e, n:Math.min(qty, round2(total-e)) }; renderCard(); return false;
+      }
+    } else if(overEnviado(line, total)){
       if(!c.overWarned){
         c.overWarned=true;
         await showModal({ title:'Esta cantidad es mayor a lo enviado. Vuelve a contar.',
@@ -2061,7 +2168,7 @@ async function guardQty(c, qty){
       // Name the presentation when it's what differs; the whole name when the siblings share it (flavors)
       const pres=presentacion(p.producto), sameSize=!pres || siblingsOf(p).some(s=>{ const q=presentacion(s.producto); return q && normName(q.t)===normName(pres.t); });
       const v=await showModal({ title:`¿Revisaste pieza por pieza que las ${qty} son ${sameSize?p.producto:pres.t}?`,
-        html:`<p>En este envío también viene ${siblingsOf(p).map(s=>'<b>'+escapeHtml(s.producto)+'</b>').join(', ')}.</p>`,
+        html:`<p>En ${isPd()?'esta orden':'este envío'} también viene ${siblingsOf(p).map(s=>'<b>'+escapeHtml(s.producto)+'</b>').join(', ')}.</p>`,
         buttons:[{label:'Sí, todas', value:'yes', kind:'primary'}, {label:'Voy a revisar', value:'no', kind:'secondary'}] });
       if(v!=='yes') return false;
       c.sibOk=qty; c.det.hermano_revisado=true;
@@ -2069,6 +2176,8 @@ async function guardQty(c, qty){
   } else {
     const big = kg ? qty>50 : qty>200;
     if(big && c.typoOk!==qty && !(await typoOk(c, qty))) return false;
+    // §4 not in the order (Pedido 0): everything counted is separated for rejection
+    if(isPd() && !c.recount && c.excOk!==qty){ c.exc={ qty, prev:0, pedido:0, n:qty }; renderCard(); return false; }
   }
   return true;
 }
@@ -2102,8 +2211,9 @@ async function confirmCard(){
   } else {
     const cad=caducidadMin(p);
     recordEvent(makeEvent('scan', { sku_key:p.sku_key, producto:p.producto, cantidad:qty, metodo:c.metodo,
-      detalle:Object.assign({ esperado:p.enEnvio, kgpz:p.kgpz }, cad?{ caducidad_min:cad }:{}, c.det, sp.fc?{ fecha_corta:true, fecha_corta_pz:sp.fc }:{}, sp.dan?{ danadas:sp.dan }:{}) }));
-    toast(`✓ ${fmtQty(qty,p.kgpz)} ${unitOf(p.kgpz)} · ${p.producto}${sepN?` · separar ${fmtQty(sepN,p.kgpz)} para MNA`:''}`);
+      detalle:Object.assign({ esperado:p.enEnvio, kgpz:p.kgpz }, cad?{ caducidad_min:cad }:{}, isPd()&&p.enEnvio===false?{ pns:true }:{}, c.det, sp.fc?{ fecha_corta:true, fecha_corta_pz:sp.fc }:{}, sp.dan?{ danadas:sp.dan }:{}) }));
+    toast(isPd()&&c.det.excedente_ok ? `✓ ${fmtQty(qty,p.kgpz)} ${unitOf(p.kgpz)} · ${p.producto} · ${fmtQty(c.det.excedente_ok,p.kgpz)} para rechazo`
+      : `✓ ${fmtQty(qty,p.kgpz)} ${unitOf(p.kgpz)} · ${p.producto}${sepN?` · separar ${fmtQty(sepN,p.kgpz)} para MNA`:''}`);
   }
   S.current=null;
   renderRecibir();
@@ -2124,13 +2234,13 @@ function renderRecent(){
   const more=all.length>10 ? `<button class="link-btn" onclick="S.recentAll=!S.recentAll;renderRecent()">${S.recentAll?'Ver solo los últimos 10':`Ver todos los escaneos (${all.length})`}</button>` : '';
   el.innerHTML=scans.map(ev=>{
     const u=ev.detalle&&ev.detalle.uid, kp=kgpzOf(ev), now=scanQtyNow(ev), orig=round2(ev.cantidad), line=S.lines.get(ev.sku_key);
-    const meta=[localHM(new Date(ev.ts)), ev.receptor!==S.receptor?escapeHtml(ev.receptor):'', ev.metodo==='manual'?'sin código':ev.metodo==='codigo_incorrecto'?'<span style="color:var(--orange);font-weight:700">código incorrecto</span>':ev.metodo==='camara'?'cámara':'', line?'':'<span style="color:var(--c-ink);font-weight:700">no esperado</span>', sepMeta(ev, kp)].filter(Boolean).join(' · ');
+    const meta=[localHM(new Date(ev.ts)), ev.receptor!==S.receptor?escapeHtml(ev.receptor):'', ev.metodo==='manual'?'sin código':ev.metodo==='codigo_incorrecto'?'<span style="color:var(--orange);font-weight:700">código incorrecto</span>':ev.metodo==='camara'?'cámara':'', line?'':`<span style="color:var(--c-ink);font-weight:700">${isPd()?'no solicitado · rechazo':'no esperado'}</span>`, line&&ev.detalle&&ev.detalle.excedente_ok?`<span style="color:var(--c-ink);font-weight:700">${fmtQty(ev.detalle.excedente_ok,kp)} para rechazo</span>`:'', sepMeta(ev, kp)].filter(Boolean).join(' · ');
     const editing=S.corrigiendo===u, sepEdit=S.separando===u;
     return `<div class="ritem"><div class="ritem-row">
         ${line?imgTag(line.barcode, line.producto, 'thumb'):imgTag(ev.sku_key.startsWith('name:')?'':ev.sku_key, ev.producto, 'thumb')}
         <div class="ritem-main"><div class="ritem-name">${nameHtml(line?line.producto:ev.producto)}</div><div class="ritem-meta">${meta}</div></div>
         <div><div class="ritem-qty">${now!==orig?`<s>${fmtQty(orig,kp)}</s>`:''}${fmtQty(now,kp)} <small>${unitOf(kp)}</small></div>
-          ${editing||sepEdit?'':enEntregaCerrada(ev)?`<div class="ritem-meta">entrega ${entregaDe(ev)} cerrada</div>`:`<button class="corr-btn" onclick="startCorregir('${escapeHtml(u)}')">Corregir</button>${now>0?` <button class="corr-btn" onclick="startSeparar('${escapeHtml(u)}')">Separar</button>`:''}`}</div>
+          ${editing||sepEdit?'':enEntregaCerrada(ev)?`<div class="ritem-meta">entrega ${entregaDe(ev)} cerrada</div>`:`<button class="corr-btn" onclick="startCorregir('${escapeHtml(u)}')">Corregir</button>${now>0&&!isPd()?` <button class="corr-btn" onclick="startSeparar('${escapeHtml(u)}')">Separar</button>`:''}`}</div>
       </div>${editing?corrBoxHtml(ev, kp, now):sepEdit?sepBoxHtml(ev, kp, now):''}</div>`;
   }).join('')+more;
 }
@@ -2241,7 +2351,7 @@ function renderSearch(q){
     const pos=positionOf(h.p.barcode, h.p.producto);
     return `<button class="res-item ${h.env?'':'grey'}" onclick="pickSearch(${i})">${imgTag(h.p.barcode, h.p.producto, 'thumb')}
       <div style="flex:1;min-width:0"><div class="res-name">${nameHtml(h.p.producto)}</div>
-      <div class="res-sub">${h.env?'<span class="tag green">viene en el envío</span> ':'no viene en el envío · '}${h.p.kgpz==='Kg'?'Kg':'Pz'}${pos?' · '+escapeHtml(pos.full):''}</div></div></button>`;
+      <div class="res-sub">${h.env?`<span class="tag green">viene en ${isPd()?'la orden':'el envío'}</span> `:`no viene en ${isPd()?'la orden':'el envío'} · `}${h.p.kgpz==='Kg'?'Kg':'Pz'}${pos?' · '+escapeHtml(pos.full):''}</div></div></button>`;
   }).join('');
 }
 async function pickSearch(i){

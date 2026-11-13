@@ -55,7 +55,7 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   PIN file exists, `v1-alerts-rpc.sql` is run. Alert schedules and the Apps Script wait for the real launch. Any
   new local test writes to prod again: use test-hub and tell Jose what to clean up.
 
-## Proveedor directo (proveedorDirecto-plan.md — phases 1–2 built 2026-11-12)
+## Proveedor directo (proveedorDirecto-plan.md — phases 1–3 built 2026-11-12)
 - Supplier deliveries straight to the hub. Orders come read-only from an Apps Script web app
   (`proveedor/apps-script.gs`, reference copy; Jose deploys it). It reads the master «Fill Rate Oc Nacional» («Base
   datos Compras» = open orders of every hub, one orden per Num Oc; «Catalogo2» V Anaquel → caducidad) plus one hub file
@@ -70,6 +70,16 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   `envios/{slug}/pd-{prov}/{fecha}__{epochMs}.json` with `origen:'proveedor'`, `orden:{proveedor, ocs, num_oc,
   fechas_entrega, leido, comercial, comprador}`; lines carry `caducidad_min`, `temp`, `sku_marca`. No CSV. Phones are
   never stored (only the live bridge answer has them, for `tel:` links). The CH stale-file modal skips these.
+- Recibir (`isPd()`): the receptor types only the pieces they accept (unfit ones are set aside, not counted). Card
+  shows a Temp chip (`tempLabel`) and Caducidad mínima from the order line (`caducidadMin` reads `caducidad_min`).
+  No Fecha corta / Dañadas buttons, no recent-list Separar (that is CH's MNA). `guardQty`: typo guard, then count >
+  Pedido (Kg: CH tolerance) → `c.exc` renders «Separa {n} para rechazo» on the card (`pdExcHtml`) with «Ya separé»
+  (`detalle.excedente_ok` = n) or «Corregir la cantidad»; n = min(this scan, total − Pedido). Not in the order →
+  `notInEnvio` opens the card as «No solicitado · se rechaza» (no modal), same alert with Pedido 0, `detalle.pns`.
+- `pdOrdenDudosa` (3 of the first 5 products not in the order) → advisory banner with contacts + «Volver a leer la
+  orden». `pdReleerRecepcion(extraKey)` re-reads the same OCs (`&fresh=1`); a change (or «Agregar a esta recepción»
+  for another open OC of the supplier, `S.pdOtras`) writes a new snapshot in the same session + `reemplazo`
+  {orden_releida:true}. `pdBuildEnvio` is shared with Empezar. Phones: `S.pdTel` from the live answer only.
 
 ## How the code is laid out (index.html)
 - Helpers copied from armado-CH sit at the top, each block labelled. Our additions: `codeKey` (cleanBC + strip
