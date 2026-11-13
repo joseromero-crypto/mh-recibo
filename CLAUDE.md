@@ -59,8 +59,12 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - Supplier deliveries straight to the hub. Orders come read-only from an Apps Script web app
   (`proveedor/apps-script.gs`, reference copy; Jose deploys it). It reads the master «Fill Rate Oc Nacional» («Base
   datos Compras» = open orders of every hub, one orden per Num Oc; «Catalogo2» V Anaquel → caducidad) plus one hub file
-  per city for Temp, Comercial and phones. `PD_URL`/`PD_TOKEN` in index.html; empty → localhost reads
-  `fixtures/proveedor_mh-contry.json` (gitignored; `?pdlive=1` forces the live URL). test-hub borrows mh-contry.
+  per city for Temp and Comercial. Deployed 2026-11-13 (Jose's account): `PD_URL`/`PD_TOKEN` in index.html. The token is
+  public by design (no login), so the bridge is locked down instead: `proveedor/appsscript.json` limits it to
+  `spreadsheets.readonly` (tabs read through the Sheets API advanced service, `libro_`; SpreadsheetApp needs edit rights)
+  and it returns **no phone numbers** (names only; no «Llamar» links). Code change → Jose pastes it and deploys a New
+  version of the same deployment (URL stays). Live read ~8 s fresh, ~2 s cached (30 s). Localhost reads
+  `fixtures/proveedor_mh-contry.json` (gitignored); `?pdlive=1` uses the live URL. test-hub borrows mh-contry.
 - Each supplier is an internal área `pd-{provSlug}` (§6.0): same folders, sessions, closing, deleting. `areaName()`
   shows the supplier name (`PD_NAMES`); never show `pd-…` to a receptor.
 - Inicio: ¿De dónde viene? CH Guadalupe | Proveedor directo → Hub → ¿Quién recibe? → ¿Qué proveedor llegó?
@@ -68,8 +72,7 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   (`abrir`/`cerrar` `detalle.ocs` = pdKey list: num_oc, or `{provSlug}|{fecha}`). No order → no reception (§3.5).
 - Empezar recepción (`pdEmpezar`) re-reads the supplier with `&fresh=1`, sums the ticked OCs per sku_key and writes
   `envios/{slug}/pd-{prov}/{fecha}__{epochMs}.json` with `origen:'proveedor'`, `orden:{proveedor, ocs, num_oc,
-  fechas_entrega, leido, comercial, comprador}`; lines carry `caducidad_min`, `temp`, `sku_marca`. No CSV. Phones are
-  never stored (only the live bridge answer has them, for `tel:` links). The CH stale-file modal skips these.
+  fechas_entrega, leido, comercial, comprador}`; lines carry `caducidad_min`, `temp`, `sku_marca`. No CSV. No phones anywhere. The CH stale-file modal skips these.
 - Recibir (`isPd()`): the receptor types only the pieces they accept (unfit ones are set aside, not counted). Card
   shows a Temp chip (`tempLabel`) and Caducidad mínima from the order line (`caducidadMin` reads `caducidad_min`).
   No Fecha corta / Dañadas buttons, no recent-list Separar (that is CH's MNA). `guardQty`: typo guard, then count >
@@ -79,7 +82,7 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - `pdOrdenDudosa` (3 of the first 5 products not in the order) → advisory banner with contacts + «Volver a leer la
   orden». `pdReleerRecepcion(extraKey)` re-reads the same OCs (`&fresh=1`); a change (or «Agregar a esta recepción»
   for another open OC of the supplier, `S.pdOtras`) writes a new snapshot in the same session + `reemplazo`
-  {orden_releida:true}. `pdBuildEnvio` is shared with Empezar. Phones: `S.pdTel` from the live answer only.
+  {orden_releida:true}. `pdBuildEnvio` is shared with Empezar. `tempLabel`: ≥15 °C = Ambiente (the sheet says 24 for bread).
 - `pdLeerOrden(extraKey)` (re-read → `{data, cambio}` or `{gone}`) + `pdAplicarOrden` (snapshot + `reemplazo`) are shared by
   «Volver a leer la orden» and Cerrar. No «Cerrar entrega parcial» on pd receptions.
 - Resumen y cierre (`renderResumen`/`cerrarRecepcion` hand off to `pdRenderResumen`/`pdCerrar` when `isPd()`). `pdRows()` →

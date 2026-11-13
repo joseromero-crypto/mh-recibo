@@ -10,19 +10,23 @@
  *       «Catalogo2»           per-city catalog: Ciudad, Cód. de barras, Producto, Proveedor, Kg/Pz, V Anaquel.
  *                             Caducidad mínima = Fecha de entrega + V Anaquel (the hub files compute it the same way).
  *       «Proveedores»         Proveedor Retool → Comprador (fallback when a supplier has no lines).
- *   - REFERENCIA per city (CIUDADES): one hub file holding «Encargados» (supplier → Comercial; contacts table Área/Nombre/
- *     Teléfono) and «Inv {city}» (Temp). The master has neither.
+ *   - REFERENCIA per city (CIUDADES): one hub file holding «Encargados» (supplier → Comercial) and «Inv {city}» (Temp).
+ *     The master has neither. The phones in Encargados are NOT read: the token sits in the public app, so the answer
+ *     carries no personal data (decision 2026-11-13).
  *
  * Setup (once):
  *   1. script.google.com → New project → name it "MH Recibo · Órdenes proveedor" → paste this file → Save.
- *   2. Project Settings → Script properties → add TOKEN = a long random string (shared with the app).
- *   3. Run `probar` once: authorizes SpreadsheetApp and logs a summary of mh-contry (check it against the sheet).
+ *   2. Project Settings → tick «Show appsscript.json» → paste proveedor/appsscript.json into it → Save. It limits the
+ *      script to spreadsheets.readonly (Google itself rejects any write) and turns on the Sheets API service, which is
+ *      how the tabs are read: SpreadsheetApp.openById needs edit rights and won't run with the read-only scope.
+ *   2b. Project Settings → Script properties → add TOKEN = a long random string (shared with the app).
+ *   3. Run `probar` once: asks for «See your spreadsheets» only, and logs a summary of mh-contry (check it against the sheet).
  *   4. Deploy → New deployment → type "Web app" → Execute as: Me · Who has access: Anyone → Deploy.
  *      Copy the /exec URL. (Every code change: Deploy → Manage deployments → edit → Version: New version,
  *      so the URL stays the same.)
  *
  * Call:  GET {exec}?token=…&hub=mh-contry[&proveedor=LALA][&fresh=1]
- *   → { leido, ordenes:[{num_oc, proveedor, fecha_entrega, comercial, comprador, lineas:[…]}], contactos, telefonos,
+ *   → { leido, ordenes:[{num_oc, proveedor, fecha_entrega, comercial, comprador, lineas:[…]}], contactos,
  *       proveedores[, catalogo], avisos }   or   { error }
  *   - One orden per Num Oc (two Bimbo OCs on the same day are two órdenes). Rows without Num Oc («-») are grouped by
  *     supplier + date. Window: Fecha de entrega from today − 14 to today + 14 (America/Monterrey).
@@ -30,8 +34,7 @@
  *     hub's city: names/units for products not in the order).
  *   - The parsed answer is cached 30 s per hub; &fresh=1 skips the cache (compras may have just edited the sheet).
  *
- * Phones (Encargados contacts table) are returned only for the app's «Llamar» links; the app never copies them into
- * reports or Slack.
+ * No phone numbers are returned (names only).
  */
 const TZ = 'America/Monterrey';
 const VENTANA_DIAS = 14;
@@ -40,7 +43,7 @@ const MASTER = '14-Wt08IJuNc7e5nKA0R_omBHc0JY2olSxu_FCCVHOLQ';
 const TABS = { ordenes: 'Base datos Compras', catalogo: 'Catalogo2', proveedores: 'Proveedores',
                encargados: 'Encargados', nuevos: 'Productos Nuevos' };
 // City → reference hub file (Encargados + Inv {city} + Productos Nuevos). A city without one still gets orders,
-// caducidad and comprador from the master; comercial/telefonos/temp stay empty and the app shows «Contacta al equipo
+// caducidad and comprador from the master; comercial/temp stay empty and the app shows «Contacta al equipo
 // comercial en el canal de abastecimiento en Slack».
 const CIUDADES = {
   Mty:  { file: '1C8Vb9OE8uVZVidNRs7D7aDbwdPK56U2OW0nYFJ3eKoE', inv: 'Inv Mty' },    // Recepcion Contry
@@ -76,8 +79,8 @@ function doGet(e) {
 function probar() {
   const t0 = Date.now();
   const d = leerHub_('mh-contry', true);
-  Logger.log('leido %s en %s ms · %s órdenes · %s proveedores · %s teléfonos · %s catálogo', d.leido, Date.now() - t0,
-    d.ordenes.length, d.proveedores.length, Object.keys(d.telefonos).length, d.catalogo.length);
+  Logger.log('leido %s en %s ms · %s órdenes · %s proveedores · %s catálogo', d.leido, Date.now() - t0,
+    d.ordenes.length, d.proveedores.length, d.catalogo.length);
   d.ordenes.forEach(o => Logger.log('  %s · %s · %s · %s líneas · comercial %s · compras %s',
     o.fecha_entrega, o.num_oc || '—', o.proveedor, o.lineas.length, o.comercial || '—', o.comprador || '—'));
   if (d.ordenes.length) Logger.log('Primera línea: %s', JSON.stringify(d.ordenes[0].lineas[0]));
@@ -99,7 +102,6 @@ function soloProveedor_(d, prov) {
     leido: d.leido,
     ordenes: d.ordenes.filter(o => provKey_(o.proveedor) === k),
     contactos: contactos,
-    telefonos: d.telefonos,
     proveedores: d.proveedores,
     catalogo: (d.catalogo || []).filter(c => provKey_(c.proveedor) === k),
     avisos: d.avisos,
@@ -143,8 +145,8 @@ function cacheGet_(cache, key) {
 /* ── Parsing ── */
 function parsearHub_(slug) {
   const cfg = HUBS[slug];
-  const master = SpreadsheetApp.openById(MASTER);
-  const tz = master.getSpreadsheetTimeZone() || TZ;
+  const master = libro_(MASTER, [TABS.catalogo, TABS.proveedores, TABS.ordenes]);
+  const tz = TZ;
   const hoy = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
   const desde = addDays_(hoy, -VENTANA_DIAS), hasta = addDays_(hoy, VENTANA_DIAS);
   const avisos = [];
@@ -177,21 +179,17 @@ function parsearHub_(slug) {
     });
   } catch (e) { avisos.push(String(e.message || e)); }
 
-  // Reference hub file for the city: Encargados (Comercial, phones) + Inv {city} (Temp).
-  const comercialDe = {}, telefonos = {}, tempDe = {};
+  // Reference hub file for the city: Encargados (Comercial; phones are never read) + Inv {city} (Temp).
+  const comercialDe = {}, tempDe = {};
   const ref = CIUDADES[cfg.ciudad];
   if (ref) {
-    const rs = SpreadsheetApp.openById(ref.file);
-    const rtz = rs.getSpreadsheetTimeZone() || TZ;
+    const rs = libro_(ref.file, [TABS.encargados, ref.inv, TABS.nuevos]);
+    const rtz = TZ;
     try {
       const enc = tabla_(rs, TABS.encargados, ['proveedor', 'comercial']);
       enc.rows.forEach(r => {
         const prov = txt_(r.v[enc.col.proveedor]), com = txt_(r.v[enc.col.comercial]);
         if (prov && com) comercialDe[provKey_(prov)] = com;
-        if (enc.col.nombre != null && enc.col.telefono != null) {
-          const nombre = txt_(r.v[enc.col.nombre]), tel = txt_(r.d[enc.col.telefono]);
-          if (nombre && tel) telefonos[nombre] = tel;
-        }
       });
     } catch (e) { avisos.push(String(e.message || e)); }
     try {
@@ -213,7 +211,7 @@ function parsearHub_(slug) {
       });
     } catch (e) { avisos.push(String(e.message || e)); }
   } else {
-    avisos.push('Sin archivo de referencia para ' + cfg.ciudad + ': sin comercial, teléfonos ni temperatura');
+    avisos.push('Sin archivo de referencia para ' + cfg.ciudad + ': sin comercial ni temperatura');
   }
 
   // Order lines: «Base datos Compras», this hub's rows.
@@ -276,28 +274,41 @@ function parsearHub_(slug) {
     contactos[p] = { comercial: comercialDe[pk] || '', comprador: compradorDe(pk) };
   });
 
-  return { leido: new Date().toISOString(), ordenes: ordenes, contactos: contactos, telefonos: telefonos,
+  return { leido: new Date().toISOString(), ordenes: ordenes, contactos: contactos,
            proveedores: proveedores, catalogo: catalogo, avisos: avisos };
 }
 
 /* Reads a tab; finds the header row (first of the top 6 rows that holds every `need` header) and maps columns by
  * normalized name: «Cod. Barras» → cod_barras, «Fecha de entrega» → fecha_de_entrega, «Und.» → und. When a header
  * repeats (Encargados has «Comercial» and «Comercial (Nuevo)»), the first one wins. */
-function tabla_(ss, nombre, need) {
-  const sh = ss.getSheetByName(nombre);
-  if (!sh) throw new Error('No existe la pestaña «' + nombre + '»');
-  const range = sh.getDataRange();
-  const v = range.getValues(), d = range.getDisplayValues();
+// Reads tabs through the Sheets API (advanced service «Sheets»): it works with the spreadsheets.readonly scope. Two batch
+// reads per file: raw values (numbers; dates as serial day numbers) and the text shown in each cell (barcodes keep
+// leading zeros). Missing tabs are skipped here and reported by tabla_.
+function libro_(id, nombres) {
+  const titulos = (Sheets.Spreadsheets.get(id, { fields: 'sheets.properties.title' }).sheets || []).map(x => x.properties.title);
+  const hay = nombres.filter(n => titulos.indexOf(n) >= 0), tabs = {};
+  if (hay.length) {
+    const ranges = hay.map(n => "'" + n.replace(/'/g, "''") + "'");
+    const v = Sheets.Spreadsheets.Values.batchGet(id, { ranges: ranges, valueRenderOption: 'UNFORMATTED_VALUE', dateTimeRenderOption: 'SERIAL_NUMBER' }).valueRanges;
+    const d = Sheets.Spreadsheets.Values.batchGet(id, { ranges: ranges, valueRenderOption: 'FORMATTED_VALUE' }).valueRanges;
+    hay.forEach((n, i) => { tabs[n] = { v: v[i].values || [], d: d[i].values || [] }; });
+  }
+  return { tabs: tabs };
+}
+function tabla_(libro, nombre, need) {
+  const t = libro.tabs[nombre];
+  if (!t) throw new Error('No existe la pestaña «' + nombre + '»');
+  const v = t.v, d = t.d; // the API drops trailing empty cells, so rows can be shorter than the header
   let h = -1;
-  for (let i = 0; i < Math.min(6, v.length); i++) {
-    const names = d[i].map(colKey_);
+  for (let i = 0; i < Math.min(6, d.length); i++) {
+    const names = (d[i] || []).map(colKey_);
     if (need.every(n => names.indexOf(n) >= 0)) { h = i; break; }
   }
   if (h < 0) throw new Error('«' + nombre + '»: no encontré los encabezados ' + need.join(', '));
   const col = {};
   d[h].forEach((name, j) => { const k = colKey_(name); if (k && col[k] == null) col[k] = j; });
   const rows = [];
-  for (let i = h + 1; i < v.length; i++) rows.push({ n: i + 1, v: v[i], d: d[i] });
+  for (let i = h + 1; i < Math.max(v.length, d.length); i++) rows.push({ n: i + 1, v: v[i] || [], d: d[i] || [] });
   return { col: col, rows: rows };
 }
 
@@ -321,12 +332,12 @@ function addDays_(ymd, n) { const d = new Date(ymd + 'T12:00:00Z'); d.setUTCDate
 const MESES = { enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6, julio: 7, agosto: 8, septiembre: 9, setiembre: 9,
                 octubre: 10, noviembre: 11, diciembre: 12 };
 const pad_ = n => (n < 10 ? '0' : '') + n;
-/* Date cell → YYYY-MM-DD in the sheet's zone; text «12/11/2026» (dd/mm/yyyy), «2026-11-12» or
+/* Date cell (a serial day number from the API: days since 1899-12-30, no time zone involved) → YYYY-MM-DD; text «12/11/2026» (dd/mm/yyyy), «2026-11-12» or
  * «martes, 9 de diciembre de 2026» → YYYY-MM-DD; anything else → ''. */
 function fecha_(v, disp, tz) {
-  if (v instanceof Date && !isNaN(v)) {
-    const y = Number(Utilities.formatDate(v, tz, 'yyyy'));
-    return y > 1900 ? Utilities.formatDate(v, tz, 'yyyy-MM-dd') : '';
+  if (typeof v === 'number') {
+    if (!(v > 1)) return '';
+    return new Date(Date.UTC(1899, 11, 30) + Math.floor(v) * 86400000).toISOString().slice(0, 10);
   }
   const s = sinAcentos_(txt_(disp || v)).toLowerCase();
   let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
@@ -337,14 +348,10 @@ function fecha_(v, disp, tz) {
   if (m && MESES[m[2]]) return m[3] + '-' + pad_(MESES[m[2]]) + '-' + pad_(Number(m[1]));
   return '';
 }
-/* Temp: «Ambiente» stays; a number stays as text ("1", "-18"). A Date is a number formatted as a date
- * (1 → «31 de diciembre de 1899»): its serial day number is the value. */
+/* Temp: «Ambiente» stays; a number stays as text ("1", "-18"). A cell formatted as a date (1 → «31/12/1899») comes
+ * from the API as its serial day number, which is the value. */
 function temp_(v, tz) {
-  if (v instanceof Date && !isNaN(v)) {
-    const ymd = Utilities.formatDate(v, tz, 'yyyy-MM-dd');
-    const serial = Math.round((Date.parse(ymd + 'T00:00:00Z') - Date.UTC(1899, 11, 30)) / 86400000);
-    return String(serial);
-  }
+  if (typeof v === 'number') return String(v);
   const s = txt_(v);
   if (!s) return '';
   if (/^amb/i.test(s)) return 'Ambiente';

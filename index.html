@@ -86,7 +86,6 @@ h2{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.15;margin:
 .pd-oc{display:flex;align-items:center;gap:12px;background:var(--c-surface);border-radius:18px;padding:12px 14px;font-size:15px;cursor:pointer;min-height:56px}
 .pd-oc.sel{box-shadow:inset 0 0 0 2px var(--c-ink)}
 .pd-oc.pd-done{opacity:.55;cursor:default}
-.btn.pd-call{flex:1;margin:0;text-decoration:none;background:var(--c-white);color:var(--c-ink);font-size:14px;padding:10px 12px;white-space:nowrap}
 .text-input{width:100%;min-height:56px;padding:14px 18px;font-size:17px;font-weight:600;border:2px solid var(--c-line);border-radius:var(--r-md);outline:none;background:var(--c-white)}
 .text-input::placeholder{color:var(--c-faint);font-weight:500}
 .text-input:focus{border-color:var(--c-teal)}
@@ -1040,8 +1039,10 @@ async function sessionHasScans(sessionId){
    the Apps Script bridge (proveedor/apps-script.gs, plan §5). Each supplier is stored as an internal área
    'pd-{provSlug}' (§6.0) so the hub+área machinery works unchanged; receptors only ever see the supplier's name.
    ════════════════════════════════════════════════════════════════════════════════════ */
-const PD_URL='';    // Apps Script /exec URL (plan §5) — empty until deployed
-const PD_TOKEN='';
+const PD_URL='https://script.google.com/macros/s/AKfycbyRm-_zx8282SNSSNDNi5LK7NFesGlB4BUSTSFZSfSinIWI6kysbtR6wLZ-76sviUbOFQ/exec'; // Apps Script /exec (plan §5)
+// Public by design: the app has no login, so this only stops casual calls. The bridge is read-only (spreadsheets.readonly)
+// and returns no phone numbers (decision 2026-11-13).
+const PD_TOKEN='9306d8e2e82845304cabcfec4d8b87602365f808';
 // Localhost reads the gitignored fixture unless ?pdlive=1 (and PD_URL is set). test-hub borrows MH Contry's orders.
 const PD_FIXTURE = IS_LOCAL && (!PD_URL || !/[?&]pdlive=1/.test(location.search));
 const PD_HUB={ 'test-hub':'mh-contry' };
@@ -1077,7 +1078,7 @@ async function pdFetch(slug, { prov=null, fresh=false }={}){
     finally{ clearTimeout(to); }
     if(d && d.error) throw new Error(d.error==='token' ? 'Token de órdenes inválido' : d.error);
   }
-  d.ordenes=d.ordenes||[]; d.contactos=d.contactos||{}; d.telefonos=d.telefonos||{}; d.proveedores=d.proveedores||[];
+  d.ordenes=d.ordenes||[]; d.contactos=d.contactos||{}; d.proveedores=d.proveedores||[];
   if(prov){ // the fixture holds every supplier; the script already narrowed it
     d.ordenes=d.ordenes.filter(o=>sameName(o.proveedor, prov));
     d.catalogo=(d.catalogo||[]).filter(c=>sameName(c.proveedor, prov));
@@ -1124,7 +1125,7 @@ async function pdLoad({ prov=null, fresh=false }={}){
       const full=INI.pd.data;
       full.ordenes=full.ordenes.filter(o=>!sameName(o.proveedor, prov)).concat(data.ordenes)
         .sort((a,b)=>a.fecha_entrega.localeCompare(b.fecha_entrega) || a.proveedor.localeCompare(b.proveedor,'es'));
-      Object.assign(full.contactos, data.contactos); Object.assign(full.telefonos, data.telefonos);
+      Object.assign(full.contactos, data.contactos);
       full.leido=data.leido; full.catalogo=data.catalogo;
       INI.pd={ data:full, abiertas:ses.abiertas, recibidas:ses.recibidas, offlineSes:!!ses.offline };
     } else INI.pd={ data, abiertas:ses.abiertas, recibidas:ses.recibidas, offlineSes:!!ses.offline };
@@ -1167,8 +1168,8 @@ function pdContactos(prov){
   return { comercial, comprador };
 }
 const NOMBRE_TITLE=s=>String(s||'').toLowerCase().replace(/(^|\s)\S/g,m=>m.toUpperCase());
-// «Contacta a Catalina (comercial) o Borjas (compras)» + Llamar links. No Comercial → the abastecimiento Slack channel.
-function pdContactoHtml(prov){ return pdContactoFrom(pdContactos(prov), (INI.pd&&INI.pd.data&&INI.pd.data.telefonos)||{}); }
+// «Contacta a Catalina (comercial) o Borjas (compras)». No Comercial → the abastecimiento Slack channel.
+function pdContactoHtml(prov){ return pdContactoFrom(pdContactos(prov)); }
 
 function isPd(){ return !!(S.envio && S.envio.origen==='proveedor'); }
 // Temp from the sheet: «Ambiente», «1» (refrigerado), «-18» (congelado)
@@ -1176,16 +1177,15 @@ function tempLabel(t){
   const s=String(t||'').trim(); if(!s) return '';
   if(/^amb/i.test(s)) return 'Ambiente';
   const n=Number(s); if(!isFinite(n)) return '';
+  if(n>=15) return 'Ambiente'; // the sheet writes 24 for bread and the like
   return (n<=-5?'Congelado ':'Refrigerado ')+String(n).replace('-','−')+' °C';
 }
-// Contact line for Recibir (names from the snapshot, phones from the live bridge answer only)
-function pdContactoFrom({ comercial, comprador }, telefonos){
-  const tel=n=>{ const k=Object.keys(telefonos||{}).find(x=>sameName(x, n)); return k?String(telefonos[k]).replace(/[^\d+]/g,''):''; };
+// Contact line (names only: the bridge returns no phone numbers). `links` stays for callers; always empty now.
+function pdContactoFrom({ comercial, comprador }){
   const comp=comprador?NOMBRE_TITLE(comprador):'';
   const txt = comercial ? `contacta a <b>${escapeHtml(comercial)}</b> (comercial)${comp?` o <b>${escapeHtml(comp)}</b> (compras)`:''}`
     : `contacta al equipo comercial en el canal de abastecimiento en Slack${comp?` o a <b>${escapeHtml(comp)}</b> (compras)`:''}`;
-  const links=[comercial, comp].filter(Boolean).map(n=>{ const t=tel(n); return t?`<a class="btn pd-call" href="tel:${escapeHtml(t)}">Llamar a ${escapeHtml(n)}</a>`:''; }).join('');
-  return { txt, links: links?`<div style="display:flex;gap:8px;margin-top:10px">${links}</div>`:'' };
+  return { txt, links:'' };
 }
 function pdStepHtml(){
   const P=INI.pd;
@@ -1331,7 +1331,7 @@ async function pdRecibirLive(){
   try{
     const [d, ses]=await Promise.all([ pdFetch(S.hub, { prov }), pdSesiones(S.hub).catch(()=>null) ]);
     if(!S.session || S.session.id!==sid) return;
-    S.pdTel=d.telefonos; S.pdLeido=d.leido;
+    S.pdLeido=d.leido;
     pdOtrasDe(d, ses); renderRecibir();
   }catch(_){}
 }
@@ -1346,7 +1346,7 @@ async function pdLeerOrden(extraKey){
   const sid=S.session.id, prov=S.envio.orden.proveedor, slug=S.hub, area=S.area;
   const [d, ses]=await Promise.all([ pdFetch(slug, { prov, fresh:true }), pdSesiones(slug).catch(()=>null) ]);
   if(!S.session || S.session.id!==sid) return null;
-  S.pdTel=d.telefonos; S.pdLeido=d.leido;
+  S.pdLeido=d.leido;
   const keys=new Set(S.envio.orden.ocs.map(o=>o.key)); if(extraKey) keys.add(extraKey);
   const ocs=d.ordenes.filter(o=>keys.has(pdKey(o)));
   if(!ocs.length) return { gone:true, d, ses };
@@ -1386,7 +1386,7 @@ function pdOrdenDudosa(){
   return seen.filter(k=>!S.lines.has(k)).length>=3;
 }
 function pdRecibirBannerHtml(){
-  const o=S.envio.orden, c=pdContactoFrom(o, S.pdTel);
+  const o=S.envio.orden, c=pdContactoFrom(o);
   let h='';
   if(pdOrdenDudosa()) h+=`<div class="warn-box"><b>Parece que la orden no corresponde a esta entrega.</b> ${c.txt.replace(/^c/,'C')}.${c.links}
     <button class="btn btn-warn btn-block" ${S.pdBusy?'disabled':''} onclick="pdReleerRecepcion()">${S.pdBusy?'Leyendo la orden…':'Volver a leer la orden'}</button></div>`;
@@ -1702,7 +1702,7 @@ function openRecibir(data, opts={}){
   showScreen('screen-recibir');
   renderRecibir(); focusScan();
   loadSorting(S.hub).then(()=>{ buildCatalog(); renderRecibir(); });
-  S.pdTel={}; S.pdOtras=[]; S.pdBusy=false;
+  S.pdOtras=[]; S.pdBusy=false;
   syncServerEvents().then(()=>{ if(opts.revisar && revisarItems().length) openRevisar(); });
   pdRecibirLive();
   flushOutbox();

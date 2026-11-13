@@ -62,8 +62,8 @@ Quirks the reader must handle:
 2. **Supplier list comes from the orders**, not a hand-kept list.
 3. **Contacts = Comercial and Compras.** Every warning names both: the Comercial from Encargados and the Comprador
    from the order lines (column Comprador; if the supplier has no lines, the last comprador seen for it in the
-   sheet, then Productos Nuevos). Phones from the Encargados contacts table become a «Llamar» link (`tel:`), never
-   copied into reports or Slack. Where there is no Comercial (reference file missing, §2.1), the {Comercial} part of every message
+   sheet, then Productos Nuevos). No phones (2026-11-13): the bridge's token is public, so it returns names only and
+   there are no «Llamar» links. Where there is no Comercial (reference file missing, §2.1), the {Comercial} part of every message
    becomes «Contacta al equipo comercial en el canal de abastecimiento en Slack».
 4. **Early or late is fine.** Any open order for the supplier shows up whatever its date. Date ≠ today → inline
    warning: «La orden de {Proveedor} está programada para el {fecha}. Puedes empezar la recepción; contacta a
