@@ -39,6 +39,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 6. Never write to Retool.
 8. Everything that physically arrived is received, whatever its date or state. Fecha corta never lowers Recibido or
    changes the estado: those pieces are received, then registered as merma (MNA) and separated.
+   **CH only.** Proveedor directo rejects instead: unfit pieces are set aside, never counted, and go back on the truck
+   (proveedorDirecto-plan §3.9, §4).
 
 ## Status (2026-10-30)
 - **Phases 0–5b built; full QA run with both real files passed (see HANDOFF.md)**. "Empezar sin archivo" is
@@ -52,6 +54,22 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   file except `recibo/config/`). The app is live at https://mh-recibo.joseromero.co; Receptores are filled in,
   PIN file exists, `v1-alerts-rpc.sql` is run. Alert schedules and the Apps Script wait for the real launch. Any
   new local test writes to prod again: use test-hub and tell Jose what to clean up.
+
+## Proveedor directo (proveedorDirecto-plan.md — phases 1–2 built 2026-11-12)
+- Supplier deliveries straight to the hub. Orders come read-only from an Apps Script web app
+  (`proveedor/apps-script.gs`, reference copy; Jose deploys it). It reads the master «Fill Rate Oc Nacional» («Base
+  datos Compras» = open orders of every hub, one orden per Num Oc; «Catalogo2» V Anaquel → caducidad) plus one hub file
+  per city for Temp, Comercial and phones. `PD_URL`/`PD_TOKEN` in index.html; empty → localhost reads
+  `fixtures/proveedor_mh-contry.json` (gitignored; `?pdlive=1` forces the live URL). test-hub borrows mh-contry.
+- Each supplier is an internal área `pd-{provSlug}` (§6.0): same folders, sessions, closing, deleting. `areaName()`
+  shows the supplier name (`PD_NAMES`); never show `pd-…` to a receptor.
+- Inicio: ¿De dónde viene? CH Guadalupe | Proveedor directo → Hub → ¿Quién recibe? → ¿Qué proveedor llegó?
+  (`pdStepHtml`). One query (`pdSesiones`) finds open pd receptions and which OCs a closed one covered
+  (`abrir`/`cerrar` `detalle.ocs` = pdKey list: num_oc, or `{provSlug}|{fecha}`). No order → no reception (§3.5).
+- Empezar recepción (`pdEmpezar`) re-reads the supplier with `&fresh=1`, sums the ticked OCs per sku_key and writes
+  `envios/{slug}/pd-{prov}/{fecha}__{epochMs}.json` with `origen:'proveedor'`, `orden:{proveedor, ocs, num_oc,
+  fechas_entrega, leido, comercial, comprador}`; lines carry `caducidad_min`, `temp`, `sku_marca`. No CSV. Phones are
+  never stored (only the live bridge answer has them, for `tel:` links). The CH stale-file modal skips these.
 
 ## How the code is laid out (index.html)
 - Helpers copied from armado-CH sit at the top, each block labelled. Our additions: `codeKey` (cleanBC + strip

@@ -79,6 +79,14 @@ h2{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.15;margin:
 .choice:hover{background:var(--c-surface-hover)}
 .choice.sel{background:var(--c-ink);color:var(--c-white)}
 .choice.big{font-size:18px;text-align:center;padding:18px 12px}
+.pd-list{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.choice.pd-prov{display:flex;flex-direction:column;gap:2px;width:100%}
+.pd-sub{font-size:13px;font-weight:500;color:var(--c-muted)}
+.choice.pd-done{opacity:.55}
+.pd-oc{display:flex;align-items:center;gap:12px;background:var(--c-surface);border-radius:18px;padding:12px 14px;font-size:15px;cursor:pointer;min-height:56px}
+.pd-oc.sel{box-shadow:inset 0 0 0 2px var(--c-ink)}
+.pd-oc.pd-done{opacity:.55;cursor:default}
+.btn.pd-call{flex:1;margin:0;text-decoration:none;background:var(--c-white);color:var(--c-ink);font-size:14px;padding:10px 12px;white-space:nowrap}
 .text-input{width:100%;min-height:56px;padding:14px 18px;font-size:17px;font-weight:600;border:2px solid var(--c-line);border-radius:var(--r-md);outline:none;background:var(--c-white)}
 .text-input::placeholder{color:var(--c-faint);font-weight:500}
 .text-input:focus{border-color:var(--c-teal)}
@@ -294,7 +302,7 @@ textarea.text-input{min-height:110px;font-size:15px;font-weight:500}
 
 <!-- ═══════════ INICIO (§6.1) ═══════════ -->
 <div class="screen active" id="screen-inicio">
-  <div class="hero"><span class="brand"><span class="brand-mark"></span>Calii</span><div class="hero-logo">MH Recibo</div><div class="hero-sub">Recepción de envíos de CH Guadalupe</div></div>
+  <div class="hero"><span class="brand"><span class="brand-mark"></span>Calii</span><div class="hero-logo">MH Recibo</div><div class="hero-sub">Recepción de CH Guadalupe y de proveedores</div></div>
   <div class="wrap">
     <div id="clock-warning" style="display:none"></div>
     <div class="status-line"><span class="db-dot" id="db-dot"></span><span id="db-label">Cargando base de imágenes…</span></div>
@@ -418,7 +426,16 @@ const SORTING_SLUG = { 'test-hub':'mh-contry' };
 const SIN_ARCHIVO_ENABLED = false;
 const AREAS = [ { id:'abarrotes', name:'Abarrotes' }, { id:'carnes', name:'Carnes' } ];
 function hubName(slug){ const h=HUBS.find(x=>x.slug===slug); return h?h.name:slug; }
-function areaName(id){ const a=AREAS.find(x=>x.id===id); return a?a.name:id; }
+function areaName(id){
+  const a=AREAS.find(x=>x.id===id); if(a) return a.name;
+  // Proveedor directo (§6.0): the internal área is never shown, only the supplier's name
+  if(/^pd-/.test(String(id||''))){
+    if(typeof S!=='undefined' && S.envio && S.envio.area===id && S.envio.orden) return S.envio.orden.proveedor;
+    if(typeof PD_NAMES!=='undefined' && PD_NAMES[id]) return PD_NAMES[id];
+    return String(id).slice(3).replace(/-/g,' ').replace(/(^|\s)\S/g,m=>m.toUpperCase());
+  }
+  return id;
+}
 
 /* ── FECHA Y HORA — copied from armado-CH (§9.1 of its handoff). Every date/time goes through here;
    never the device clock or its time zone. ── */
@@ -829,7 +846,7 @@ function modalOpen(){ return document.getElementById('modal-bg').classList.conta
 /* ════════════════════════════════════════════════════════════════════════════════════
    INICIO (§6.1) — hub → área → receptor, nothing pre-selected, nothing stored (rule 7).
    ════════════════════════════════════════════════════════════════════════════════════ */
-const INI={ hub:null, area:null, receptor:null, active:undefined }; // memory only
+const INI={ origen:null, hub:null, area:null, receptor:null, active:undefined, prov:null, pd:undefined, ocSel:null, otro:null }; // memory only
 let RECEPTORES; // undefined = loading · null = no config file yet · 'offline' · { slug: [names] }
 let _activeTok=0;
 async function loadReceptores(){
@@ -840,11 +857,14 @@ async function loadReceptores(){
 function receptoresDeHub(slug){ return (RECEPTORES && typeof RECEPTORES==='object' && Array.isArray(RECEPTORES[slug])) ? RECEPTORES[slug] : null; }
 function iniPick(k, v){
   INI[k]=v;
-  if(k==='hub'){ INI.area=null; INI.receptor=null; }
+  if(k==='origen'){ INI.hub=null; INI.area=null; INI.receptor=null; }
+  if(k==='origen' || k==='hub'){ INI.area=null; INI.receptor=null; INI.prov=null; INI.pd=undefined; INI.ocSel=null; INI.otro=null; _pdTok++; }
   if(k==='area'){ INI.receptor=null; }
+  if(k==='receptor' && INI.origen==='pd'){ INI.prov=null; INI.area=null; INI.ocSel=null; INI.otro=null; }
   INI.active=undefined;
   renderInicio();
-  if(INI.receptor) refreshActive();
+  if(INI.origen==='pd'){ if(k==='receptor') pdLoad(); }
+  else if(INI.receptor) refreshActive();
   const steps=document.querySelectorAll('#inicio-body .step'); const last=steps[steps.length-1];
   if(last) setTimeout(()=>last.scrollIntoView({behavior:'smooth', block:'nearest'}),30);
 }
@@ -854,29 +874,40 @@ function iniFreeName(){
   if(v.length<2){ toast('Escribe tu nombre'); return; }
   iniPick('receptor', v);
 }
+function receptorStepHtml(n){
+  let h=`<div class="step"><div class="step-title">${n} · ¿Quién recibe?</div>`;
+  const list=receptoresDeHub(INI.hub);
+  if(RECEPTORES===undefined) h+=`<div class="muted">Cargando receptores…</div>`;
+  else if(list && list.length){
+    h+=`<div class="choice-grid">`+list.map((n,i)=>`<button class="choice ${INI.receptor===n?'sel':''}" onclick="iniPickReceptor(${i})">${escapeHtml(n)}</button>`).join('')+`</div>`;
+  } else {
+    // Temporary until Admin → Receptores writes recibo/config/receptores.json (§6.8)
+    h+=`<div class="note">${RECEPTORES==='offline'?'Sin conexión para cargar la lista de receptores.':'Aún no hay lista de receptores para este hub.'} Escribe tu nombre (temporal).</div>`
+      +`<div style="display:flex;gap:8px"><input id="free-name" class="text-input" placeholder="Tu nombre" autocomplete="off" value="${escapeHtml(INI.receptor||'')}" onkeydown="if(event.key==='Enter')iniFreeName()"><button class="btn btn-primary" onclick="iniFreeName()">OK</button></div>`;
+  }
+  return h+`</div>`;
+}
 function renderInicio(){
   const b=document.getElementById('inicio-body'); if(!b) return;
-  let h=`<div class="step"><div class="step-title">1 · Hub</div><div class="choice-grid">`
+  // 1 · CH Guadalupe | Proveedor directo (proveedorDirecto-plan §6.1)
+  let h=`<div class="step"><div class="step-title">1 · ¿De dónde viene la entrega?</div><div class="choice-grid">`
+    +`<button class="choice big ${INI.origen==='ch'?'sel':''}" onclick="iniPick('origen','ch')">CH Guadalupe</button>`
+    +`<button class="choice big ${INI.origen==='pd'?'sel':''}" onclick="iniPick('origen','pd')">Proveedor directo</button></div></div>`;
+  if(INI.origen) h+=`<div class="step"><div class="step-title">2 · Hub</div><div class="choice-grid">`
     +HUBS.map(x=>`<button class="choice ${INI.hub===x.slug?'sel':''}" onclick="iniPick('hub','${x.slug}')">${escapeHtml(x.name)}</button>`).join('')+`</div></div>`;
-  if(INI.hub){
-    h+=`<div class="step"><div class="step-title">2 · Área</div><div class="choice-grid">`
+  if(INI.origen==='pd'){
+    if(INI.hub) h+=receptorStepHtml(3);
+    if(INI.hub && INI.receptor) h+=`<div class="step"><div class="step-title">4 · ¿Qué proveedor llegó?</div>${pdStepHtml()}</div>`;
+    h+=`<button class="link-btn" style="color:var(--gray-500);margin-top:28px" onclick="openAdmin()">Admin</button>`;
+    b.innerHTML=h; return;
+  }
+  if(INI.origen==='ch' && INI.hub){
+    h+=`<div class="step"><div class="step-title">3 · Área</div><div class="choice-grid">`
       +AREAS.map(a=>`<button class="choice big ${INI.area===a.id?'sel':''}" onclick="iniPick('area','${a.id}')">${a.name}</button>`).join('')+`</div></div>`;
   }
-  if(INI.hub && INI.area){
-    h+=`<div class="step"><div class="step-title">3 · ¿Quién recibe?</div>`;
-    const list=receptoresDeHub(INI.hub);
-    if(RECEPTORES===undefined) h+=`<div class="muted">Cargando receptores…</div>`;
-    else if(list && list.length){
-      h+=`<div class="choice-grid">`+list.map((n,i)=>`<button class="choice ${INI.receptor===n?'sel':''}" onclick="iniPickReceptor(${i})">${escapeHtml(n)}</button>`).join('')+`</div>`;
-    } else {
-      // Temporary until Admin → Receptores writes recibo/config/receptores.json (§6.8)
-      h+=`<div class="note">${RECEPTORES==='offline'?'Sin conexión para cargar la lista de receptores.':'Aún no hay lista de receptores para este hub.'} Escribe tu nombre (temporal).</div>`
-        +`<div style="display:flex;gap:8px"><input id="free-name" class="text-input" placeholder="Tu nombre" autocomplete="off" value="${escapeHtml(INI.receptor||'')}" onkeydown="if(event.key==='Enter')iniFreeName()"><button class="btn btn-primary" onclick="iniFreeName()">OK</button></div>`;
-    }
-    h+=`</div>`;
-  }
-  if(INI.hub && INI.area && INI.receptor){
-    h+=`<div class="step"><div class="step-title">4 · Envío de ${escapeHtml(hubName(INI.hub))} · ${areaName(INI.area)}</div>${inicioActionsHtml()}
+  if(INI.origen==='ch' && INI.hub && INI.area) h+=receptorStepHtml(4);
+  if(INI.origen==='ch' && INI.hub && INI.area && INI.receptor){
+    h+=`<div class="step"><div class="step-title">5 · Envío de ${escapeHtml(hubName(INI.hub))} · ${areaName(INI.area)}</div>${inicioActionsHtml()}
       <button class="link-btn" onclick="openRecepciones()">Recepciones cerradas (para registrar en el sistema)</button></div>`;
   }
   h+=`<button class="link-btn" style="color:var(--gray-500);margin-top:28px" onclick="openAdmin()">Admin</button>`;
@@ -922,7 +953,8 @@ async function refreshActive(){
 function goInicio(){
   closeCamera(); closeSheet();
   showScreen('screen-inicio'); renderInicio();
-  if(INI.receptor) refreshActive();
+  if(INI.origen==='pd'){ if(INI.receptor) pdLoad(); if(INI.area) refreshActive(); }
+  else if(INI.receptor) refreshActive();
 }
 // Borrar envío: a file uploaded by mistake (wrong hub, a test). Typed "borrar" confirms. The reception's events stay
 // (append-only) and an admin 'borrar' event ends it; the .json/.csv are removed and Inicio shows no envío (an older
@@ -991,6 +1023,285 @@ async function sessionHasScans(sessionId){
   if(OUTBOX.some(e=>e.session_id===sessionId && e.tipo==='scan')) return true;
   const r=await pgSelect('rec_events', `session_id=eq.${encodeURIComponent(sessionId)}&tipo=eq.scan&select=id&limit=1`);
   return r.length>0;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════════════
+   PROVEEDOR DIRECTO (proveedorDirecto-plan.md) — supplier deliveries straight to the hub. Orders come read-only from
+   the Apps Script bridge (proveedor/apps-script.gs, plan §5). Each supplier is stored as an internal área
+   'pd-{provSlug}' (§6.0) so the hub+área machinery works unchanged; receptors only ever see the supplier's name.
+   ════════════════════════════════════════════════════════════════════════════════════ */
+const PD_URL='';    // Apps Script /exec URL (plan §5) — empty until deployed
+const PD_TOKEN='';
+// Localhost reads the gitignored fixture unless ?pdlive=1 (and PD_URL is set). test-hub borrows MH Contry's orders.
+const PD_FIXTURE = IS_LOCAL && (!PD_URL || !/[?&]pdlive=1/.test(location.search));
+const PD_HUB={ 'test-hub':'mh-contry' };
+const PD_NAMES={}; // 'pd-lala' → 'LALA' (filled from every read; areaName uses it)
+function provSlug(name){ return normName(name).replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || 'proveedor'; }
+function pdArea(name){ const a='pd-'+provSlug(name); PD_NAMES[a]=name; return a; }
+function isPdArea(a){ return /^pd-/.test(String(a||'')); }
+function pdKey(o){ return o.num_oc || (provSlug(o.proveedor)+'|'+o.fecha_entrega); }
+const DOW=['dom','lun','mar','mié','jue','vie','sáb'];
+function dowCorto(ymd){ return DOW[new Date(ymd+'T12:00:00Z').getUTCDay()]; }
+// «entrega hoy» · «programada jue 14» · «atrasada: era el lun 10»
+function pdFechaLabel(ymd){
+  const t=todayStr(), d=Number(String(ymd).slice(8,10));
+  if(ymd===t) return 'entrega hoy';
+  return ymd>t ? `programada ${dowCorto(ymd)} ${d}` : `atrasada: era el ${dowCorto(ymd)} ${d}`;
+}
+function sameName(a,b){ return normName(a)===normName(b); }
+
+// GET the bridge (or the fixture). `prov` narrows to one supplier; `fresh` skips the script's 30 s cache.
+async function pdFetch(slug, { prov=null, fresh=false }={}){
+  const hub=PD_HUB[slug]||slug;
+  let d;
+  if(PD_FIXTURE){
+    const r=await fetch(`fixtures/proveedor_${hub}.json`, { cache:'no-store' });
+    if(!r.ok) throw new Error(r.status===404 ? `No hay fixture para ${hub}` : String(r.status));
+    d=await r.json();
+  } else {
+    if(!PD_URL) throw new Error('La conexión con las órdenes de proveedor aún no está configurada');
+    const q=new URLSearchParams({ token:PD_TOKEN, hub }); if(prov) q.set('proveedor', prov); if(fresh) q.set('fresh','1');
+    const ctl=new AbortController(), to=setTimeout(()=>ctl.abort(), 30000);
+    try{ d=await (await fetch(`${PD_URL}?${q}`, { signal:ctl.signal, cache:'no-store' })).json(); }
+    catch(e){ throw e.name==='AbortError' ? new TypeError('timeout') : e; }
+    finally{ clearTimeout(to); }
+    if(d && d.error) throw new Error(d.error==='token' ? 'Token de órdenes inválido' : d.error);
+  }
+  d.ordenes=d.ordenes||[]; d.contactos=d.contactos||{}; d.telefonos=d.telefonos||{}; d.proveedores=d.proveedores||[];
+  if(prov){ // the fixture holds every supplier; the script already narrowed it
+    d.ordenes=d.ordenes.filter(o=>sameName(o.proveedor, prov));
+    d.catalogo=(d.catalogo||[]).filter(c=>sameName(c.proveedor, prov));
+  }
+  d.ordenes.forEach(o=>pdArea(o.proveedor));
+  return d;
+}
+// Supplier receptions of this hub (one query): open ones per área, and which orders a closed reception already covers.
+async function pdSesiones(slug){
+  const desde=addDaysStr(todayStr(), -30);
+  const rows=await pgSelectAll('rec_events', `hub=eq.${encodeURIComponent(slug)}&area=like.pd-*&fecha=gte.${desde}&tipo=in.(abrir,reemplazo,cerrar,admin)&select=session_id,area,fecha,tipo,detalle,ts,receptor&order=id.asc`);
+  const by=new Map();
+  for(const e of rows){
+    const s=by.get(e.session_id) || { id:e.session_id, area:e.area, fecha:e.fecha, abierta:e.ts, receptor:e.receptor, ocs:[], proveedor:'', closed:null, borrada:false };
+    const d=e.detalle||{};
+    if(e.tipo==='abrir' || e.tipo==='reemplazo'){ if(d.ocs) s.ocs=d.ocs; if(d.proveedor){ s.proveedor=d.proveedor; PD_NAMES[e.area]=d.proveedor; } }
+    if(e.tipo==='cerrar'){ s.closed=e.ts; if(d.ocs) s.ocs=d.ocs; }
+    if(e.tipo==='admin' && d.accion==='reabrir') s.closed=null;
+    if(e.tipo==='admin' && d.accion==='borrar') s.borrada=true;
+    by.set(e.session_id, s);
+  }
+  const abiertas=new Map(), recibidas=new Map();
+  for(const s of by.values()){
+    if(s.borrada) continue;
+    if(s.closed){ for(const k of s.ocs) recibidas.set(k, localDateStr(new Date(s.closed))); }
+    else abiertas.set(s.area, s); // newest wins (rows are in id order)
+  }
+  return { abiertas, recibidas };
+}
+function addDaysStr(ymd, n){ const d=new Date(ymd+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); }
+
+/* ── Inicio state for Proveedor directo (memory only, rule 7) ── */
+// INI.pd: undefined = loading · { error } · { data, abiertas, recibidas }
+// INI.prov: chosen supplier name · INI.ocSel: Set of pdKey · INI.otro: search text (null = closed)
+let _pdTok=0;
+async function pdLoad({ prov=null, fresh=false }={}){
+  const tok=++_pdTok, slug=INI.hub;
+  if(!prov){ INI.pd=undefined; renderInicio(); }
+  else if(INI.pd && INI.pd.data){ INI.pd.releyendo=true; renderInicio(); }
+  try{
+    const [data, ses]=await Promise.all([ pdFetch(slug, { prov, fresh }), pdSesiones(slug).catch(()=>({ abiertas:new Map(), recibidas:new Map(), offline:true })) ]);
+    if(tok!==_pdTok || slug!==INI.hub) return;
+    if(prov && INI.pd && INI.pd.data){ // merge the supplier's fresh lines into the full answer
+      const full=INI.pd.data;
+      full.ordenes=full.ordenes.filter(o=>!sameName(o.proveedor, prov)).concat(data.ordenes)
+        .sort((a,b)=>a.fecha_entrega.localeCompare(b.fecha_entrega) || a.proveedor.localeCompare(b.proveedor,'es'));
+      Object.assign(full.contactos, data.contactos); Object.assign(full.telefonos, data.telefonos);
+      full.leido=data.leido; full.catalogo=data.catalogo;
+      INI.pd={ data:full, abiertas:ses.abiertas, recibidas:ses.recibidas, offlineSes:!!ses.offline };
+    } else INI.pd={ data, abiertas:ses.abiertas, recibidas:ses.recibidas, offlineSes:!!ses.offline };
+    if(INI.prov) pdDefaultSel();
+  }catch(e){
+    if(tok!==_pdTok) return;
+    if(prov && INI.pd && INI.pd.data){ INI.pd.releyendo=false; toast(isNetErr(e)?'Sin conexión: no se pudo volver a leer la orden':'No se pudo leer la orden ('+e.message+')', 4000); }
+    else INI.pd={ error: isNetErr(e) ? 'Sin conexión: no se pudieron leer las órdenes de proveedor.' : 'No se pudieron leer las órdenes ('+e.message+').' };
+  }
+  renderInicio();
+}
+function pdOrdenesDe(prov){ return ((INI.pd&&INI.pd.data&&INI.pd.data.ordenes)||[]).filter(o=>sameName(o.proveedor, prov)); }
+function pdRecibida(o){ return INI.pd && INI.pd.recibidas && INI.pd.recibidas.get(pdKey(o)); }
+// Default tick: every not-received OC of the nearest pending date (today first, then late, then early)
+function pdDefaultSel(){
+  const pend=pdOrdenesDe(INI.prov).filter(o=>!pdRecibida(o));
+  INI.ocSel=new Set();
+  if(!pend.length) return;
+  const t=todayStr();
+  const best=pend.map(o=>o.fecha_entrega).sort((a,b)=>Math.abs(daysBetween(t,a))-Math.abs(daysBetween(t,b)) || a.localeCompare(b))[0];
+  pend.filter(o=>o.fecha_entrega===best).forEach(o=>INI.ocSel.add(pdKey(o)));
+}
+function pdPickProv(name){
+  INI.prov=name; INI.area=pdArea(name); INI.otro=null; INI.active=undefined;
+  pdDefaultSel(); renderInicio(); refreshActive();
+  setTimeout(()=>{ const el=document.getElementById('pd-panel'); if(el) el.scrollIntoView({behavior:'smooth', block:'start'}); },30);
+}
+function pdPickProvIdx(i){ pdPickProv(INI._provList[i]); }
+function pdCambiarProv(){ INI.prov=null; INI.area=null; INI.active=undefined; INI.ocSel=null; renderInicio(); }
+function pdToggleOc(k){ if(INI.ocSel.has(k)) INI.ocSel.delete(k); else INI.ocSel.add(k); renderInicio(); }
+function pdReleer(){ if(INI.prov) pdLoad({ prov:INI.prov, fresh:true }); else pdLoad({ fresh:true }); }
+function pdOtro(v){ INI.otro=v; renderInicio(); const el=document.getElementById('pd-otro'); if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
+
+// Contacts (plan §3.3): Comercial from Encargados + Comprador from the order. Phones only become tel: links.
+function pdContactos(prov){
+  const d=(INI.pd&&INI.pd.data)||{}, ords=pdOrdenesDe(prov);
+  const c=Object.entries(d.contactos||{}).find(([k])=>sameName(k, prov));
+  const comercial=(ords.find(o=>o.comercial)||{}).comercial || (c&&c[1].comercial) || '';
+  const comprador=(ords.find(o=>o.comprador)||{}).comprador || (c&&c[1].comprador) || '';
+  return { comercial, comprador };
+}
+function pdTel(nombre){
+  const t=(INI.pd&&INI.pd.data&&INI.pd.data.telefonos)||{};
+  const k=Object.keys(t).find(n=>sameName(n, nombre));
+  return k ? String(t[k]).replace(/[^\d+]/g,'') : '';
+}
+const NOMBRE_TITLE=s=>String(s||'').toLowerCase().replace(/(^|\s)\S/g,m=>m.toUpperCase());
+// «Contacta a Catalina (comercial) o Borjas (compras)» + Llamar links. No Comercial → the abastecimiento Slack channel.
+function pdContactoHtml(prov){
+  const { comercial, comprador }=pdContactos(prov);
+  const comp=comprador?NOMBRE_TITLE(comprador):'';
+  let txt;
+  if(comercial) txt=`contacta a <b>${escapeHtml(comercial)}</b> (comercial)${comp?` o <b>${escapeHtml(comp)}</b> (compras)`:''}`;
+  else txt=`contacta al equipo comercial en el canal de abastecimiento en Slack${comp?` o a <b>${escapeHtml(comp)}</b> (compras)`:''}`;
+  const links=[comercial, comp].filter(Boolean).map(n=>{ const tel=pdTel(n); return tel?`<a class="btn pd-call" href="tel:${escapeHtml(tel)}">Llamar a ${escapeHtml(n)}</a>`:''; }).join('');
+  return { txt, links: links?`<div style="display:flex;gap:8px;margin-top:10px">${links}</div>`:'' };
+}
+
+function pdStepHtml(){
+  const P=INI.pd;
+  if(P===undefined) return `<div class="muted">Leyendo las órdenes de proveedor…</div>`;
+  if(P.error) return `<div class="err-box">${escapeHtml(P.error)}</div><button class="btn btn-secondary btn-block" onclick="pdLoad({fresh:true})">Reintentar</button>`;
+  if(INI.prov) return pdPanelHtml();
+  const d=P.data, t=todayStr();
+  // one row per supplier: open reception on top, then pending orders by nearest date, then fully received
+  const provs=new Map();
+  for(const o of d.ordenes){
+    const k=normName(o.proveedor); if(!provs.has(k)) provs.set(k, { name:o.proveedor, pend:[], rec:[] });
+    (pdRecibida(o)?provs.get(k).rec:provs.get(k).pend).push(o);
+  }
+  const abiertas=[...P.abiertas.values()].map(s=>({ s, name:s.proveedor||PD_NAMES[s.area]||s.area }));
+  abiertas.forEach(a=>provs.delete(normName(a.name)));
+  const near=o=>Math.abs(daysBetween(t,o.fecha_entrega))*2+(o.fecha_entrega>t?1:0);
+  const pend=[...provs.values()].filter(p=>p.pend.length).sort((a,b)=>Math.min(...a.pend.map(near))-Math.min(...b.pend.map(near)) || a.name.localeCompare(b.name,'es'));
+  const rec=[...provs.values()].filter(p=>!p.pend.length);
+  INI._provList=[];
+  const btn=(name, sub, cls='')=>{ INI._provList.push(name); return `<button class="choice pd-prov ${cls}" onclick="pdPickProvIdx(${INI._provList.length-1})"><span>${escapeHtml(name)}</span><span class="pd-sub">${sub}</span></button>`; };
+  let h='';
+  if(abiertas.length) h+=`<div class="pd-list">`+abiertas.map(a=>btn(a.name, `<span class="tag orange">recepción abierta</span> desde ${a.s.fecha===t?'hoy':fechaLarga(a.s.fecha)} ${localHM(new Date(a.s.abierta))}`)).join('')+`</div>`;
+  if(pend.length) h+=`<div class="pd-list">`+pend.map(p=>{
+      const best=p.pend.slice().sort((a,b)=>near(a)-near(b))[0], same=p.pend.filter(o=>o.fecha_entrega===best.fecha_entrega);
+      const n=new Set(same.flatMap(o=>o.lineas.map(l=>l.codigo||l.producto))).size;
+      const extra=p.pend.length>same.length?` · +${p.pend.length-same.length} orden${p.pend.length-same.length===1?'':'es'} más`:'';
+      return btn(p.name, `${n} producto${n===1?'':'s'} · ${pdFechaLabel(best.fecha_entrega)}${extra}`);
+    }).join('')+`</div>`;
+  if(!abiertas.length && !pend.length) h+=`<div class="info-card">No hay órdenes de proveedor abiertas para este hub.</div>`;
+  if(rec.length) h+=`<div class="pd-list">`+rec.map(p=>btn(p.name, `recibida ${fechaLarga(pdRecibida(p.rec[p.rec.length-1]))}`, 'pd-done')).join('')+`</div>`;
+  // «Otro proveedor» (plan §6.1): any supplier from the sheet; no order → the §3.5 message
+  if(INI.otro==null) h+=`<button class="btn btn-secondary btn-block" style="margin-top:8px" onclick="pdOtro('')">Otro proveedor</button>`;
+  else {
+    const q=normName(INI.otro), hits=q.length<2?[]:d.proveedores.filter(p=>normName(p).includes(q)).slice(0,8);
+    h+=`<div style="margin-top:8px"><input id="pd-otro" class="text-input" placeholder="Busca el proveedor" autocomplete="off" value="${escapeHtml(INI.otro)}" oninput="pdOtro(this.value)"></div>`
+      +(hits.length?`<div class="pd-list" style="margin-top:6px">`+hits.map(p=>btn(p, pdOrdenesDe(p).length?'con orden':'sin orden cargada')).join('')+`</div>`
+        :q.length>=2?`<div class="muted" style="margin-top:6px">Ningún proveedor coincide.</div>`:'');
+  }
+  h+=`<button class="link-btn" onclick="pdReleer()">Volver a leer las órdenes</button>`;
+  if(P.offlineSes) h+=`<div class="muted">Sin conexión para revisar recepciones abiertas.</div>`;
+  return h;
+}
+function pdPanelHtml(){
+  const prov=INI.prov, a=INI.active, t=todayStr(), P=INI.pd;
+  let h=`<div id="pd-panel" class="info-card" style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:18px">${escapeHtml(prov)}</b><button class="link-btn" style="margin:0;padding:8px 4px" onclick="pdCambiarProv()">Cambiar</button></div>`;
+  const releer=`<button class="btn btn-secondary btn-block" ${P.releyendo?'disabled':''} onclick="pdReleer()">${P.releyendo?'Leyendo la orden…':'Volver a leer la orden'}</button>`;
+  if(a===undefined) return h+`<div class="muted">Buscando recepciones abiertas…</div>`;
+  if(a.offline && !a.data) return h+`<div class="warn-box">Sin conexión. Conéctate a internet para empezar la recepción.</div><button class="btn btn-secondary btn-block" onclick="refreshActive()">Reintentar</button>`;
+  // an open reception of this supplier → continue it (one at a time per supplier)
+  if(a.data && !a.closed){
+    const d=a.data;
+    return h+`<div class="info-card"><b>Recepción abierta</b> desde ${d.session_fecha===t?'hoy':'el '+fechaLarga(d.session_fecha)}, ${localHM(new Date(d.uploadedAt))}${d.receptor?' · '+escapeHtml(d.receptor):''}
+        <div class="muted" style="font-size:13px;margin-top:2px">${d.stats.lineas} productos · ${(d.orden&&d.orden.ocs||[]).map(o=>o.num_oc?'OC '+escapeHtml(o.num_oc):pdFechaLabel(o.fecha_entrega)).join(', ')}</div></div>
+      <div class="stack"><button class="btn btn-primary btn-block" onclick="continuarRecepcion()">Continuar recepción</button></div>
+      ${a.offline?'':`<button class="link-btn" style="color:var(--red)" onclick="borrarEnvio()">Borrar esta recepción</button>`}`;
+  }
+  const ords=pdOrdenesDe(prov), c=pdContactoHtml(prov);
+  const pend=ords.filter(o=>!pdRecibida(o)), rec=ords.filter(o=>pdRecibida(o));
+  if(!pend.length){
+    // §3.5 — no order, no reception
+    h+=`<div class="warn-box"><b>No hay orden cargada para ${escapeHtml(prov)}.</b> No puedes empezar la recepción hasta que aparezca: ${c.txt}.${c.links}</div>`;
+    if(rec.length) h+=`<div class="muted" style="font-size:13px;margin-bottom:8px">${rec.map(o=>`${o.num_oc?'OC '+escapeHtml(o.num_oc):pdFechaLabel(o.fecha_entrega)}: recibida ${fechaLarga(pdRecibida(o))}`).join(' · ')}</div>`;
+    return h+releer+`<div class="muted" style="font-size:12px;margin-top:6px;text-align:center">Leída ${P.data.leido?localHM(new Date(P.data.leido)):''}</div>`;
+  }
+  // which orders arrived (§6.1: several OCs → tick; default = the nearest date)
+  if(pend.length>1 || rec.length){
+    h+=`<div class="step-title" style="margin-top:4px">¿Qué orden llegó?</div><div class="pd-list">`
+      +pend.map(o=>{ const k=pdKey(o), on=INI.ocSel.has(k);
+        return `<label class="pd-oc ${on?'sel':''}"><input type="checkbox" class="chk" ${on?'checked':''} onchange="pdToggleOc('${escapeHtml(k).replace(/'/g,'&#39;')}')"><span><b>${o.num_oc?'OC '+escapeHtml(o.num_oc):'Orden'}</b> · ${o.lineas.length} producto${o.lineas.length===1?'':'s'}<br><span class="pd-sub">${pdFechaLabel(o.fecha_entrega)}</span></span></label>`; }).join('')
+      +rec.map(o=>`<div class="pd-oc pd-done"><span><b>${o.num_oc?'OC '+escapeHtml(o.num_oc):'Orden'}</b><br><span class="pd-sub">recibida ${fechaLarga(pdRecibida(o))}</span></span></div>`).join('')+`</div>`;
+  } else {
+    const o=pend[0];
+    h+=`<div class="info-card" style="margin-bottom:8px"><b>${o.num_oc?'OC '+escapeHtml(o.num_oc):'Orden'}</b> · ${o.lineas.length} producto${o.lineas.length===1?'':'s'}<div class="muted" style="font-size:13px">${pdFechaLabel(o.fecha_entrega)}</div></div>`;
+  }
+  const sel=pend.filter(o=>INI.ocSel.has(pdKey(o)));
+  const fechas=[...new Set(sel.map(o=>o.fecha_entrega))].filter(f=>f!==t).sort();
+  // §3.4 — early or late is fine, but say so (inline, not a modal)
+  if(fechas.length) h+=`<div class="warn-box">La orden de <b>${escapeHtml(prov)}</b> está programada para el <b>${fechas.map(f=>`${dowCorto(f)} ${fechaLarga(f)}`).join(' y el ')}</b>. Puedes empezar la recepción; ${c.txt} para confirmar que sea correcta.${c.links}</div>`;
+  h+=`<button class="btn btn-primary btn-block" style="margin-top:8px" ${sel.length&&!INI.pdBusy?'':'disabled'} onclick="pdEmpezar()">${INI.pdBusy?'Preparando la recepción…':'Empezar recepción'}</button>`;
+  h+=`<button class="link-btn" ${P.releyendo?'disabled':''} onclick="pdReleer()">${P.releyendo?'Leyendo la orden…':'Volver a leer la orden'}</button>`;
+  return h;
+}
+
+// Empezar recepción (§6.2): re-read the supplier (fresh), write the snapshot = the reception's envío, open Recibir.
+async function pdEmpezar(){
+  if(INI.pdBusy || !INI.prov) return;
+  const slug=INI.hub, prov=INI.prov, area=pdArea(prov), keys=new Set(INI.ocSel||[]);
+  INI.pdBusy=true; renderInicio();
+  try{
+    const prev=await findActiveEnvio(slug, area);
+    if(prev.offline) throw new TypeError('offline');
+    if(prev.data && !prev.closed){ toast('Ya hay una recepción abierta de este proveedor: continúala'); INI.active=prev; return; }
+    const d=await pdFetch(slug, { prov, fresh:true });
+    const ocs=d.ordenes.filter(o=>keys.has(pdKey(o)));
+    if(ocs.length!==keys.size){ // the order changed in the sheet since the list was read
+      INI.pd.data.ordenes=INI.pd.data.ordenes.filter(o=>!sameName(o.proveedor, prov)).concat(d.ordenes);
+      pdDefaultSel(); toast('La orden cambió en el archivo de compras: revisa y vuelve a empezar', 4500); return;
+    }
+    const now=serverNow(), epochMs=now.getTime(), fecha=localDateStr(now);
+    // lines of every ticked OC, summed per product
+    const by=new Map();
+    for(const o of ocs) for(const l of o.lineas){
+      const barcode=cleanBC(l.codigo).replace(/\s+/g,''), sku_key=skuKeyOf(barcode, l.producto);
+      const x=by.get(sku_key);
+      if(x){ x.esperado=round2(x.esperado+Number(l.pedido)); if((l.caducidad_min||'')>(x.caducidad_min||'')) x.caducidad_min=l.caducidad_min; continue; }
+      by.set(sku_key, { rowIndex:by.size, producto:l.producto, barcode, sku_key, kgpz:normKgPz(l.kgpz), esperado:round2(Number(l.pedido)),
+        vida_dias:null, caducidad_min:l.caducidad_min||'', temp:String(l.temp||''), sku_marca:l.sku_marca||'', categoria:'' });
+    }
+    const lines=[...by.values()];
+    const catalogo=(d.catalogo||[]).filter(c=>!by.has(skuKeyOf(cleanBC(c.codigo), c.producto))).map(c=>[c.producto, cleanBC(c.codigo), normKgPz(c.kgpz), null]);
+    const { comercial, comprador }=pdContactos(prov);
+    const session_id=`${slug}__${area}__${fecha}__${epochMs}`, base=`envios/${slug}/${area}/${fecha}__${epochMs}`;
+    const ocInfo=ocs.map(o=>({ num_oc:o.num_oc||'', fecha_entrega:o.fecha_entrega, key:pdKey(o) }));
+    const data={ v:1, origen:'proveedor', hub:slug, area, fecha, epochMs, uploadedAt:now.toISOString(), receptor:INI.receptor,
+      sourceFile:'', session_id, session_fecha:fecha,
+      // names only: phones stay in the bridge's live answer (never stored)
+      orden:{ proveedor:prov, ocs:ocInfo, num_oc:ocInfo.map(o=>o.num_oc).filter(Boolean), fechas_entrega:[...new Set(ocs.map(o=>o.fecha_entrega))].sort(),
+              leido:d.leido||null, comercial, comprador },
+      stats:{ lineas:lines.length, kg:lines.filter(l=>l.kgpz==='Kg').length, sinCodigo:lines.filter(l=>!l.barcode).length, catalogo:catalogo.length, renglones:ocs.reduce((n,o)=>n+o.lineas.length,0) },
+      lines, catalogo };
+    await sbUpload(base+'.json', JSON.stringify(data), 'application/json');
+    data._path=base+'.json';
+    INI.area=area;
+    openRecibir(data);
+    recordEvent(makeEvent('abrir', { detalle:{ envio:base+'.json', origen:'proveedor', proveedor:prov, ocs:ocInfo.map(o=>o.key),
+      num_oc:data.orden.num_oc, fechas_entrega:data.orden.fechas_entrega, lineas:lines.length } }));
+    toast(`✓ Recepción de ${prov}. Empieza a escanear.`);
+  }catch(e){
+    toast(isNetErr(e)?'Sin conexión: no se pudo empezar. Intenta de nuevo.':'No se pudo empezar ('+e.message+')', 4500);
+  }finally{ INI.pdBusy=false; if(screenActive('screen-inicio')) renderInicio(); }
 }
 
 /* ════════════════════════════════════════════════════════════════════════════════════
@@ -1307,7 +1618,8 @@ function openRecibir(data, opts={}){
 /* ── §6.7 stale warning: the active file was uploaded on an earlier day. Ignorar lasts for that file today. ── */
 function staleIgnored(){ try{ return localStorage.getItem('mr_stale_ign_'+S.envio._path)===todayStr(); }catch(_){ return S.staleIgnMem===S.envio._path+todayStr(); } }
 async function staleCheck(){
-  if(!S.envio || S.envio.sinArchivo || !(S.envio.fecha<todayStr()) || staleIgnored() || modalOpen()) return true;
+  // Proveedor directo: the snapshot is the order, not a daily file — never ask to upload today's
+  if(!S.envio || S.envio.sinArchivo || S.envio.origen==='proveedor' || !(S.envio.fecha<todayStr()) || staleIgnored() || modalOpen()) return true;
   if(S.conParciales || parciales().length) return true;
   S.staleAsked=true;
   const v=await showModal({ title:`Estás trabajando con el archivo cargado el ${fechaLarga(S.envio.fecha)}.`,
