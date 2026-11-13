@@ -245,6 +245,21 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .filters select{height:40px;padding:0 12px;font-size:14px;font-weight:600;border:none;border-radius:var(--r-pill);background:var(--c-surface)}
 .chk{width:30px;height:30px;flex-shrink:0;accent-color:var(--c-teal-dark)}
 .sum-row.ticked{opacity:.5}
+/* Proveedor directo, botones mode: one row per order line, answered with a tap */
+.pdb-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+.pdb-tabs .choice{min-height:44px;padding:0 10px;text-align:center;font-size:14px}
+.pdb-row{background:var(--c-surface);border-radius:var(--r-lg);padding:12px;margin-bottom:8px;border-left:4px solid transparent;scroll-margin-top:90px}
+.pdb-row.done{border-left-color:var(--c-teal)}
+.pdb-row.dif{border-left-color:var(--c-ink)}
+.pdb-row.foco{box-shadow:0 0 0 3px var(--c-teal)}
+.pdb-ped{display:flex;align-items:baseline;gap:6px;margin-top:8px}
+.pdb-ped b{font-size:30px;font-weight:800;color:var(--c-teal-dark);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.pdb-ped span{font-size:14px;font-weight:700;color:var(--c-muted)}
+.pdb-btns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+.pdb-btns .btn{min-height:48px;padding:0 8px;font-size:15px}
+.pdb-btns .btn-secondary{background:var(--c-white)}
+.pdb-row .btn-secondary{background:var(--c-white)}
+.pdb-res{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;font-size:14px;font-weight:700}
 .badge-warn{display:inline-block;font-size:12px;font-weight:700;padding:3px 10px;border-radius:var(--r-pill);background:var(--c-ink);color:var(--c-white);margin:2px 4px 2px 0}
 
 /* Admin */
@@ -348,13 +363,18 @@ textarea.text-input{min-height:110px;font-size:15px;font-weight:500}
       <button class="icon-btn" id="kb-toggle" onclick="toggleKeyboard()" title="Escribir el código" aria-label="Escribir el código"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="3"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg></button>
       <button class="icon-btn" onclick="openCamera()" title="Escanear con la cámara" aria-label="Escanear con la cámara"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
     </div>
-    <div class="row2">
+    <div class="row2" id="rec-row2">
       <button class="btn btn-secondary" onclick="openSinCodigo()">Sin código</button>
       <button class="btn btn-secondary" onclick="openPendientes()">Pendientes <span id="pend-count"></span></button>
     </div>
-    <button class="btn btn-secondary btn-block" style="margin:-4px 0 12px;font-size:15px;padding:10px" onclick="openCanastas()">Canastas (lo recibido por pasillo)</button>
+    <button class="btn btn-secondary btn-block" id="rec-canastas" style="margin:-4px 0 12px;font-size:15px;padding:10px" onclick="openCanastas()">Canastas (lo recibido por pasillo)</button>
     <div id="card-area"></div>
-    <div class="section-title">Últimos escaneos</div>
+    <div id="pd-lista" style="display:none">
+      <div class="pdb-tabs" id="pdb-tabs"></div>
+      <input type="text" id="pd-q" class="text-input" style="min-height:46px;padding:10px 16px;font-size:15px;margin-bottom:10px" autocomplete="off" placeholder="Buscar en la orden…" oninput="pdBListRender()">
+      <div id="pd-rows"></div>
+    </div>
+    <div class="section-title" id="recent-title">Últimos escaneos</div>
     <div id="recent-list" class="rlist"></div>
     <div id="rec-footer" style="margin-top:20px"></div>
   </div>
@@ -1179,6 +1199,7 @@ const NOMBRE_TITLE=s=>String(s||'').toLowerCase().replace(/(^|\s)\S/g,m=>m.toUpp
 function pdContactoHtml(prov){ return pdContactoFrom(pdContactos(prov)); }
 
 function isPd(){ return !!(S.envio && S.envio.origen==='proveedor'); }
+function pdBotones(){ return isPd() && S.envio.modo==='botones'; }
 // Temp from the sheet: «Ambiente», «1» (refrigerado), «-18» (congelado)
 function tempLabel(t){
   const s=String(t||'').trim(); if(!s) return '';
@@ -1293,19 +1314,19 @@ async function pdEmpezar(){
     }
     const now=serverNow(), fecha=localDateStr(now);
     const session_id=`${slug}__${area}__${fecha}__${now.getTime()}`;
-    const data=pdBuildEnvio({ slug, prov, area, ocs, d, session_id, session_fecha:fecha, receptor:INI.receptor, comercial:pdContactos(prov).comercial, comprador:pdContactos(prov).comprador });
+    const data=pdBuildEnvio({ slug, prov, area, ocs, d, session_id, session_fecha:fecha, receptor:INI.receptor, comercial:pdContactos(prov).comercial, comprador:pdContactos(prov).comprador, modo:'botones' });
     await sbUpload(data._path, JSON.stringify(data), 'application/json');
     INI.area=area;
     openRecibir(data);
     recordEvent(makeEvent('abrir', { detalle:{ envio:data._path, origen:'proveedor', proveedor:prov, ocs:data.orden.ocs.map(o=>o.key),
       num_oc:data.orden.num_oc, fechas_entrega:data.orden.fechas_entrega, lineas:data.lines.length } }));
-    toast(`✓ Recepción de ${prov}. Empieza a escanear.`);
+    toast(`✓ Recepción de ${prov}. Revisa cada producto de la orden.`);
   }catch(e){
     toast(isNetErr(e)?'Sin conexión: no se pudo empezar. Intenta de nuevo.':'No se pudo empezar ('+e.message+')', 4500);
   }finally{ INI.pdBusy=false; if(screenActive('screen-inicio')) renderInicio(); }
 }
 // The reception's envío = a copy of the ticked OCs (§6.2): lines summed per sku_key, catalog for products not ordered.
-function pdBuildEnvio({ slug, prov, area, ocs, d, session_id, session_fecha, receptor, comercial, comprador }){
+function pdBuildEnvio({ slug, prov, area, ocs, d, session_id, session_fecha, receptor, comercial, comprador, modo }){
     const now=serverNow(), epochMs=now.getTime(), fecha=localDateStr(now);
     const by=new Map();
     for(const o of ocs) for(const l of o.lineas){
@@ -1319,7 +1340,9 @@ function pdBuildEnvio({ slug, prov, area, ocs, d, session_id, session_fecha, rec
     const catalogo=(d.catalogo||[]).filter(c=>!by.has(skuKeyOf(cleanBC(c.codigo), c.producto))).map(c=>[c.producto, cleanBC(c.codigo), normKgPz(c.kgpz), null]);
     const base=`envios/${slug}/${area}/${fecha}__${epochMs}`;
     const ocInfo=ocs.map(o=>({ num_oc:o.num_oc||'', fecha_entrega:o.fecha_entrega, key:pdKey(o) }));
-    const data={ v:1, origen:'proveedor', hub:slug, area, fecha, epochMs, uploadedAt:now.toISOString(), receptor,
+    // modo 'botones': the order is shown and each line is answered with a tap (Completo / Faltante / Excedente /
+    // Rechazo). Receptions started before it have no modo and keep the blind count.
+    const data={ v:1, origen:'proveedor', modo:modo||undefined, hub:slug, area, fecha, epochMs, uploadedAt:now.toISOString(), receptor,
       sourceFile:'', session_id, session_fecha,
       // names only: phones stay in the bridge's live answer (never stored)
       orden:{ proveedor:prov, ocs:ocInfo, num_oc:ocInfo.map(o=>o.num_oc).filter(Boolean), fechas_entrega:[...new Set(ocs.map(o=>o.fecha_entrega))].sort(),
@@ -1358,7 +1381,7 @@ async function pdLeerOrden(extraKey){
   const ocs=d.ordenes.filter(o=>keys.has(pdKey(o)));
   if(!ocs.length) return { gone:true, d, ses };
   const data=pdBuildEnvio({ slug, prov, area, ocs, d, session_id:sid, session_fecha:S.session.fecha, receptor:S.receptor,
-    comercial:S.envio.orden.comercial, comprador:S.envio.orden.comprador });
+    comercial:S.envio.orden.comercial, comprador:S.envio.orden.comprador, modo:S.envio.modo });
   return { data, d, ses, cambio: pdFirma(data.lines)!==pdFirma(S.envio.lines) || ocs.length!==S.envio.orden.ocs.length };
 }
 // Writes the re-read order as the reception's new snapshot (same session, reemplazo orden_releida)
@@ -1709,7 +1732,7 @@ function openRecibir(data, opts={}){
   showScreen('screen-recibir');
   renderRecibir(); focusScan();
   loadSorting(S.hub).then(()=>{ buildCatalog(); renderRecibir(); });
-  S.pdOtras=[]; S.pdBusy=false;
+  S.pdOtras=[]; S.pdBusy=false; S.pdTab='pend'; S.pdEdit=null; S.pdForm=null; S.pdFoco=null; const pq=document.getElementById('pd-q'); if(pq) pq.value='';
   syncServerEvents().then(()=>{ if(opts.revisar && revisarItems().length) openRevisar(); });
   pdRecibirLive();
   flushOutbox();
@@ -1828,6 +1851,17 @@ function renderRecibir(){
     : (isPd()?'':`<button class="btn btn-secondary btn-block" style="margin-bottom:10px" onclick="openParcial()">Cerrar entrega parcial (sigo después)</button>`)
       +`<button class="btn btn-primary btn-block" onclick="openResumen()">${isPd()?'Terminé de contar: revisar y cerrar':'Terminé todo: revisar y cerrar'}</button>`
       +(isPd()?`<button class="link-btn" ${S.pdBusy?'disabled':''} onclick="pdReleerRecepcion()">${S.pdBusy?'Leyendo la orden…':'Volver a leer la orden'}</button>`:'');
+  const B=pdBotones();
+  for(const id of ['rec-row2','rec-canastas','card-area','recent-title','recent-list']) document.getElementById(id).style.display=B?'none':'';
+  document.getElementById('pd-lista').style.display=B?'':'none';
+  if(B){
+    const rs=pdBRows().filter(r=>!r.pns), done=rs.filter(r=>!r.pend).length;
+    document.getElementById('rec-progress').innerHTML=`<b>${done}</b> / ${rs.length} productos revisados`;
+    document.getElementById('rec-bar').style.width=(rs.length?Math.round(done*100/rs.length):0)+'%';
+    if(!S.closedInfo) document.getElementById('rec-footer').innerHTML=`<button class="btn btn-primary btn-block" onclick="openResumen()">Terminé: revisar y cerrar</button>`
+      +`<button class="link-btn" ${S.pdBusy?'disabled':''} onclick="pdReleerRecepcion()">${S.pdBusy?'Leyendo la orden…':'Volver a leer la orden'}</button>`;
+    pdBListRender();
+  }
   renderCard(); renderRecent(); renderNet();
 }
 
@@ -1900,6 +1934,7 @@ async function processScan(raw, metodo){
   if(!r){ const g=extractEmbeddedGTIN(code.replace(/\D/g,'')); if(g) r=resolveCode(g); }
   const det={ codigo:code, teclado:metodo==='teclado'||undefined };
   const m=metodo==='teclado' ? 'scanner' : metodo;
+  if(pdBotones()){ pdBScan(r, code); return; }
   if(r && r.line){ vibrate(true); openCard({ ...r.line, enEnvio:true }, m, det); return; }
   // §6.2b — no file yet: nothing can be flagged; the unit is asked on the card
   if(r && r.product && S.envio.sinArchivo){ vibrate(true); openCard(sinArchivoProduct(r.product), m, det); return; }
@@ -2626,6 +2661,7 @@ function pdRow(base){
   return r;
 }
 function pdRows(){
+  if(pdBotones()) return pdBRows();
   const rows=[];
   for(const l of [...S.lines.values()].sort((a,b)=>a.rowIndex-b.rowIndex))
     rows.push(pdRow({ sku:l.sku_key, producto:l.producto, barcode:l.barcode, kgpz:l.kgpz, pedido:l.esperado, count:recibidoDe(l.sku_key), cad:l.caducidad_min||'', temp:l.temp||'', rowIndex:l.rowIndex, pns:false }));
@@ -2634,6 +2670,192 @@ function pdRows(){
     if(c>0) rows.push(pdRow({ sku, producto:ne.producto, barcode:sku.startsWith('name:')?'':sku, kgpz:ne.kgpz, pedido:0, count:c, cad:'', temp:'', rowIndex:1e9, pns:true }));
   }
   return rows;
+}
+/* ── Proveedor directo, modo botones (envío.modo==='botones', receptions started from 2026-11-14). No blind count:
+   the order is shown with its Pedido and each line is answered with a tap. Answers are `confirmacion` events with
+   detalle.marca, latest per sku wins, valid only while the line's Pedido is the one answered (a re-read that changes
+   it asks the line again):
+     completo → Recibido = Pedido
+     faltante {llegaron} → Recibido = llegaron (< Pedido), Faltante = the rest
+     excedente → Recibido = Pedido; the extra is rejected. Flag only, to measure how often each supplier does it
+     rechazo {rechazadas, motivo} → Recibido = Pedido − rechazadas (all or part)
+     no_solicitado → a scanned product not in the order (flag only, goes back); quitado undoes it.
+   Rows have the shape pdRow gives, so Resumen, the report, cerrar and Slack read both modes. ── */
+const PD_MARCA={ completo:'Completo', faltante:'Faltante', excedente:'Excedente', rechazo:'Rechazo' };
+function pdMarcas(){ const m=new Map(); for(const e of S.events) if(e.tipo==='confirmacion' && e.detalle && e.detalle.marca) m.set(e.sku_key, e); return m; }
+function pdBRows(){
+  const M=pdMarcas(), rows=[];
+  for(const l of [...S.lines.values()].sort((a,b)=>a.rowIndex-b.rowIndex)){
+    const e=M.get(l.sku_key), d=e&&e.detalle, P=l.esperado;
+    const valid=!!(d && PD_MARCA[d.marca] && round2(Number(d.pedido))===round2(P));
+    const r={ sku:l.sku_key, producto:l.producto, barcode:l.barcode, kgpz:l.kgpz, pedido:P, cad:l.caducidad_min||'', temp:l.temp||'', rowIndex:l.rowIndex,
+      pns:false, rec:0, count:0, exc:0, excFlag:false, gap:0, rech:0, motivo:'', falt:0, ack:valid?e:null, marca:valid?d.marca:null,
+      cambio:!!(d && PD_MARCA[d.marca] && !valid), pend:!valid, dif:false, estado:'Por revisar' };
+    if(valid){
+      if(d.marca==='completo'){ r.rec=P; r.estado='Completo'; }
+      else if(d.marca==='excedente'){ r.rec=P; r.excFlag=true; r.estado='Excedente'; r.dif=true; }
+      else if(d.marca==='faltante'){ r.rec=Math.min(round2(Number(d.llegaron)||0), P); r.falt=r.gap=round2(P-r.rec); r.estado='Faltante'; r.dif=true; }
+      else { r.rech=Math.min(round2(Number(d.rechazadas)||0), P); r.motivo=d.motivo||''; r.rec=round2(P-r.rech); r.gap=r.rech; r.estado='Rechazo'; r.dif=true; }
+      r.count=r.rec;
+    }
+    rows.push(r);
+  }
+  for(const [sku, e] of M) if(!S.lines.has(sku) && e.detalle.marca==='no_solicitado')
+    rows.push({ sku, producto:e.producto||sku, barcode:sku.startsWith('name:')?'':sku, kgpz:e.detalle.kgpz||'Pz', pedido:0, cad:'', temp:'', rowIndex:1e9,
+      pns:true, rec:0, count:0, exc:0, excFlag:false, gap:0, rech:0, motivo:'', falt:0, ack:e, marca:'no_solicitado', cambio:false, pend:false, dif:true, estado:'No solicitado' });
+  return rows;
+}
+function pdBResTxt(r){
+  const q=v=>fmtQty(v,r.kgpz), u=unitOf(r.kgpz);
+  if(r.pns) return 'No viene en la orden: no se recibe, regrésalo al camión';
+  if(r.marca==='completo') return `Completo · ${q(r.rec)} ${u}`;
+  if(r.marca==='excedente') return `Recibiste ${q(r.rec)} ${u} · lo de más se rechazó`;
+  if(r.marca==='faltante') return r.rec>0 ? `Llegaron ${q(r.rec)} ${u} · faltan ${q(r.falt)}` : `No llegó · faltan ${q(r.falt)} ${u}`;
+  if(r.marca==='rechazo') return `Rechazaste ${q(r.rech)} ${u} (${PD_MOTIVO[r.motivo]||r.motivo})${r.rec>0?` · recibiste ${q(r.rec)}`:''}`;
+  return '';
+}
+const pdBEsc=s=>escapeHtml(s).replace(/'/g,'&#39;');
+function pdBLineHtml(r){
+  const sk=pdBEsc(r.sku), q=v=>fmtQty(v,r.kgpz), u=unitOf(r.kgpz), t=tempLabel(r.temp), P=r.pedido;
+  const meta=[r.kgpz, r.cad?'Caducidad mínima <b>'+dmy(r.cad)+'</b>':'', r.barcode?'':'sin código'].filter(Boolean).join(' · ');
+  const editing=!r.pns && !S.closedInfo && (r.pend || S.pdEdit===r.sku), f=S.pdForm&&S.pdForm.sku===r.sku?S.pdForm:null;
+  let h=`<div class="pdb-row ${r.pend?'':r.dif?'dif':'done'} ${S.pdFoco===r.sku?'foco':''}" data-sku="${escapeHtml(r.sku)}">
+    <div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
+      <div class="ritem-meta">${meta}</div></div>${r.pend?'':`<span class="estado ${PD_ESTADO_CLS[r.estado]||'bad'}">${escapeHtml(r.estado)}</span>`}</div>`;
+  if(!r.pns) h+=`<div class="pdb-ped"><span>Pedido</span><b>${q(P)}</b><span>${u}</span>${t?`<span class="temp-chip" style="margin-left:auto">${escapeHtml(t)}</span>`:''}</div>`;
+  if(r.cambio && r.pend) h+=`<div class="ritem-meta" style="color:var(--c-ink);font-weight:700;margin-top:4px">La orden cambió la cantidad pedida: vuelve a revisar este producto.</div>`;
+  if(r.pns){
+    h+=`<div class="pdb-res"><span>${pdBResTxt(r)}</span>${S.closedInfo?'':`<button class="corr-btn" onclick="pdBQuitarPns('${sk}')">Me equivoqué</button>`}</div>`;
+  } else if(editing && f){
+    const kg=r.kgpz==='Kg', m=f.motivo;
+    if(f.kind==='faltante') h+=`<div style="margin-top:10px"><div class="sep-q">¿Cuántas llegaron? ${kg?`(menos de ${q(P)} kg)`:`(de 0 a ${q(P-1)})`}</div>
+        <input id="pdb-n" class="text-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}" onkeydown="if(event.key==='Enter')pdBGuardar('${sk}')">
+        <button class="corr-btn" style="margin-top:6px" onclick="pdBNinguna('${sk}')">No llegó ninguna</button>`;
+    else h+=`<div style="margin-top:10px"><div class="sep-q">¿Por qué?</div>
+        <div class="sep-btns">${Object.entries(PD_MOTIVO).map(([k,n])=>`<button class="choice ${m===k?'sel':''}" onclick="pdBMotivo('${k}')">${n[0].toUpperCase()+n.slice(1)}</button>`).join('')}</div>
+        <div class="sep-q" style="margin-top:8px">¿Cuántas rechazaste? (de 1 a ${q(P)} ${u})</div>
+        <input id="pdb-n" class="text-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}" onkeydown="if(event.key==='Enter')pdBGuardar('${sk}')">
+        <button class="corr-btn" style="margin-top:6px" onclick="pdBTodas('${sk}')">Todas (${q(P)} ${u})</button>`;
+    h+=`<div class="qty-err" id="pdb-err"></div>
+        <div class="pcard-actions" style="grid-template-columns:1fr 1fr;margin-top:4px"><button class="btn btn-secondary" onclick="pdBCancel()">Cancelar</button><button class="btn btn-primary" onclick="pdBGuardar('${sk}')">Guardar</button></div></div>`;
+  } else if(editing){
+    h+=`<div class="pdb-btns"><button class="btn btn-primary" onclick="pdBTap('${sk}','completo')">Completo</button><button class="btn btn-secondary" onclick="pdBTap('${sk}','faltante')">Faltante</button>
+      <button class="btn btn-secondary" onclick="pdBTap('${sk}','excedente')">Excedente</button><button class="btn btn-secondary" onclick="pdBTap('${sk}','rechazo')">Rechazo</button></div>`
+      +(r.pend?'':`<button class="link-btn" style="margin-top:0" onclick="pdBCancel()">Dejar como estaba</button>`);
+  } else {
+    const who=r.ack&&r.ack.receptor&&r.ack.receptor!==S.receptor?` · ${escapeHtml(r.ack.receptor)}`:'';
+    h+=`<div class="pdb-res"><span>${pdBResTxt(r)}${who}</span>${S.closedInfo?'':`<button class="corr-btn" onclick="pdBCambiar('${sk}')">Cambiar</button>`}</div>`;
+  }
+  return h+'</div>';
+}
+function pdBRerender(){ if(screenActive('screen-resumen')) renderResumen(); else if(screenActive('screen-recibir')) renderRecibir(); }
+// Keeps a half-typed answer through a re-render (another phone's taps arrive every 15 s)
+function pdBKeepInput(fn){
+  const i=document.getElementById('pdb-n'), v=i?i.value:null, foc=i&&document.activeElement===i;
+  fn();
+  const j=document.getElementById('pdb-n'); if(j && v!=null){ j.value=v; if(foc) j.focus(); }
+}
+function pdBFocusInput(){ setTimeout(()=>{ const i=document.getElementById('pdb-n'); if(i) i.focus(); }, 40); }
+function pdBTap(sku, kind){
+  const l=S.lines.get(sku); if(!l || S.closedInfo) return;
+  if(kind==='completo'){ pdMarcar(sku, 'completo', { recibido:l.esperado }); toast(`✓ Completo · ${l.producto}`); return; }
+  if(kind==='excedente'){ pdMarcar(sku, 'excedente', { recibido:l.esperado }); toast(`✓ Recibe ${fmtQty(l.esperado,l.kgpz)} ${unitOf(l.kgpz)} · lo de más regrésalo al camión`, 4000); return; }
+  S.pdForm={ sku, kind, motivo:null }; pdBRerender(); pdBFocusInput();
+}
+function pdMarcar(sku, marca, extra){
+  const l=S.lines.get(sku); if(!l) return;
+  recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:l.producto, cantidad:extra.recibido, metodo:'boton',
+    detalle:Object.assign({ marca, pedido:l.esperado, kgpz:l.kgpz }, extra) }));
+  S.pdEdit=null; S.pdForm=null; S.pdFoco=null; pdBRerender();
+}
+function pdBGuardar(sku){
+  const f=S.pdForm, l=S.lines.get(sku), i=document.getElementById('pdb-n'), err=document.getElementById('pdb-err'); if(!f || !l || !i) return;
+  const P=l.esperado, q=v=>fmtQty(v,l.kgpz), u=unitOf(l.kgpz);
+  if(f.kind==='faltante'){
+    const n=parseQty(i.value, l.kgpz, true);
+    if(n==null || n>=P){ err.textContent = n!=null && n>=P ? `Llegó todo lo pedido: usa Completo${n>P?' o Excedente':''}.` : `Escribe cuántas llegaron: ${l.kgpz==='Kg'?`menos de ${q(P)} kg`:`de 0 a ${q(P-1)}`}.`; i.focus(); return; }
+    pdMarcar(sku, 'faltante', { recibido:n, llegaron:n, faltan:round2(P-n) });
+    toast(`✓ ${l.producto}: ${n>0?`llegaron ${q(n)} ${u}`:'no llegó'}`);
+  } else {
+    if(!f.motivo){ err.textContent='Elige por qué: fecha corta o dañada.'; return; }
+    const n=parseQty(i.value, l.kgpz);
+    if(n==null || n>P){ err.textContent=`Escribe cuántas rechazaste: de 1 a ${q(P)} ${u}.`; i.focus(); return; }
+    pdMarcar(sku, 'rechazo', { recibido:round2(P-n), rechazadas:n, motivo:f.motivo });
+    toast(`✓ ${l.producto}: ${q(n)} ${u} rechazadas`);
+  }
+}
+function pdBNinguna(sku){ const i=document.getElementById('pdb-n'); if(i){ i.value='0'; pdBGuardar(sku); } }
+function pdBTodas(sku){ const l=S.lines.get(sku), i=document.getElementById('pdb-n'); if(l && i){ i.value=fmtQty(l.esperado,l.kgpz); if(S.pdForm.motivo) pdBGuardar(sku); else document.getElementById('pdb-err').textContent='Elige por qué: fecha corta o dañada.'; } }
+function pdBMotivo(k){ if(!S.pdForm) return; S.pdForm.motivo=k; pdBKeepInput(pdBRerender); }
+function pdBCancel(){ S.pdForm=null; S.pdEdit=null; pdBRerender(); }
+function pdBCambiar(sku){ S.pdEdit=sku; S.pdForm=null; pdBRerender(); }
+function pdBQuitarPns(sku){
+  const e=pdMarcas().get(sku); if(!e) return;
+  recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:e.producto, metodo:'boton', detalle:{ marca:'quitado', kgpz:e.detalle.kgpz||'Pz' } }));
+  pdBRerender();
+}
+function pdBTab(t){ S.pdTab=t; pdBListRender(); }
+// Recibir: the order, pending first-tab by default; answered lines leave «Por revisar» (still under «Todos»)
+function pdBListRender(){
+  const all=pdBRows(), lines=all.filter(r=>!r.pns), pns=all.filter(r=>r.pns), pend=lines.filter(r=>r.pend);
+  const tab=S.pdTab==='todos'?'todos':'pend';
+  document.getElementById('pdb-tabs').innerHTML=`<button class="choice ${tab==='pend'?'sel':''}" onclick="pdBTab('pend')">Por revisar · ${pend.length}</button><button class="choice ${tab==='todos'?'sel':''}" onclick="pdBTab('todos')">Todos · ${lines.length}</button>`;
+  const words=normName(document.getElementById('pd-q').value||'').split(' ').filter(Boolean);
+  const match=r=>!words.length || words.every(w=>normName(r.producto).includes(w) || (r.barcode||'').includes(w));
+  const vis=(tab==='todos'?lines:lines.filter(r=>r.pend || r.sku===S.pdEdit || r.sku===S.pdFoco)).filter(match);
+  let h=vis.map(pdBLineHtml).join('');
+  if(!vis.length) h=tab==='pend' && !pend.length ? `<div class="warn-box ok">Revisaste todos los productos de la orden. Toca «Terminé: revisar y cerrar».</div>` : `<div class="empty-hint">Ningún producto coincide.</div>`;
+  if(pns.length) h+=`<div class="section-title">No solicitados · ${pns.length}</div>`+pns.map(pdBLineHtml).join('');
+  pdBKeepInput(()=>{ document.getElementById('pd-rows').innerHTML=h; });
+}
+// A scan finds the line in the order; a product not in it is flagged «No solicitado» (it goes back, never counted)
+function pdBScan(r, code){
+  if(r && r.line){
+    vibrate(true); S.pdFoco=r.line.sku_key; S.pdEdit=null; S.pdForm=null; document.getElementById('pd-q').value='';
+    const row=pdBRows().find(x=>x.sku===S.pdFoco); if(row && !row.pend) S.pdTab='todos';
+    pdBListRender();
+    const el=document.querySelector('.pdb-row.foco'); if(el) el.scrollIntoView({ block:'center', behavior:'smooth' });
+    return;
+  }
+  vibrate(false);
+  if(r && r.product){
+    const p=r.product, e=pdMarcas().get(p.sku_key);
+    if(!(e && e.detalle.marca==='no_solicitado'))
+      recordEvent(makeEvent('confirmacion', { sku_key:p.sku_key, producto:p.producto, metodo:'boton', detalle:{ marca:'no_solicitado', codigo:code, kgpz:p.kgpz||'Pz' } }));
+    toast(`${p.producto}: no viene en la orden. No se recibe: regrésalo al camión.`, 5000); renderRecibir(); return;
+  }
+  toast('Código no reconocido: búscalo por nombre en la lista', 4000);
+  const q=document.getElementById('pd-q'); if(q) q.focus();
+}
+function pdBRenderResumen(){
+  const el=document.getElementById('resumen-body');
+  const rows=pdRows(), lines=rows.filter(r=>!r.pns), pend=lines.filter(r=>r.pend), difs=rows.filter(r=>r.dif), oks=lines.filter(r=>!r.pend && !r.dif);
+  const ord=r=>S.resumenOrder.has(r.sku) ? S.resumenOrder.get(r.sku) : 1e6;
+  difs.sort((a,b)=>ord(a)-ord(b));
+  const o=S.envio.orden;
+  let h=`<h2>Resumen y cierre</h2><div class="muted" style="margin-bottom:8px">${escapeHtml(o.proveedor)}${o.num_oc.length?' · OC '+o.num_oc.map(escapeHtml).join(', '):''} · ${o.fechas_entrega.map(pdFechaLabel).join(', ')}</div>
+    <div class="stat-grid">
+    <div class="stat"><div class="stat-n">${lines.length}</div><div class="stat-l">productos en la orden</div></div>
+    <div class="stat"><div class="stat-n">${oks.length}</div><div class="stat-l">completos</div></div>
+    <div class="stat"><div class="stat-n">${difs.length}</div><div class="stat-l">con diferencia</div></div>
+    <div class="stat"><div class="stat-n" style="color:${pend.length?'var(--orange)':'var(--green-dark)'}">${pend.length}</div><div class="stat-l">por revisar</div></div></div>`;
+  if(OUTBOX.length) h+=`<div class="warn-box">Hay ${OUTBOX.length} registro(s) sin subir. Conéctate a internet para poder cerrar.</div>`;
+  if(pend.length) h+=`<div class="section-title">Por revisar · ${pend.length}</div>`+pend.map(pdBLineHtml).join('');
+  if(difs.length) h+=`<div class="section-title">Diferencias · ${difs.length}</div>`+difs.map(pdBLineHtml).join('');
+  else if(!pend.length) h+=`<div class="warn-box ok">Todo llegó como se pidió.</div>`;
+  if(oks.length) h+=`<details style="margin-top:14px" ${S.pdEdit&&oks.some(r=>r.sku===S.pdEdit)?'open':''}><summary class="section-title" style="cursor:pointer">Completos · ${oks.length}</summary>${oks.map(pdBLineHtml).join('')}</details>`;
+  if(!pend.length) h+=pdCamionHtml(rows);
+  const can=!pend.length && !OUTBOX.length && !S.closing;
+  h+=`<button class="btn btn-primary btn-block" style="margin-top:18px" ${can?'':'disabled'} onclick="cerrarRecepcion()">${S.closing?'Cerrando…':pend.length?`Faltan ${pend.length} producto(s) por revisar`:OUTBOX.length?'Subiendo registros…':'Cerrar recepción'}</button>`;
+  pdBKeepInput(()=>{ el.innerHTML=h; });
+}
+// Facturar list as Código · Producto · Recibido, tab-separated, to type it in the system
+async function pdCopiarFacturar(){
+  const rows=pdRows().filter(r=>r.rec>0);
+  const txt=['Código\tProducto\tRecibido\tUnd'].concat(rows.map(r=>[r.barcode, r.producto, fmtQty(r.rec,r.kgpz), unitOf(r.kgpz)].join('\t'))).join('\n');
+  try{ await navigator.clipboard.writeText(txt); }
+  catch(_){ const t=document.createElement('textarea'); t.value=txt; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  toast('✓ Lista copiada');
 }
 function pdFreezeOrder(){
   S.resumenOrder=new Map(pdRows().filter(r=>r.dif).sort((a,b)=>(b.pend-a.pend) || Math.abs(b.count-b.pedido)-Math.abs(a.count-a.pedido)).map((r,i)=>[r.sku,i]));
@@ -2685,6 +2907,8 @@ function pdCamionHtml(rows){
   for(const r of rows){
     const u=unitOf(r.kgpz), q=v=>fmtQty(v,r.kgpz);
     if(r.exc>0) dev.push(`${escapeHtml(r.producto)}: <b>${q(r.exc)} ${u}</b> ${r.pns?'no solicitado':'excedente'}`);
+    else if(r.excFlag) dev.push(`${escapeHtml(r.producto)}: <b>lo que llegó de más</b> (excedente)`);
+    else if(r.pns) dev.push(`${escapeHtml(r.producto)}: <b>no solicitado</b>`);
     if(r.rech>0) dev.push(`${escapeHtml(r.producto)}: <b>${q(r.rech)} ${u}</b> ${PD_MOTIVO[r.motivo]||r.motivo}`);
     if(r.falt>0 && r.ack) fal.push(`${escapeHtml(r.producto)}: <b>faltan ${q(r.falt)} ${u}</b>`);
   }
@@ -2692,10 +2916,12 @@ function pdCamionHtml(rows){
   h+=`<div class="info-card"><b>Devolver al proveedor${dev.length?' · '+dev.length:''}</b>${dev.length?dev.map(x=>`<div style="margin-top:4px">${x}</div>`).join(''):'<div class="muted">Nada que devolver.</div>'}</div>`;
   if(fal.length) h+=`<div class="info-card" style="margin-top:8px"><b>Faltan: que no se facture</b>${fal.map(x=>`<div style="margin-top:4px">${x}</div>`).join('')}</div>`;
   h+=`<details class="info-card" style="margin-top:8px"><summary style="cursor:pointer"><b>Facturar · ${fac.length} producto${fac.length===1?'':'s'}</b> <span class="muted">(lo recibido, nunca más de lo pedido)</span></summary>
-    ${fac.map(r=>`<div style="margin-top:4px;display:flex;justify-content:space-between;gap:8px"><span>${escapeHtml(r.producto)}</span><b style="white-space:nowrap">${fmtQty(r.rec,r.kgpz)} ${unitOf(r.kgpz)}</b></div>`).join('')}</details>`;
+    ${fac.map(r=>`<div style="margin-top:4px;display:flex;justify-content:space-between;gap:8px"><span>${escapeHtml(r.producto)}</span><b style="white-space:nowrap">${fmtQty(r.rec,r.kgpz)} ${unitOf(r.kgpz)}</b></div>`).join('')}
+    <button class="btn btn-secondary btn-block" style="margin-top:10px;background:var(--c-white)" onclick="pdCopiarFacturar()">Copiar lista para el sistema</button></details>`;
   return h;
 }
 function pdRenderResumen(){
+  if(pdBotones()) return pdBRenderResumen();
   const el=document.getElementById('resumen-body');
   const rows=pdRows(), difs=rows.filter(r=>r.dif), oks=rows.filter(r=>!r.dif), pend=rows.filter(r=>r.pend);
   const ord=r=>S.resumenOrder.has(r.sku) ? S.resumenOrder.get(r.sku) : 1e6;
@@ -2751,7 +2977,7 @@ function pdBuildReportCsv(rows, receptores){
   const o=S.envio.orden, head=PD_REPORT_COLS.map(csvCell).join(',');
   const body=rows.map(r=>{ const q=v=>fmtQty(v,r.kgpz);
     return [hubName(S.hub), o.proveedor, o.num_oc.join(', '), S.session.fecha, receptores.join(', '), r.barcode, r.producto, r.kgpz,
-      q(r.pedido), q(r.rec), r.exc?q(r.exc):'', r.rech?q(r.rech):'', r.rech?(PD_MOTIVO[r.motivo]||r.motivo):'', r.falt?q(r.falt):'', q(r.rec),
+      q(r.pedido), q(r.rec), r.exc?q(r.exc):r.excFlag?'Sí':'', r.rech?q(r.rech):'', r.rech?(PD_MOTIVO[r.motivo]||r.motivo):'', r.falt?q(r.falt):'', q(r.rec),
       r.cad?dmy(r.cad):'', tempLabel(r.temp), r.estado, notasDe(r.sku, r.kgpz)].map(csvCell).join(','); });
   return [head].concat(body).join('\r\n')+'\r\n';
 }
@@ -2780,10 +3006,10 @@ async function pdCerrar(){
     const ev=makeEvent('cerrar', { detalle:{ reporte:path, envio:S.envio._path, origen:'proveedor', proveedor:o.proveedor, comercial:o.comercial||undefined, comprador:o.comprador||undefined,
       ocs:o.ocs.map(x=>x.key), num_oc:o.num_oc, fechas_entrega:o.fechas_entrega, orden_cambio_ignorado:lectura&&lectura.cambio?true:undefined,
       lineas:S.lines.size, recibidas:rows.filter(r=>!r.pns && r.rec>0).length, diferencias:difs.length, receptores,
-      excedente:rows.filter(r=>!r.pns && r.exc>0).length, rechazadas:rows.filter(r=>r.rech>0).length,
+      modo:S.envio.modo||undefined, excedente:rows.filter(r=>!r.pns && (r.exc>0||r.excFlag)).length, rechazadas:rows.filter(r=>r.rech>0).length,
       faltantes:rows.filter(r=>r.falt>0).length, no_solicitados:rows.filter(r=>r.pns).length,
       lineas_dif:difs.map(r=>({ sku_key:r.sku, producto:r.producto, kgpz:r.kgpz, pedido:r.pedido, contado:r.count, recibido:r.rec,
-        excedente:r.exc||undefined, rechazadas:r.rech||undefined, motivo:r.motivo||undefined, faltante:r.falt||undefined, no_solicitado:r.pns||undefined })) } });
+        excedente:r.exc||(r.excFlag?true:undefined), rechazadas:r.rech||undefined, motivo:r.motivo||undefined, faltante:r.falt||undefined, no_solicitado:r.pns||undefined })) } });
     recordEvent(ev); S.closedInfo=closedState(); await flushAndWait();
     S.closing=false;
     toast(OUTBOX.length?'Recepción cerrada — se termina de subir al reconectar':'✓ Recepción cerrada', 3500);
@@ -3021,9 +3247,9 @@ function pdSlackMensaje(info, rvRows, orden){
   const quien=(info.receptores||[info.receptor]).filter(Boolean).join(', ');
   const out=[`*${hubName(info.hub)} · ${info.proveedor||areaName(info.area)} · entrega ${fechaLarga(info.fecha)}*${info.num_oc&&info.num_oc.length?' · OC '+info.num_oc.join(', '):''}: ${difs.length?`${difs.length} producto(s) con diferencia`:'llegó completo'}${quien?' · recibió '+quien:''}`];
   for(const r of difs){
-    if(r.pns){ out.push(`• ${r.producto} — No solicitado · Excedente ${q(r.exc,r)} (devuelto) · Facturar 0`); continue; }
+    if(r.pns){ out.push(`• ${r.producto} — No solicitado${r.exc?` · Excedente ${q(r.exc,r)}`:''} (devuelto) · Facturar 0`); continue; }
     const p=[`Pedido ${q(r.env,r)}`, `Recibido ${q(r.rec,r)}`];
-    if(r.exc>0) p.push(`Excedente ${q(r.exc,r)} (devuelto)`);
+    if(r.exc>0) p.push(`Excedente ${q(r.exc,r)} (devuelto)`); else if(r.excFlag) p.push('Llegó excedente (rechazado)');
     if(r.rech>0) p.push(`Rechazadas ${q(r.rech,r)} (${r.motivo})`);
     if(r.falt>0) p.push(`Faltan ${q(r.falt,r)}`);
     p.push(`Facturar ${q(r.fac,r)}`);
@@ -3195,10 +3421,10 @@ async function openRecepcion(info, from){
   const pdRep=(p.meta.fields||[]).includes('Pedido'); // supplier report (Phase 5 gives it its own Retool view)
   const rows=(p.data||[]).map((r,i)=>{ const g=n=>pickCol(r, n)||'';
     if(pdRep){ const ped=parseNum(g('Pedido')), rec=parseNum(g('Recibido')), kgpz=g('Und')==='Kg'?'Kg':'Pz', u=unitOf(kgpz);
-      const extra=[g('Excedente')?`Excedente ${g('Excedente')} ${u} (devuelto)`:'', g('Rechazadas')?`Rechazadas ${g('Rechazadas')} ${u} (${g('Motivo')})`:'', g('Faltante')?`Faltan ${g('Faltante')} ${u}`:''].filter(Boolean);
+      const excFlag=g('Excedente')==='Sí', extra=[excFlag?'Llegó excedente (rechazado)':g('Excedente')?`Excedente ${g('Excedente')} ${u} (devuelto)`:'', g('Rechazadas')?`Rechazadas ${g('Rechazadas')} ${u} (${g('Motivo')})`:'', g('Faltante')?`Faltan ${g('Faltante')} ${u}`:''].filter(Boolean);
       return { i, producto:g('Producto'), barcode:g('Código'), kgpz, pos:'', pasillo:'', armado:'', env:ped, rec, dif:round2(rec-ped), estado:g('Estado'), acum:null,
         corta:0, cad:g('Caducidad mínima'), dan:0, notas:extra.concat(g('Notas')||[]).join(' · '), _n:normName(g('Producto')), pd:true,
-        exc:parseNum(g('Excedente'))||0, rech:parseNum(g('Rechazadas'))||0, motivo:g('Motivo'), falt:parseNum(g('Faltante'))||0, fac:parseNum(g('Facturar'))||0,
+        exc:excFlag?0:parseNum(g('Excedente'))||0, excFlag, rech:parseNum(g('Rechazadas'))||0, motivo:g('Motivo'), falt:parseNum(g('Faltante'))||0, fac:parseNum(g('Facturar'))||0,
         pns:g('Estado')==='No solicitado', temp:g('Temp') }; }
     const pos=g('Posición'), kgpz=g('Kg/Pz')==='Kg'?'Kg':'Pz';
     return { i, producto:g('Producto'), barcode:g('Código de barras'), kgpz, pos, pasillo:(pos.split(/[-·\s]/)[0]||'').trim(), armado:g('Armado'),
@@ -3281,10 +3507,10 @@ function renderRecepcionRows(){
   if(dv.length) document.getElementById('rv-rows').insertAdjacentHTML('beforeend', `<div class="section-title" style="margin-top:16px">No solicitados · ${dv.length}</div>
     <div class="muted" style="margin-bottom:8px">Se regresaron al proveedor. No se registran en el sistema.</div>`
     +dv.map(r=>`<div class="sum-row"><div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
-      <div class="ritem-meta">${escapeHtml(r.barcode||'sin código')} · ${fmtQty(r.exc,r.kgpz)} ${unitOf(r.kgpz)} devueltas</div></div></div></div>`).join(''));
+      <div class="ritem-meta">${escapeHtml(r.barcode||'sin código')} · ${r.exc?`${fmtQty(r.exc,r.kgpz)} ${unitOf(r.kgpz)} devueltas`:'devuelto'}</div></div></div></div>`).join(''));
 }
 function pdRecepcionHead(I){
-  const dev=RV.rows.filter(r=>!r.pns && (r.exc>0||r.rech>0)).length, fal=RV.rows.filter(r=>r.falt>0).length;
+  const dev=RV.rows.filter(r=>!r.pns && (r.exc>0||r.excFlag||r.rech>0)).length, fal=RV.rows.filter(r=>r.falt>0).length;
   return `<h2>${escapeHtml(I.proveedor||areaName(I.area))} · ${fechaLarga(I.fecha)}</h2>
     <div class="info-card">${I.num_oc&&I.num_oc.length?'OC '+escapeHtml(I.num_oc.join(', '))+'<br>':''}Cerrada ${localDateStr(new Date(I.ts))!==I.fecha?'el '+fechaLarga(localDateStr(new Date(I.ts)))+' ':''}a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}<br>
       ${I.lineas||0} productos en la orden · ${I.diferencias?`<b style="color:var(--orange)">${I.diferencias} con diferencia</b>`:'sin diferencias'}${dev?` · ${dev} con devolución`:''}${fal?` · ${fal} con faltante`:''}${I.no_solicitados?` · ${I.no_solicitados} no solicitado(s)`:''}</div>

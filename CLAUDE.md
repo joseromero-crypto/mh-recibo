@@ -30,7 +30,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - **Local runs write to prod.** Use `hub='test-hub'` or stub write helpers before testing write flows.
 
 ## Rules that must survive any change
-1. Receiver inputs: barcode + quantity (product pick only when there's no barcode).
+1. Receiver inputs: barcode + quantity (product pick only when there's no barcode). **Except proveedor directo in modo botones**
+   (proveedorDirecto-plan §6.6): the order is shown and each line is answered with a tap.
 2. No cheap exits: no bulk accept / confirm-all. Discrepancies acknowledged one by one.
 7. Nothing remembered between visits: always open on Inicio (no saved hub/área/name/page).
 3. Blocking modals only where plan §7.5 allows them.
@@ -111,6 +112,14 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   even on one-day bars; shown only when the month has one. Admin → Recepciones names pd sessions «Proveedor {name}».
 - Alerts (`alertas/apps-script.gs`): no schedule for suppliers; from 21:00, for every hub with an active alert row, an open
   pd reception → `sin_cerrar` (área = pd-…), and the digest adds a line per supplier reception of the day.
+
+- **Modo botones (2026-11-13, plan §6.6)** — `pdBotones()` = `isPd()` && envío `modo:'botones'` (set by `pdEmpezar`,
+  carried by re-reads). No blind count: Recibir shows the order (`pdBListRender`, `pdBLineHtml`) and each line gets
+  Completo / Faltante (llegaron) / Excedente (flag, Recibido = Pedido) / Rechazo (motivo + n). Answers are `confirmacion`
+  `detalle.marca`, latest wins while `pedido` is unchanged (`pdMarcas`, `pdBRows` → same row shape as `pdRow`, so `pdRows`,
+  cerrar, report, Slack, Recepciones serve both modes). Scan → `pdBScan` (jump to the line, or flag `no_solicitado`).
+  `pdBRenderResumen`; «Copiar lista para el sistema» (`pdCopiarFacturar`). Report Excedente = «Sí». Receptions opened
+  before keep the count flow.
 
 ## How the code is laid out (index.html)
 - Helpers copied from armado-CH sit at the top, each block labelled. Our additions: `codeKey` (cleanBC + strip

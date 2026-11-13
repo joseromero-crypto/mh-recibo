@@ -212,6 +212,18 @@ closing and report, and all the existing machinery works for them without new co
 - Calendario: a third bar style for Proveedor directo (teal-light fill, teal-dark text, label = supplier). No new hue.
 - Admin → Recepciones lists `pd-*` sessions like the others. Alerts (`sin_cerrar`) apply as today.
 
+### 6.6 Modo botones (2026-11-13, replaces the blind count for new receptions)
+Receptions started from now on write `modo:'botones'` in the envío; ones opened before keep the blind count (§6.3/6.4).
+Recibir shows the order (Pedido, Temp, Caducidad mínima) and every line is answered with a tap: **Completo** (Recibido =
+Pedido) · **Faltante** (how many arrived, 0..Pedido−1; rest = Faltante) · **Excedente** (flag only: Recibido = Pedido, the
+extra goes back; stored to measure how often each supplier does it) · **Rechazo** (motivo fecha corta | dañada + how many,
+1..Pedido or «Todas»; Recibido = Pedido − rechazadas). Tabs «Por revisar» / «Todos», a name search, «Cambiar». A scan jumps
+to the line; a product not in the order is flagged «No solicitado» (no quantity, goes back; «Me equivoqué» undoes it).
+Answers = `confirmacion` with `detalle.marca` (completo|faltante|excedente|rechazo|no_solicitado|quitado), `pedido`,
+`llegaron`/`rechazadas`/`motivo`; latest per sku wins and holds only while Pedido is unchanged. Resumen lists what is left
+to answer, the differences (editable) and «Antes de que se vaya el camión» with «Copiar lista para el sistema» (Código,
+Producto, Recibido for Retool). Report: Excedente column = «Sí» for the flag; `cerrar.modo='botones'`.
+
 ## 7. Events
 
 - `scan.cantidad` = the counted pieces. New in `scan` detalle: `pns:true` (code not in the order when scanned),
