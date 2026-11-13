@@ -10,7 +10,7 @@
  *       «Catalogo2»           per-city catalog: Ciudad, Cód. de barras, Producto, Proveedor, Kg/Pz, V Anaquel.
  *                             Caducidad mínima = Fecha de entrega + V Anaquel (the hub files compute it the same way).
  *       «Proveedores»         Proveedor Retool → Comprador (fallback when a supplier has no lines).
- *   - REFERENCIA per city: one hub file holding «Encargados» (supplier → Comercial; contacts table Área/Nombre/
+ *   - REFERENCIA per city (CIUDADES): one hub file holding «Encargados» (supplier → Comercial; contacts table Área/Nombre/
  *     Teléfono) and «Inv {city}» (Temp). The master has neither.
  *
  * Setup (once):
@@ -39,11 +39,14 @@ const CACHE_SEG = 30;
 const MASTER = '14-Wt08IJuNc7e5nKA0R_omBHc0JY2olSxu_FCCVHOLQ';
 const TABS = { ordenes: 'Base datos Compras', catalogo: 'Catalogo2', proveedores: 'Proveedores',
                encargados: 'Encargados', nuevos: 'Productos Nuevos' };
-// City → reference hub file (Encargados + Inv {city}). Only Mty has one (Jose, 2026-11-12: not worth adding files per
-// city). Elsewhere orders, caducidad and comprador still come from the master; comercial/telefonos/temp stay empty and
-// the app shows «Contacta al equipo comercial en el canal de abastecimiento en Slack».
+// City → reference hub file (Encargados + Inv {city} + Productos Nuevos). A city without one still gets orders,
+// caducidad and comprador from the master; comercial/telefonos/temp stay empty and the app shows «Contacta al equipo
+// comercial en el canal de abastecimiento en Slack».
 const CIUDADES = {
-  Mty: { file: '1C8Vb9OE8uVZVidNRs7D7aDbwdPK56U2OW0nYFJ3eKoE', inv: 'Inv Mty' },   // Recepcion Contry
+  Mty:  { file: '1C8Vb9OE8uVZVidNRs7D7aDbwdPK56U2OW0nYFJ3eKoE', inv: 'Inv Mty' },    // Recepcion Contry
+  CDMX: { file: '1MbGG8sIkwOozaqJEcl_JJgNP4h1DRFuyjt4Aq4KXGzU', inv: 'Inv CDMX' },   // Recepcion Condesa
+  Gdl:  { file: '19uMqhehFei1rH2jNlr9O4vICa4yW3JGTqithg9-EjuE', inv: 'Inv Gdl' },    // Recepcion Zap
+  Sal:  { file: '1KqHhWeY8RpnlSYOejegtldqmekKcx6tcf3H-uYC4UbE', inv: 'Inv Sal' },    // Recepcion Saltillo
 };
 // App slug → Hub code in «Base datos Compras» and its Catalogo2 city.
 const HUBS = {
@@ -346,5 +349,5 @@ function temp_(v, tz) {
   if (!s) return '';
   if (/^amb/i.test(s)) return 'Ambiente';
   const n = Number(s.replace(',', '.').replace(/[^0-9.\-]/g, ''));
-  return s.match(/\d/) && isFinite(n) ? String(n) : s;
+  return s.match(/\d/) && isFinite(n) ? String(n) : '';   // anything else («Abarrotes» in one Productos Nuevos row) → no temp
 }
