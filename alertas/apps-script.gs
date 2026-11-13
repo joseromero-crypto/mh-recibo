@@ -16,6 +16,8 @@
  *   - From 21:00: a reception opened but not closed → "sin_cerrar". A reception with an entrega parcial closed
  *     (big shipments received tarima by tarima) only alerts once its last entrega is older than dias_gracia days.
  *   - From 21:00: one digest email for every configured hub+área.
+ *   - Proveedor directo (área pd-{proveedor}, no schedule): from 21:00, for every hub with an active row, a supplier
+ *     reception still open → "sin_cerrar" (área = pd-…); the digest adds a line per supplier reception of the day.
  * Each alert is recorded once in rec_alerts (unique hub+área+fecha+tipo) through the RPC, and emailed once.
  * The anon key is the same public key the web app ships; this script only reads tables and calls the RPCs.
  */
@@ -89,6 +91,21 @@ function sesiones_(hub, area, hoy){
   return Object.keys(by).map(k => by[k]).filter(s => !s.borrada);
 }
 
+// Supplier receptions (área pd-*) of the last 7 days, one per session, with the supplier's name
+function sesionesPd_(hub, hoy){
+  const evs = sb_(`rec_events?hub=eq.${enc_(hub)}&area=like.pd-*&fecha=gte.${addDays_(hoy,-7)}&tipo=in.(abrir,reemplazo,cerrar,admin)&select=session_id,area,fecha,tipo,detalle,ts&order=id.asc`);
+  const by = {};
+  evs.forEach(e => {
+    const s = by[e.session_id] || (by[e.session_id] = { area:e.area, fecha:e.fecha, proveedor:e.area.slice(3), cerrada:null });
+    const d = e.detalle || {};
+    if (d.proveedor) s.proveedor = d.proveedor;
+    if (e.tipo === 'cerrar') s.cerrada = d;
+    if (e.tipo === 'admin' && d.accion === 'reabrir') s.cerrada = null;
+    if (e.tipo === 'admin' && d.accion === 'borrar') s.borrada = true;
+  });
+  return Object.keys(by).map(k => by[k]).filter(s => !s.borrada);
+}
+
 /* ── Main ── */
 function revisarAlertas(verbose){
   const now = new Date(), hoy = fmt_(now, 'yyyy-MM-dd'), hm = fmt_(now, 'HH:mm'), dow = dow_(hoy);
@@ -120,8 +137,20 @@ function revisarAlertas(verbose){
       if (abiertas.length) alerta(c, 'sin_cerrar', hoy, `${nombre}: recepción abierta sin cerrar (desde el ${fechaLarga_(abiertas[0].fecha)}).`);
     }
   });
+  // Proveedor directo: the hubs with an active, unpaused row
+  const hubsPd = [...new Set(cfgs.filter(c => c.activo && !(c.pausado_hasta && c.pausado_hasta >= hoy)).map(c => c.hub))];
+  const pdSes = {};
+  if (hm >= HORA_CIERRE) hubsPd.forEach(hub => {
+    pdSes[hub] = sesionesPd_(hub, hoy);
+    pdSes[hub].filter(s => !s.cerrada).forEach(s => alerta({ hub, area:s.area, email:cfgs.some(c => c.hub === hub && c.email) }, 'sin_cerrar', hoy,
+      `${HUBS[hub]} — Proveedor ${s.proveedor}: recepción abierta sin cerrar (desde el ${fechaLarga_(s.fecha)}).`));
+  });
   if (hm >= HORA_CIERRE && cfgs.length) {
     const lineas = cfgs.map(c => '• ' + estadoDelDia_(c, hoy, dow));
+    hubsPd.forEach(hub => (pdSes[hub] || []).filter(s => s.fecha === hoy || !s.cerrada).forEach(s => {
+      const d = s.cerrada, nombre = `${HUBS[hub]} — Proveedor ${s.proveedor}`;
+      lineas.push('• ' + (d ? `✓ ${nombre}: recibido (${d.lineas || 0} productos, ${d.diferencias || 0} con diferencia)` : `⚠ ${nombre}: abierta sin cerrar`));
+    }));
     const msg = `Recepciones del ${fechaLarga_(hoy)}\n\n` + lineas.join('\n');
     const id = rpc_('rec_alert_record', { p_hub:'todos', p_area:'todos', p_fecha:hoy, p_tipo:'digest', p_mensaje:msg });
     if (id != null && cfgs.some(c => c.email)) { enviar_('MH Recibo — resumen del ' + fechaLarga_(hoy), msg); rpc_('rec_alert_mark_sent', { p_id:id }); }

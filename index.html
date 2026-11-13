@@ -277,6 +277,9 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .cal-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--c-muted);margin:10px 0}
 .cal-legend{align-items:center} .cal-sw{display:inline-block;width:18px;height:10px;border-radius:5px;margin-right:5px;vertical-align:0;border:1px solid transparent}
 .cal-sw.abarrotes{background:var(--c-teal)} .cal-sw.carnes{background:var(--c-ink)} .cal-sw.open{border:1px dashed var(--c-muted);background:var(--c-white)}
+.cal-bar.pd{background:var(--c-teal-light);color:var(--c-teal-dark);border-color:var(--c-teal-light)}
+.cal-bar.open.pd{background:var(--c-white);color:var(--c-teal-dark);border-style:dashed;border-color:var(--c-teal-dark)}
+.cal-sw.pd{background:var(--c-teal-light)}
 .day-chk{display:inline-flex;align-items:center;gap:3px;font-size:13px;margin-right:8px}
 .adm-field{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:14px;flex-wrap:wrap}
 .adm-field input[type=time],.adm-field input[type=date],.adm-field input[type=number],.adm-field select{height:40px;padding:0 10px;font-size:14px;border:2px solid var(--c-line);border-radius:var(--r-sm);background:var(--c-white)}
@@ -903,7 +906,8 @@ function renderInicio(){
     +HUBS.map(x=>`<button class="choice ${INI.hub===x.slug?'sel':''}" onclick="iniPick('hub','${x.slug}')">${escapeHtml(x.name)}</button>`).join('')+`</div></div>`;
   if(INI.origen==='pd'){
     if(INI.hub) h+=receptorStepHtml(3);
-    if(INI.hub && INI.receptor) h+=`<div class="step"><div class="step-title">4 · ¿Qué proveedor llegó?</div>${pdStepHtml()}</div>`;
+    if(INI.hub && INI.receptor) h+=`<div class="step"><div class="step-title">4 · ¿Qué proveedor llegó?</div>${pdStepHtml()}
+      <button class="link-btn" onclick="openRecepciones(true)">Recepciones de proveedor cerradas (para registrar en el sistema)</button></div>`;
     h+=`<button class="link-btn" style="color:var(--gray-500);margin-top:28px" onclick="openAdmin()">Admin</button>`;
     b.innerHTML=h; return;
   }
@@ -2761,7 +2765,7 @@ async function pdCerrar(){
     const path=`reportes/${S.hub}/${S.area}/${S.session.fecha}_${localHM(now).replace(':','-')}_${fileSafe(S.receptor)}.csv`;
     await sbUpload(path, pdBuildReportCsv(rows, receptores), 'text/csv; charset=utf-8');
     const difs=rows.filter(r=>r.dif);
-    const ev=makeEvent('cerrar', { detalle:{ reporte:path, envio:S.envio._path, origen:'proveedor', proveedor:o.proveedor,
+    const ev=makeEvent('cerrar', { detalle:{ reporte:path, envio:S.envio._path, origen:'proveedor', proveedor:o.proveedor, comercial:o.comercial||undefined, comprador:o.comprador||undefined,
       ocs:o.ocs.map(x=>x.key), num_oc:o.num_oc, fechas_entrega:o.fechas_entrega, orden_cambio_ignorado:lectura&&lectura.cambio?true:undefined,
       lineas:S.lines.size, recibidas:rows.filter(r=>!r.pns && r.rec>0).length, diferencias:difs.length, receptores,
       excedente:rows.filter(r=>!r.pns && r.exc>0).length, rechazadas:rows.filter(r=>r.rech>0).length,
@@ -2989,11 +2993,34 @@ function origenTexto(o){ return o ? [ORIGEN[o.cat], o.nota].filter(Boolean).join
 // People tagged at the start of paragraph 2: recibo/config/slack.json { tags:[…] }, edited in Admin → Slack. Use the Slack
 // @username (or a first name that's unique in Slack): a pasted "@Alberto Mendoza" tagged @alberto and left "Mendoza" as text.
 const SLACK_TAGS_DEFAULT=['@alberto']; // the hub coordinator and Jose are added by hand by the aux
-let SLACK_TAGS=null;
+let SLACK_TAGS=null, SLACK_PERSONAS={}; // personas: { "<nombre como viene en la hoja>": "@usuario" } — Comercial / Comprador (proveedor directo)
 async function loadSlackTags(){
-  try{ const j=JSON.parse(await sbFetch('config/slack.json')); SLACK_TAGS=Array.isArray(j.tags)?j.tags:SLACK_TAGS_DEFAULT; }
+  try{ const j=JSON.parse(await sbFetch('config/slack.json')); SLACK_TAGS=Array.isArray(j.tags)?j.tags:SLACK_TAGS_DEFAULT;
+    SLACK_PERSONAS=j.personas&&typeof j.personas==='object'?j.personas:{}; }
   catch(_){ if(!SLACK_TAGS) SLACK_TAGS=SLACK_TAGS_DEFAULT; }
   return SLACK_TAGS;
+}
+function personaTag(nombre){ const k=Object.keys(SLACK_PERSONAS).find(x=>sameName(x, nombre)); return k?SLACK_PERSONAS[k]:''; }
+// Proveedor directo (proveedorDirecto-plan §4, §6.4): header, one §4 line per product with a difference, then the
+// supplier's Comercial and Comprador (their Slack tag from Admin → Slack, else the plain name). Names only, never phones.
+function pdSlackMensaje(info, rvRows, orden){
+  const u=r=>r.kgpz==='Kg'?' kg':'', q=(v,r)=>fmtQty(v,r.kgpz)+u(r);
+  const difs=rvRows.filter(r=>r.pns || !/^Completo/.test(r.estado));
+  const quien=(info.receptores||[info.receptor]).filter(Boolean).join(', ');
+  const out=[`*${hubName(info.hub)} · ${info.proveedor||areaName(info.area)} · entrega ${fechaLarga(info.fecha)}*${info.num_oc&&info.num_oc.length?' · OC '+info.num_oc.join(', '):''}: ${difs.length?`${difs.length} producto(s) con diferencia`:'llegó completo'}${quien?' · recibió '+quien:''}`];
+  for(const r of difs){
+    if(r.pns){ out.push(`• ${r.producto} — No solicitado · Excedente ${q(r.exc,r)} (devuelto) · Facturar 0`); continue; }
+    const p=[`Pedido ${q(r.env,r)}`, `Recibido ${q(r.rec,r)}`];
+    if(r.exc>0) p.push(`Excedente ${q(r.exc,r)} (devuelto)`);
+    if(r.rech>0) p.push(`Rechazadas ${q(r.rech,r)} (${r.motivo})`);
+    if(r.falt>0) p.push(`Faltan ${q(r.falt,r)}`);
+    p.push(`Facturar ${q(r.fac,r)}`);
+    out.push(`• ${r.producto} — ${p.join(' · ')}`);
+  }
+  const c=orden&&orden.comercial, b=orden&&orden.comprador, t=n=>personaTag(n)||n;
+  const quienes=[c?`Comercial ${t(c)}`:'', b && !sameName(b, c||'')?`Compras ${t(b)}`:''].filter(Boolean);
+  if(quienes.length && difs.length) out.push('', quienes.join(' · '));
+  return out.join('\n');
 }
 const SLACK_CAUSAS=[ // [key, categories, tag on the item line, how paragraph 2 names it, the weakness it points to]
   ['conteo', ['sobrante_armado'], 'conteo al armar', 'conteo al armar', 'no se cuentan bien las piezas al armar'],
@@ -3051,8 +3078,15 @@ function slackMensaje(info, rvRows, tags){
   return out.join('\n');
 }
 async function openSlackMensaje(){
-  const txt=slackMensaje(RV.info, RV.rows, await loadSlackTags());
-  openSheet('Mensaje para Slack', `<div class="muted" style="margin-bottom:10px">Cópialo y pégalo en el canal de abastecimiento del hub. Las conclusiones las calcula el sistema con lo armado, lo enviado y lo recibido.</div>
+  let txt;
+  if(RV.pd){
+    await loadSlackTags();
+    let orden={ comercial:RV.info.comercial, comprador:RV.info.comprador };
+    // closes before 2026-11-13 don't carry the names: read them from the order snapshot
+    if(!orden.comercial && !orden.comprador && RV.info.envio){ try{ orden=JSON.parse(await sbFetch(RV.info.envio)).orden||orden; }catch(_){} }
+    txt=pdSlackMensaje(RV.info, RV.rows, orden);
+  } else txt=slackMensaje(RV.info, RV.rows, await loadSlackTags());
+  openSheet('Mensaje para Slack', `<div class="muted" style="margin-bottom:10px">${RV.pd?'Cópialo y pégalo en el canal de abastecimiento del hub, con el comercial y compras del proveedor.':'Cópialo y pégalo en el canal de abastecimiento del hub. Las conclusiones las calcula el sistema con lo armado, lo enviado y lo recibido.'}</div>
     <pre class="slack-pre" id="slack-txt">${escapeHtml(txt)}</pre>
     <button class="btn btn-primary btn-block" style="margin-top:12px" onclick="copiarSlack()">Copiar mensaje</button>`);
 }
@@ -3093,7 +3127,7 @@ function openCanastas(){
 let RV=null; // { info, rows, csv, f:{q,solo,estado,kgpz,pasillo,sort} }
 async function listCerradas(slug, area, days=30){
   const desde=localDateStr(new Date(serverNow().getTime()-days*86400000));
-  const q=`tipo=in.(cerrar,admin,parcial)&fecha=gte.${desde}${slug?`&hub=eq.${encodeURIComponent(slug)}`:''}${area?`&area=eq.${area}`:''}&select=*&order=id.desc`;
+  const q=`tipo=in.(cerrar,admin,parcial)&fecha=gte.${desde}${slug?`&hub=eq.${encodeURIComponent(slug)}`:''}${area==='pd'?'&area=like.pd-*':area?`&area=eq.${area}`:''}&select=*&order=id.desc`;
   const evs=await pgSelectAll('rec_events', q);
   // latest state per session: a later admin "reabrir" hides the close
   const seen=new Map(), parts=[];
@@ -3101,29 +3135,34 @@ async function listCerradas(slug, area, days=30){
     // every entrega parcial is listed on its own (it was registered as it arrived), even after the final close
     if(e.tipo==='parcial'){ parts.push(Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id, parcial:true }, e.detalle||{})); continue; }
     if(seen.has(e.session_id)) continue;
+    if(e.detalle && e.detalle.proveedor && isPdArea(e.area)) PD_NAMES[e.area]=e.detalle.proveedor;
     if(e.tipo==='cerrar') seen.set(e.session_id, Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id }, e.detalle||{}));
     else if(e.detalle && (e.detalle.accion==='reabrir' || e.detalle.accion==='borrar')) seen.set(e.session_id, null);
   }
   return [...seen.values()].filter(Boolean).concat(parts).sort((a,b)=>Date.parse(b.ts)-Date.parse(a.ts));
 }
 function recepBack(){ goInicio(); }
-async function openRecepciones(){
-  document.getElementById('recep-title').textContent=`${hubName(INI.hub)} · ${areaName(INI.area)}`;
+let _recepPd=false; // the list shows every supplier of the hub (Proveedor directo) instead of one área
+async function openRecepciones(pd){
+  _recepPd=pd===true;
+  document.getElementById('recep-title').textContent=`${hubName(INI.hub)} · ${_recepPd?'Proveedores':areaName(INI.area)}`;
   // The list always goes back to Inicio (opening a reception from it points this button at the list)
   const back=document.getElementById('recep-back'); back.onclick=recepBack; back.textContent='← Inicio';
   const el=document.getElementById('recep-body');
   el.innerHTML='<h2>Recepciones cerradas</h2><div class="muted">Cargando…</div>';
   showScreen('screen-recepciones');
-  let list; try{ list=await listCerradas(INI.hub, INI.area); }catch(e){ el.innerHTML='<h2>Recepciones cerradas</h2><div class="err-box">Sin conexión. Intenta de nuevo.</div>'; return; }
+  let list; try{ list=await listCerradas(INI.hub, _recepPd?'pd':INI.area); }catch(e){ el.innerHTML='<h2>Recepciones cerradas</h2><div class="err-box">Sin conexión. Intenta de nuevo.</div>'; return; }
   window._recepList=list;
   el.innerHTML='<h2>Recepciones cerradas</h2><div class="muted" style="margin-bottom:10px">Últimos 30 días, con las entregas parciales. Ábrela para registrar la recepción en el sistema.</div>'
     +(list.length?list.map((r,i)=>`<button class="res-item" onclick="openRecepcion(window._recepList[${i}],'lista')"><div style="flex:1">
-      ${r.parcial?`<div class="res-name">${fechaLarga(r.fecha)} · <span class="tag orange">entrega parcial ${r.entrega}</span></div>
+      ${isPdArea(r.area)?`<div class="res-name">${escapeHtml(r.proveedor||areaName(r.area))} · ${fechaLarga(r.fecha)}</div>
+      <div class="res-sub">${r.num_oc&&r.num_oc.length?'OC '+escapeHtml(r.num_oc.join(', '))+' · ':''}cerrada ${localHM(new Date(r.ts))} · ${escapeHtml((r.receptores||[r.receptor]).join(', '))} · ${r.lineas||0} productos · ${r.diferencias?`<b style="color:var(--orange)">${r.diferencias} con diferencia</b>`:'sin diferencias'}</div>`
+      :r.parcial?`<div class="res-name">${fechaLarga(r.fecha)} · <span class="tag orange">entrega parcial ${r.entrega}</span></div>
       <div class="res-sub">${r.fecha_entrega&&r.fecha_entrega!==r.fecha?fechaLarga(r.fecha_entrega)+', ':''}${localHM(new Date(r.ts))} · ${escapeHtml((r.receptores||[r.receptor]).join(', '))} · ${r.productos||0} productos en esta entrega</div>`
       :`<div class="res-name">${fechaLarga(r.fecha)} · cerrada ${localHM(new Date(r.ts))}${r.entregas?` · ${r.entregas} entregas`:''}</div>
       <div class="res-sub">${escapeHtml((r.receptores||[r.receptor]).join(', '))} · ${r.lineas||0} productos · ${r.diferencias?`<b style="color:var(--orange)">${r.diferencias} con diferencia</b>`:'sin diferencias'}${r.fecha_corta?` · ${r.fecha_corta} con fecha corta`:''}${r.danadas?` · ${r.danadas} con dañadas`:''}</div>`}
       ${(r.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div><span style="font-size:20px">›</span></button>`).join('')
-      :'<div class="empty-hint">No hay recepciones cerradas en los últimos 30 días.</div>');
+      :`<div class="empty-hint">No hay recepciones${_recepPd?' de proveedor':''} cerradas en los últimos 30 días.</div>`);
 }
 async function verResumenCerrado(){
   const sid=INI.active && INI.active.data && INI.active.data.session_id; if(!sid) return;
@@ -3136,7 +3175,7 @@ async function verResumenCerrado(){
 async function openRecepcion(info, from){
   const el=document.getElementById('recep-body');
   document.getElementById('recep-title').textContent=`${hubName(info.hub||INI.hub)} · ${areaName(info.area||INI.area)}`;
-  document.getElementById('recep-back').onclick = from==='lista' ? openRecepciones : from==='admin' ? openAdmin : recepBack;
+  document.getElementById('recep-back').onclick = from==='lista' ? ()=>openRecepciones(_recepPd) : from==='admin' ? openAdmin : recepBack;
   document.getElementById('recep-back').textContent = from==='lista' ? '← Recepciones' : from==='admin' ? '← Admin' : '← Inicio';
   el.innerHTML='<div class="muted">Cargando reporte…</div>'; showScreen('screen-recepciones');
   let csv; try{ csv=await sbFetch(info.reporte); }catch(e){ el.innerHTML=`<div class="err-box">${isNetErr(e)?'Sin conexión.':'No se encontró el reporte.'} Intenta de nuevo.</div>`; return; }
@@ -3146,13 +3185,15 @@ async function openRecepcion(info, from){
     if(pdRep){ const ped=parseNum(g('Pedido')), rec=parseNum(g('Recibido')), kgpz=g('Und')==='Kg'?'Kg':'Pz', u=unitOf(kgpz);
       const extra=[g('Excedente')?`Excedente ${g('Excedente')} ${u} (devuelto)`:'', g('Rechazadas')?`Rechazadas ${g('Rechazadas')} ${u} (${g('Motivo')})`:'', g('Faltante')?`Faltan ${g('Faltante')} ${u}`:''].filter(Boolean);
       return { i, producto:g('Producto'), barcode:g('Código'), kgpz, pos:'', pasillo:'', armado:'', env:ped, rec, dif:round2(rec-ped), estado:g('Estado'), acum:null,
-        corta:0, cad:g('Caducidad mínima'), dan:0, notas:extra.concat(g('Notas')||[]).join(' · '), _n:normName(g('Producto')), pd:true }; }
+        corta:0, cad:g('Caducidad mínima'), dan:0, notas:extra.concat(g('Notas')||[]).join(' · '), _n:normName(g('Producto')), pd:true,
+        exc:parseNum(g('Excedente'))||0, rech:parseNum(g('Rechazadas'))||0, motivo:g('Motivo'), falt:parseNum(g('Faltante'))||0, fac:parseNum(g('Facturar'))||0,
+        pns:g('Estado')==='No solicitado', temp:g('Temp') }; }
     const pos=g('Posición'), kgpz=g('Kg/Pz')==='Kg'?'Kg':'Pz';
     return { i, producto:g('Producto'), barcode:g('Código de barras'), kgpz, pos, pasillo:(pos.split(/[-·\s]/)[0]||'').trim(), armado:g('Armado'),
       env:parseNum(g('Enviado')), rec:parseNum(g('Recibido')), dif:parseNum(g('Diferencia')), estado:info.parcial?'Entrega '+info.entrega:g('Estado'),
       acum:info.parcial?parseNum(g('Recibido acumulado')):null, corta:parseNum(g('Fecha corta'))||0, cad:g('Caducidad mínima'), dan:parseNum(g('Dañadas'))||0, notas:g('Notas (correcciones / confirmaciones)'), _n:normName(g('Producto')) }; });
   let ticks=new Set(); try{ ticks=new Set(JSON.parse(localStorage.getItem('mr_ticks_'+info.reporte)||'[]')); }catch(_){}
-  RV={ info, rows, csv, ticks, f:{ q:'', vista:info.parcial?'todos':rows.some(rvDistinto)?'dif':'igual', solo:'', estado:'', kgpz:'', pasillo:'', sort:'archivo' } };
+  RV={ info, rows, csv, ticks, pd:pdRep, f:{ q:'', vista:info.parcial?'todos':rows.some(r=>!r.pns && rvDistinto(r))?'dif':'igual', solo:'', estado:'', kgpz:'', pasillo:'', sort:'archivo' } };
   renderRecepcion();
   if(PENDING_UPLOAD && from==='inicio' && info.hub===INI.hub && info.area===INI.area)
     document.getElementById('recep-body').insertAdjacentHTML('afterbegin', `<button class="btn btn-primary btn-block" style="margin-bottom:12px" onclick="resumePendingUpload()">Ahora carga el archivo nuevo (${escapeHtml(PENDING_UPLOAD.file.name)})</button>`);
@@ -3160,7 +3201,7 @@ async function openRecepcion(info, from){
 function rvSet(k, v){ RV.f[k]=v; renderRecepcionRows(); }
 // Registering in the system: type the lines that differ, then approve the rest together. So a scale variance
 // counts here (it is "Completo" but Recibido ≠ Enviado): approving it would register the enviado weight.
-function rvDistinto(r){ return !!r.dif || !/^Completo/.test(r.estado); }
+function rvDistinto(r){ if(r.pd) return r.rec!==r.env; return !!r.dif || !/^Completo/.test(r.estado); }
 function rvVista(v){
   RV.f.vista=v; RV.f.solo=RV.f.estado='';
   for(const id of ['rv-solo','rv-estado']){ const s=document.getElementById(id); if(s) s.value=''; }
@@ -3175,18 +3216,18 @@ function rvTick(i){
 }
 function renderRecepcion(){
   const I=RV.info, pas=[...new Set(RV.rows.map(r=>r.pasillo).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es',{numeric:true}));
-  const est=[...new Set(RV.rows.map(r=>r.estado))];
+  const est=[...new Set(RV.rows.filter(r=>!r.pns).map(r=>r.estado))];
   const P=!!I.parcial;
   document.getElementById('recep-body').innerHTML=(P?`<h2>Entrega parcial ${I.entrega} · recepción del ${fechaLarga(I.fecha)}</h2>
     <div class="info-card">Cerrada ${I.fecha_entrega&&I.fecha_entrega!==I.fecha?'el '+fechaLarga(I.fecha_entrega)+' ':''}a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}<br>
       ${I.productos||0} productos en esta entrega · ${I.recibidas_total||0} de ${I.lineas||0} del envío recibidos hasta aquí
       <div class="muted" style="margin-top:4px">Lo que falta se recibe en la siguiente entrega; las diferencias se revisan al cerrar toda la recepción.</div></div>`
-    :`<h2>Recepción del ${fechaLarga(I.fecha)}</h2>
+    :RV.pd?pdRecepcionHead(I):`<h2>Recepción del ${fechaLarga(I.fecha)}</h2>
     <div class="info-card">Cerrada a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}${I.entregas?` · en ${I.entregas} entregas`:''}<br>
       ${I.lineas||0} productos · ${I.diferencias?`<b style="color:var(--orange)">${I.diferencias} con diferencia</b>`:'sin diferencias'}${I.no_esperados?` · ${I.no_esperados} no esperado(s)`:''}${I.fecha_corta?` · <b style="color:var(--orange)">${I.fecha_corta} con fecha corta</b>`:''}${I.danadas?` · <b style="color:var(--orange)">${I.danadas} con dañadas</b>`:''}
       <div>${(I.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div></div>`)+`
     ${RV.rows.some(r=>r.corta>0||r.dan>0)?`<div class="warn-box">Registra en el sistema todo lo recibido, también lo de fecha corta y lo dañado. Después regístralo como merma (MNA) y sepáralo.</div>`:''}
-    ${P||isPdArea(I.area)?'':`<button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="openSlackMensaje()">Mensaje para Slack</button>`}
+    ${P?'':`<button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="openSlackMensaje()">Mensaje para Slack</button>`}
     <button class="btn btn-secondary btn-block" onclick="descargarReporte()">Descargar CSV</button>
     ${P?'':'<div class="tabs" id="rv-vistas" style="margin:12px 0 0"></div>'}
     <input class="text-input" style="margin-top:12px" placeholder="Buscar producto…" oninput="rvSet('q',this.value)" autocomplete="off">
@@ -3194,34 +3235,48 @@ function renderRecepcion(){
       ${!RV.rows.some(r=>r.corta>0||r.dan>0)?'':`<select id="rv-solo" onchange="rvFiltro('solo',this.value)"><option value="">Fecha corta / dañadas</option>${RV.rows.some(r=>r.corta>0)?'<option value="corta">Solo fecha corta</option>':''}${RV.rows.some(r=>r.dan>0)?'<option value="dan">Solo dañadas</option>':''}</select>`}
       ${P?'':`<select id="rv-estado" onchange="rvFiltro('estado',this.value)"><option value="">Estado</option>${est.map(e=>`<option>${escapeHtml(e)}</option>`).join('')}</select>`}
       <select onchange="rvSet('kgpz',this.value)"><option value="">Kg/Pz</option><option>Kg</option><option>Pz</option></select>
-      <select onchange="rvSet('pasillo',this.value)"><option value="">Pasillo</option>${pas.map(p=>`<option>${escapeHtml(p)}</option>`).join('')}</select>
-      <select onchange="rvSet('sort',this.value)"><option value="archivo">Orden del archivo</option><option value="az">A-Z</option><option value="pasillo">Pasillo</option><option value="dif">Diferencia</option></select>
+      ${RV.pd?'':`<select onchange="rvSet('pasillo',this.value)"><option value="">Pasillo</option>${pas.map(p=>`<option>${escapeHtml(p)}</option>`).join('')}</select>`}
+      <select onchange="rvSet('sort',this.value)"><option value="archivo">${RV.pd?'Orden de la OC':'Orden del archivo'}</option><option value="az">A-Z</option>${RV.pd?'':'<option value="pasillo">Pasillo</option>'}<option value="dif">Diferencia</option></select>
     </div>
     <div class="muted" id="rv-hint"></div><div class="muted" id="rv-count" style="margin-bottom:8px"></div><div id="rv-rows"></div>`;
   renderRecepcionRows();
 }
 function renderRecepcionRows(){
   const f=RV.f, words=normName(f.q).split(' ').filter(Boolean);
-  const vista=words.length?'todos':f.vista, difs=RV.rows.filter(rvDistinto); // a search looks through every product
+  // Supplier report: products not in the order were all sent back, so they get their own section and are never registered
+  const base=RV.pd?RV.rows.filter(r=>!r.pns):RV.rows, devueltos=RV.pd?RV.rows.filter(r=>r.pns):[];
+  const vista=words.length?'todos':f.vista, difs=base.filter(rvDistinto); // a search looks through every product
   const tabs=document.getElementById('rv-vistas');
-  if(tabs) tabs.innerHTML=[['dif','Diferencias',difs.length],['igual','Sin diferencia',RV.rows.length-difs.length],['todos','Todos',RV.rows.length]]
+  if(tabs) tabs.innerHTML=[['dif','Diferencias',difs.length],['igual','Sin diferencia',base.length-difs.length],['todos','Todos',base.length]]
     .map(([k,n,c])=>`<button class="choice ${vista===k?'sel':''}" onclick="rvVista('${k}')">${n} · ${c}</button>`).join('');
   const bascula=difs.filter(r=>/^Completo/.test(r.estado)).length;
-  document.getElementById('rv-hint').textContent=vista==='dif'&&difs.length?`Primero edita estas cantidades en el sistema.${bascula?` Incluye ${bascula} con variación de báscula.`:''}`
-    :vista==='igual'?'Recibido igual a lo enviado: apruébalos juntos en el sistema.':'';
-  let rows=RV.rows.filter(r=>(!words.length || words.every(w=>r._n.includes(w)))
+  document.getElementById('rv-hint').textContent=vista==='dif'&&difs.length?`Primero edita estas cantidades en el sistema${RV.pd?': el Recibido es lo que se factura':''}.${bascula?` Incluye ${bascula} con variación de báscula.`:''}`
+    :vista==='igual'?`Recibido igual a lo ${RV.pd?'pedido':'enviado'}: apruébalos juntos en el sistema.`:'';
+  let rows=base.filter(r=>(!words.length || words.every(w=>r._n.includes(w)))
     && (vista==='todos' || rvDistinto(r)===(vista==='dif'))
     && (!f.solo || (f.solo==='corta' ? r.corta>0 : r.dan>0)) && (!f.estado || r.estado===f.estado) && (!f.kgpz || r.kgpz===f.kgpz) && (!f.pasillo || r.pasillo===f.pasillo));
   const cmp={ archivo:(a,b)=>a.i-b.i, az:(a,b)=>a._n.localeCompare(b._n), pasillo:(a,b)=>(a.pos||'~').localeCompare(b.pos||'~','es',{numeric:true})||a.i-b.i, dif:(a,b)=>Math.abs(b.dif)-Math.abs(a.dif)||a.i-b.i }[f.sort];
   rows=rows.slice().sort(cmp);
-  document.getElementById('rv-count').textContent=`${rows.length} producto(s) · ${RV.ticks.size} de ${RV.rows.length} marcados`;
+  document.getElementById('rv-count').textContent=`${rows.length} producto(s) · ${[...RV.ticks].filter(i=>base.some(r=>r.i===i)).length} de ${base.length} marcados`;
   document.getElementById('rv-rows').innerHTML=rows.map(r=>{ const u=unitOf(r.kgpz), on=RV.ticks.has(r.i);
     return `<div class="sum-row ${on?'ticked':''} ${r.acum!=null||/^Completo/.test(r.estado)?'':'delta'}"><div class="ritem-row">
       <input type="checkbox" class="chk" ${on?'checked':''} onchange="rvTick(${r.i})">${imgTag(r.barcode, r.producto, 'thumb')}
       <div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div><div class="ritem-meta">${escapeHtml(r.barcode||'sin código')}${r.pos?' · '+escapeHtml(r.pos):''}${r.corta>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(r.corta,r.kgpz)} ${u} fecha corta · separar para MNA</span>`:''}${r.dan>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(r.dan,r.kgpz)} ${u} dañadas · separar para MNA</span>`:''}</div></div>
       <div style="text-align:right"><div style="font-size:30px;font-weight:800;color:var(--green-dark)">${fmtQty(r.rec,r.kgpz)}</div><div class="ritem-meta">${u} recibido</div></div></div>
       ${r.acum!=null?`<div class="ritem-meta" style="margin-top:4px">Acumulado en la recepción: ${fmtQty(r.acum,r.kgpz)} ${u}</div>`:`<div class="ritem-meta" style="margin-top:4px">${r.pd?'Pedido':'Enviado'} ${fmtQty(r.env,r.kgpz)}${r.armado&&r.armado!=='—'?' · Armado '+escapeHtml(r.armado):''} · Dif ${r.dif>0?'+':''}${fmtQty(r.dif,r.kgpz)} · <span class="estado ${ESTADO_CLS[r.estado]||PD_ESTADO_CLS[r.estado]||'mid'}">${escapeHtml(r.estado)}</span></div>`}
-      ${r.notas?`<div class="ritem-meta">${escapeHtml(r.notas)}</div>`:''}</div>`; }).join('') || `<div class="empty-hint">${vista==='dif'&&!difs.length?'Sin diferencias: todo llegó igual a lo enviado.':'Nada coincide con el filtro.'}</div>`;
+      ${r.notas?`<div class="ritem-meta">${escapeHtml(r.notas)}</div>`:''}</div>`; }).join('') || `<div class="empty-hint">${vista==='dif'&&!difs.length?`Sin diferencias: todo llegó igual a lo ${RV.pd?'pedido':'enviado'}.`:'Nada coincide con el filtro.'}</div>`;
+  const dv=devueltos.filter(r=>!words.length || words.every(w=>r._n.includes(w)));
+  if(dv.length) document.getElementById('rv-rows').insertAdjacentHTML('beforeend', `<div class="section-title" style="margin-top:16px">No solicitados · ${dv.length}</div>
+    <div class="muted" style="margin-bottom:8px">Se regresaron al proveedor. No se registran en el sistema.</div>`
+    +dv.map(r=>`<div class="sum-row"><div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
+      <div class="ritem-meta">${escapeHtml(r.barcode||'sin código')} · ${fmtQty(r.exc,r.kgpz)} ${unitOf(r.kgpz)} devueltas</div></div></div></div>`).join(''));
+}
+function pdRecepcionHead(I){
+  const dev=RV.rows.filter(r=>!r.pns && (r.exc>0||r.rech>0)).length, fal=RV.rows.filter(r=>r.falt>0).length;
+  return `<h2>${escapeHtml(I.proveedor||areaName(I.area))} · ${fechaLarga(I.fecha)}</h2>
+    <div class="info-card">${I.num_oc&&I.num_oc.length?'OC '+escapeHtml(I.num_oc.join(', '))+'<br>':''}Cerrada ${localDateStr(new Date(I.ts))!==I.fecha?'el '+fechaLarga(localDateStr(new Date(I.ts)))+' ':''}a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}<br>
+      ${I.lineas||0} productos en la orden · ${I.diferencias?`<b style="color:var(--orange)">${I.diferencias} con diferencia</b>`:'sin diferencias'}${dev?` · ${dev} con devolución`:''}${fal?` · ${fal} con faltante`:''}${I.no_solicitados?` · ${I.no_solicitados} no solicitado(s)`:''}</div>
+    <div class="note">Registra en el sistema el <b>Recibido</b> de cada producto: es lo que se factura. Lo devuelto y lo que no llegó ya está descontado.</div>`;
 }
 function descargarReporte(){
   const blob=new Blob(['﻿'+RV.csv], { type:'text/csv;charset=utf-8' });
@@ -3303,6 +3358,7 @@ async function admRecepciones(){
     if(!r){ r={ session_id:e.session_id, hub:e.hub, area:e.area, fecha:e.fecha, abierta:e.ts, receptores:new Set(), cerrada:null, sinArchivo:false, envio:null, parciales:[] }; by.set(e.session_id, r); }
     if(e.receptor && e.receptor!=='Admin') r.receptores.add(e.receptor);
     const d=e.detalle||{};
+    if(d.proveedor && isPdArea(e.area)) PD_NAMES[e.area]=d.proveedor;
     if(e.tipo==='abrir' || e.tipo==='reemplazo'){ if(d.envio) r.envio=d.envio; if(d.sin_archivo) r.sinArchivo=true; if(d.tras_sin_archivo) r.sinArchivo=false; }
     if(e.tipo==='cerrar') r.cerrada=Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub, area:e.area, receptor:e.receptor, session_id:e.session_id }, d);
     if(e.tipo==='admin' && d.accion==='reabrir') r.cerrada=null;
@@ -3314,7 +3370,7 @@ async function admRecepciones(){
   _admRecep.forEach((r,i)=>{
     if(r.fecha!==day){ day=r.fecha; h+=`<div class="section-title">${fechaLarga(day)}</div>`; }
     const c=r.borrada?null:r.cerrada;
-    h+=`<div class="adm-row"><b>${escapeHtml(hubName(r.hub))} · ${areaName(r.area)}</b> — ${r.borrada?`<span class="tag red">envío borrado ${localHM(new Date(r.borrada.ts))} por ${escapeHtml(r.borrada.receptor||'')}${r.borrada.escaneos?` · ${r.borrada.escaneos} escaneos descartados`:''}</span>`:c?`<span class="tag green">✓ cerrada ${localHM(new Date(c.ts))}</span>`:`<span class="tag orange">abierta desde ${localHM(new Date(r.abierta))}</span>`}${r.sinArchivo?' <span class="tag red">sin archivo</span>':''}${r.parciales.length?` <span class="tag orange">${r.parciales.length} entrega${r.parciales.length===1?'':'s'} parcial${r.parciales.length===1?'':'es'}</span>`:''}
+    h+=`<div class="adm-row"><b>${escapeHtml(hubName(r.hub))} · ${isPdArea(r.area)?'Proveedor ':''}${escapeHtml(areaName(r.area))}</b> — ${r.borrada?`<span class="tag red">envío borrado ${localHM(new Date(r.borrada.ts))} por ${escapeHtml(r.borrada.receptor||'')}${r.borrada.escaneos?` · ${r.borrada.escaneos} escaneos descartados`:''}</span>`:c?`<span class="tag green">✓ cerrada ${localHM(new Date(c.ts))}</span>`:`<span class="tag orange">abierta desde ${localHM(new Date(r.abierta))}</span>`}${r.sinArchivo?' <span class="tag red">sin archivo</span>':''}${r.parciales.length?` <span class="tag orange">${r.parciales.length} entrega${r.parciales.length===1?'':'s'} parcial${r.parciales.length===1?'':'es'}</span>`:''}
       <div class="muted" style="font-size:12px">${escapeHtml([...r.receptores].join(', ')||'—')}${c?` · ${c.lineas||0} productos · ${c.diferencias||0} con diferencia`:''}</div>
       ${c?(c.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join(''):''}
       <div class="btns">${c?`<button class="btn btn-secondary" onclick="openRecepcion(_admRecep[${i}].cerrada,'admin')">Ver</button>
@@ -3343,23 +3399,27 @@ async function admCalendario(){
     if(e.fecha<r.fecha) r.fecha=e.fecha;
     if(e.receptor && e.receptor!=='Admin') r.receptores.add(e.receptor);
     const d=e.detalle||{};
+    if(d.proveedor && isPdArea(e.area)) PD_NAMES[e.area]=d.proveedor;
     if(e.tipo==='cerrar') r.cerrada=Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub||ADM.hub, area:e.area, receptor:e.receptor, session_id:e.session_id }, d);
     if(e.tipo==='admin' && d.accion==='reabrir') r.cerrada=null;   // events come in id order: latest wins
     if(e.tipo==='admin' && d.accion==='borrar') r.borrada=true;
     if(e.tipo==='parcial') r.parciales++;
   }
-  const ses=[...by.values()].filter(r=>!r.borrada && AREAS.some(a=>a.id===r.area));
+  // Proveedor directo: one group for every supplier área (teal-light bars labelled with the supplier)
+  const GRUPOS=AREAS.concat([{ id:'pd', name:'Proveedores' }]), grp=r=>isPdArea(r.area)?'pd':r.area, gi=r=>GRUPOS.findIndex(x=>x.id===grp(r));
+  const ses=[...by.values()].filter(r=>!r.borrada && gi(r)>=0);
   const newest={}; ses.forEach(r=>{ if(!newest[r.area] || r.session_id>newest[r.area]) newest[r.area]=r.session_id; }); // ids end in epoch ms
   ses.forEach(r=>{
     r.desde=r.fecha;
     r.hasta=r.cerrada ? localDateStr(new Date(r.cerrada.ts)) : (newest[r.area]===r.session_id ? today : r.fecha);
     if(r.hasta<r.desde) r.hasta=r.desde;
   });
-  ses.sort((a,b)=>AREAS.findIndex(x=>x.id===a.area)-AREAS.findIndex(x=>x.id===b.area) || a.desde.localeCompare(b.desde));
+  ses.sort((a,b)=>gi(a)-gi(b) || a.desde.localeCompare(b.desde));
   _admCal=ses;
   // Days of this month (up to today) with a reception of each área
-  const cubre={}; AREAS.forEach(a=>cubre[a.id]=new Set());
-  ses.forEach(r=>{ for(let d=r.desde; d<=r.hasta; d=ymdAdd(d,1)) if(d>=ini && d<=fin) cubre[r.area].add(d); });
+  const cubre={}; GRUPOS.forEach(a=>cubre[a.id]=new Set());
+  ses.forEach(r=>{ for(let d=r.desde; d<=r.hasta; d=ymdAdd(d,1)) if(d>=ini && d<=fin) cubre[grp(r)].add(d); });
+  const grupos=GRUPOS.filter(a=>a.id!=='pd' || ses.some(r=>grp(r)==='pd'));
   const diasMes=Math.max(0, daysBetween(ini, today<fin?today:fin)+1);
   let h=`<div class="filters">${hubSelectHtml('adm-hub', ADM.hub)}</div>
     <div class="cal-nav"><button onclick="admCalMes(-1)" aria-label="Mes anterior">‹</button><b>${MESES[Number(ADM.calMes.slice(5))-1]} ${ADM.calMes.slice(0,4)}</b><button onclick="admCalMes(1)" aria-label="Mes siguiente">›</button></div>
@@ -3371,28 +3431,29 @@ async function admCalendario(){
       h+=`<div class="cal-day${d.slice(0,7)!==ADM.calMes?' out':''}${d>today?' fut':''}${d===today?' today':''}" style="grid-column:${i+1}"><span>${Number(d.slice(8))}</span></div>`; }
     // lanes: Abarrotes first, then Carnes; overlapping receptions of the same área take another lane
     let row=2;
-    AREAS.forEach(a=>{
+    grupos.forEach(a=>{
       const lanes=[];
       ses.forEach((r,idx)=>{
-        if(r.area!==a.id || r.hasta<w || r.desde>wEnd) return;
+        if(grp(r)!==a.id || r.hasta<w || r.desde>wEnd) return;
         const s=r.desde<w?w:r.desde, e=r.hasta>wEnd?wEnd:r.hasta;
         let l=lanes.findIndex(end=>end<s); if(l<0){ l=lanes.length; lanes.push(e); } else lanes[l]=e;
         const c0=daysBetween(w,s)+1, span=daysBetween(s,e)+1;
-        const tip=`${a.name} · ${r.cerrada?'cerrada':'abierta'} · ${fechaLarga(r.desde)}${r.hasta!==r.desde?' – '+fechaLarga(r.hasta):''}`;
-        h+=`<button class="cal-bar ${a.id}${r.cerrada?'':' open'}${s===r.desde?' s':''}${e===r.hasta?' e':''}" style="grid-row:${row+l};grid-column:${c0} / span ${span}" title="${escapeHtml(tip)}" onclick="admCalVer(${idx})" aria-label="${escapeHtml(tip)}">${span>1?a.name:''}</button>`;
+        const nm=a.id==='pd'?areaName(r.area):a.name;
+        const tip=`${nm} · ${r.cerrada?'cerrada':'abierta'} · ${fechaLarga(r.desde)}${r.hasta!==r.desde?' – '+fechaLarga(r.hasta):''}`;
+        h+=`<button class="cal-bar ${a.id}${r.cerrada?'':' open'}${s===r.desde?' s':''}${e===r.hasta?' e':''}" style="grid-row:${row+l};grid-column:${c0} / span ${span}" title="${escapeHtml(tip)}" onclick="admCalVer(${idx})" aria-label="${escapeHtml(tip)}">${span>1||a.id==='pd'?escapeHtml(nm):''}</button>`;
       });
       row+=Math.max(1,lanes.length);
     });
     h+=`</div>`;
   }
-  h+=`<div class="cal-legend">${AREAS.map(a=>`<span><i class="cal-sw ${a.id}"></i>${a.name}: ${cubre[a.id].size} de ${diasMes} días</span>`).join('')}<span><i class="cal-sw open"></i>abierta / sin cerrar</span></div>
+  h+=`<div class="cal-legend">${grupos.map(a=>`<span><i class="cal-sw ${a.id}"></i>${a.name}: ${cubre[a.id].size} de ${diasMes} días</span>`).join('')}<span><i class="cal-sw open"></i>abierta / sin cerrar</span></div>
     <div id="cal-detalle"><div class="muted" style="font-size:13px">Toca una barra para ver la recepción.</div></div>`;
   document.getElementById('adm-tab').innerHTML=h;
 }
 function admCalVer(i){
   const r=_admCal[i], c=r.cerrada;
   document.getElementById('cal-detalle').innerHTML=`<div class="adm-row"><b>${escapeHtml(hubName(r.hub))} · ${areaName(r.area)}</b> — ${c?`<span class="tag green">✓ cerrada ${fechaLarga(r.hasta)}, ${localHM(new Date(c.ts))}</span>`:`<span class="tag orange">sin cerrar</span>`}${r.parciales?` <span class="tag orange">${r.parciales} entrega${r.parciales===1?'':'s'} parcial${r.parciales===1?'':'es'}</span>`:''}
-    <div class="muted" style="font-size:12px">Envío del ${fechaLarga(r.desde)} · ${escapeHtml([...r.receptores].join(', ')||'—')}${c?` · ${c.lineas||0} productos · ${c.diferencias||0} con diferencia`:''}</div>
+    <div class="muted" style="font-size:12px">${isPdArea(r.area)?'Proveedor directo · entrega del':'Envío del'} ${fechaLarga(r.desde)} · ${escapeHtml([...r.receptores].join(', ')||'—')}${c?` · ${c.lineas||0} productos · ${c.diferencias||0} con diferencia`:''}</div>
     ${c?`<div class="btns"><button class="btn btn-secondary" onclick="openRecepcion(_admCal[${i}].cerrada,'admin')">Ver</button></div>`:''}</div>`;
 }
 async function admDescargar(i){
@@ -3488,11 +3549,21 @@ async function admSlack(){
   const tags=await loadSlackTags();
   document.getElementById('adm-tab').innerHTML=`<div class="muted" style="margin-bottom:10px">Un usuario de Slack por renglón (como <b>@alberto</b>). Se etiquetan al inicio del diagnóstico para CH, en el mensaje de todos los hubs. Usa el nombre de usuario de Slack, no el nombre completo.</div>
     <textarea class="text-input" id="adm-slack-tags">${escapeHtml(tags.join('\n'))}</textarea>
+    <div class="section-title" style="margin-top:18px">Proveedor directo: comercial y compras</div>
+    <div class="muted" style="margin-bottom:10px">Un renglón por persona: <b>Nombre = @usuario</b>, con el nombre como viene en la hoja de compras (Comercial o Comprador). Se etiquetan al final del mensaje de cada recepción de proveedor; quien no esté aquí aparece con su nombre.</div>
+    <textarea class="text-input" id="adm-slack-personas" rows="6" placeholder="Mariana López = @mariana">${escapeHtml(Object.entries(SLACK_PERSONAS).map(([n,t])=>n+' = '+t).join('\n'))}</textarea>
     <button class="btn btn-primary btn-block" style="margin-top:14px" onclick="admGuardarSlack()">Guardar etiquetas</button>`;
 }
 async function admGuardarSlack(){
   const tags=[...new Set(document.getElementById('adm-slack-tags').value.split('\n').map(x=>x.trim().replace(/\s+/g,'')).filter(x=>x.replace(/^@/,'').length>=2).map(x=>x.startsWith('@')?x:'@'+x))];
-  try{ await sbUpload('config/slack.json', JSON.stringify({ tags }, null, 1), 'application/json'); SLACK_TAGS=tags; toast('✓ Etiquetas guardadas'); }
+  const personas={}, malas=[];
+  for(const line of document.getElementById('adm-slack-personas').value.split('\n')){
+    const t=line.trim(); if(!t) continue;
+    const m=t.match(/^(.+?)\s*=\s*@?(\S{2,})$/); if(!m){ malas.push(t); continue; }
+    personas[m[1].trim()]='@'+m[2].replace(/^@/,'');
+  }
+  if(malas.length){ toast('Revisa estos renglones (Nombre = @usuario): '+malas.join(' · '), 5000); return; }
+  try{ await sbUpload('config/slack.json', JSON.stringify({ tags, personas }, null, 1), 'application/json'); SLACK_TAGS=tags; SLACK_PERSONAS=personas; toast('✓ Etiquetas guardadas'); }
   catch(e){ toast('No se pudo guardar: '+e.message); }
 }
 

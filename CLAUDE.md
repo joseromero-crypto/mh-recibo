@@ -55,7 +55,7 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   PIN file exists, `v1-alerts-rpc.sql` is run. Alert schedules and the Apps Script wait for the real launch. Any
   new local test writes to prod again: use test-hub and tell Jose what to clean up.
 
-## Proveedor directo (proveedorDirecto-plan.md — phases 1–4 built 2026-11-13)
+## Proveedor directo (proveedorDirecto-plan.md — phases 1–5 built 2026-11-13)
 - Supplier deliveries straight to the hub. Orders come read-only from an Apps Script web app
   (`proveedor/apps-script.gs`, reference copy; Jose deploys it). It reads the master «Fill Rate Oc Nacional» («Base
   datos Compras» = open orders of every hub, one orden per Num Oc; «Catalogo2» V Anaquel → caducidad) plus one hub file
@@ -95,7 +95,19 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   `reportes/{hub}/pd-{prov}/{session_fecha}_{HH-MM}_{receptor}.csv`, columns `PD_REPORT_COLS`. `cerrar` detalle: `origen:
   'proveedor'`, proveedor, `ocs` (pdKeys — what greys orders in Inicio), num_oc, fechas_entrega, excedente / rechazadas /
   faltantes / no_solicitados (line counts), `lineas_dif` (per line; not `errores`, which Armado CH reads).
-  `openRecepcion` reads a PD report (has `Pedido`) with a stopgap mapping; Slack is hidden for pd áreas until phase 5.
+  `cerrar` also stores comercial/comprador (names only).
+- Recepciones: Inicio step 4 «Recepciones de proveedor cerradas» → `openRecepciones(true)` (`_recepPd`; `listCerradas(hub,'pd')`
+  = `area=like.pd-*`). `openRecepcion` spots a PD report by its `Pedido` column (`RV.pd`): rows carry exc/rech/motivo/falt/fac/
+  pns; `pdRecepcionHead`; `rvDistinto` for PD = Recibido ≠ Pedido (Recibido is what's registered and invoiced); No
+  solicitado lines sit in their own section, never ticked. Default order = the OC's; no pasillo.
+- Slack (`pdSlackMensaje`): «{Hub} · {Proveedor} · entrega {fecha}», the §4 line per product with a difference, then
+  «Comercial @x · Compras @y» from `config/slack.json` `personas` (`personaTag`, `sameName`; else the plain name). Old
+  closes read the names from the envío snapshot. Admin → Slack edits `personas` as «Nombre = @usuario» lines and
+  saves `{tags, personas}` together.
+- Calendario: group «Proveedores» after Abarrotes/Carnes (`.cal-bar.pd` teal-light, dashed white when open), label = supplier
+  even on one-day bars; shown only when the month has one. Admin → Recepciones names pd sessions «Proveedor {name}».
+- Alerts (`alertas/apps-script.gs`): no schedule for suppliers; from 21:00, for every hub with an active alert row, an open
+  pd reception → `sin_cerrar` (área = pd-…), and the digest adds a line per supplier reception of the day.
 
 ## How the code is laid out (index.html)
 - Helpers copied from armado-CH sit at the top, each block labelled. Our additions: `codeKey` (cleanBC + strip
