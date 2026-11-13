@@ -1337,28 +1337,39 @@ function pdOtrasDe(d, ses){
 }
 // «Volver a leer la orden»: same OCs, fresh from the sheet. A change writes a new snapshot in the same session
 // (reemplazo, orden_releida) and every line is recomputed; the counts never move (they are physical).
+// Reads the same OCs fresh (plus extraKey) → { data, cambio, d, ses } or { gone:true, d, ses } when they left the sheet
+async function pdLeerOrden(extraKey){
+  const sid=S.session.id, prov=S.envio.orden.proveedor, slug=S.hub, area=S.area;
+  const [d, ses]=await Promise.all([ pdFetch(slug, { prov, fresh:true }), pdSesiones(slug).catch(()=>null) ]);
+  if(!S.session || S.session.id!==sid) return null;
+  S.pdTel=d.telefonos; S.pdLeido=d.leido;
+  const keys=new Set(S.envio.orden.ocs.map(o=>o.key)); if(extraKey) keys.add(extraKey);
+  const ocs=d.ordenes.filter(o=>keys.has(pdKey(o)));
+  if(!ocs.length) return { gone:true, d, ses };
+  const data=pdBuildEnvio({ slug, prov, area, ocs, d, session_id:sid, session_fecha:S.session.fecha, receptor:S.receptor,
+    comercial:S.envio.orden.comercial, comprador:S.envio.orden.comprador });
+  return { data, d, ses, cambio: pdFirma(data.lines)!==pdFirma(S.envio.lines) || ocs.length!==S.envio.orden.ocs.length };
+}
+// Writes the re-read order as the reception's new snapshot (same session, reemplazo orden_releida)
+async function pdAplicarOrden(r){
+  const data=r.data, prov=S.envio.orden.proveedor;
+  await sbUpload(data._path, JSON.stringify(data), 'application/json');
+  const anterior=S.envio._path;
+  setEnvio(data); buildCatalog(); fold(); pdOtrasDe(r.d, r.ses);
+  if(S.current && !S.current.recount){ const l=S.lines.get(S.current.p.sku_key); S.current.p = l ? Object.assign({}, l, { enEnvio:true }) : Object.assign({}, S.current.p, { enEnvio:false, pns:true }); S.current.exc=null; }
+  recordEvent(makeEvent('reemplazo', { detalle:{ envio:data._path, anterior, orden_releida:true, ocs:data.orden.ocs.map(o=>o.key),
+    num_oc:data.orden.num_oc, fechas_entrega:data.orden.fechas_entrega, lineas:data.lines.length, proveedor:prov } }));
+}
 async function pdReleerRecepcion(extraKey){
   if(!isPd() || S.pdBusy) return;
   if(S.closedInfo){ toast('Esta recepción ya se cerró'); return; }
-  const sid=S.session.id, prov=S.envio.orden.proveedor, slug=S.hub, area=S.area;
+  const sid=S.session.id;
   S.pdBusy=true; renderRecibir();
   try{
-    const [d, ses]=await Promise.all([ pdFetch(slug, { prov, fresh:true }), pdSesiones(slug).catch(()=>null) ]);
-    if(!S.session || S.session.id!==sid) return;
-    S.pdTel=d.telefonos; S.pdLeido=d.leido;
-    const keys=new Set(S.envio.orden.ocs.map(o=>o.key)); if(extraKey) keys.add(extraKey);
-    const ocs=d.ordenes.filter(o=>keys.has(pdKey(o)));
-    if(!ocs.length){ pdOtrasDe(d, ses); toast('La orden ya no aparece en el archivo de compras. Se conserva la copia actual.', 5000); return; }
-    const data=pdBuildEnvio({ slug, prov, area, ocs, d, session_id:sid, session_fecha:S.session.fecha, receptor:S.receptor,
-      comercial:S.envio.orden.comercial, comprador:S.envio.orden.comprador });
-    const cambio=pdFirma(data.lines)!==pdFirma(S.envio.lines) || ocs.length!==S.envio.orden.ocs.length;
-    if(!cambio){ pdOtrasDe(d, ses); toast('La orden no cambió'); return; }
-    await sbUpload(data._path, JSON.stringify(data), 'application/json');
-    const anterior=S.envio._path;
-    setEnvio(data); buildCatalog(); fold(); pdOtrasDe(d, ses);
-    if(S.current && !S.current.recount){ const l=S.lines.get(S.current.p.sku_key); S.current.p = l ? Object.assign({}, l, { enEnvio:true }) : Object.assign({}, S.current.p, { enEnvio:false, pns:true }); S.current.exc=null; }
-    recordEvent(makeEvent('reemplazo', { detalle:{ envio:data._path, anterior, orden_releida:true, ocs:data.orden.ocs.map(o=>o.key),
-      num_oc:data.orden.num_oc, fechas_entrega:data.orden.fechas_entrega, lineas:data.lines.length, proveedor:prov } }));
+    const r=await pdLeerOrden(extraKey); if(!r) return;
+    if(r.gone){ pdOtrasDe(r.d, r.ses); toast('La orden ya no aparece en el archivo de compras. Se conserva la copia actual.', 5000); return; }
+    if(!r.cambio){ pdOtrasDe(r.d, r.ses); toast('La orden no cambió'); return; }
+    await pdAplicarOrden(r);
     toast(extraKey?'✓ Orden agregada: todo se volvió a comparar':'✓ Orden actualizada: todo se volvió a comparar', 3500);
   }catch(e){
     toast(isNetErr(e)?'Sin conexión: no se pudo leer la orden':'No se pudo leer la orden ('+e.message+')', 4500);
@@ -1803,8 +1814,8 @@ function renderRecibir(){
   document.getElementById('rec-banner').innerHTML=banner;
   document.getElementById('rec-footer').innerHTML = S.closedInfo ? '' : sinArch
     ? `<div class="muted" style="text-align:center">Para cerrar la recepción, primero sube el archivo del envío.</div>`
-    : `<button class="btn btn-secondary btn-block" style="margin-bottom:10px" onclick="openParcial()">Cerrar entrega parcial (sigo después)</button>
-       <button class="btn btn-primary btn-block" onclick="openResumen()">Terminé todo: revisar y cerrar</button>`
+    : (isPd()?'':`<button class="btn btn-secondary btn-block" style="margin-bottom:10px" onclick="openParcial()">Cerrar entrega parcial (sigo después)</button>`)
+      +`<button class="btn btn-primary btn-block" onclick="openResumen()">${isPd()?'Terminé de contar: revisar y cerrar':'Terminé todo: revisar y cerrar'}</button>`
       +(isPd()?`<button class="link-btn" ${S.pdBusy?'disabled':''} onclick="pdReleerRecepcion()">${S.pdBusy?'Leyendo la orden…':'Volver a leer la orden'}</button>`:'');
   renderCard(); renderRecent(); renderNet();
 }
@@ -2152,7 +2163,7 @@ async function guardQty(c, qty){
         const prev=recibidoDe(p.sku_key);
         c.exc={ qty, prev, pedido:e, n:Math.min(qty, round2(total-e)) }; renderCard(); return false;
       }
-    } else if(overEnviado(line, total)){
+    } else if(!isPd() && overEnviado(line, total)){ // PD recount: an excess is asked in Resumen
       if(!c.overWarned){
         c.overWarned=true;
         await showModal({ title:'Esta cantidad es mayor a lo enviado. Vuelve a contar.',
@@ -2467,6 +2478,8 @@ function openResumen(){
   if(S.closedInfo){ openRecepcion(S.closedInfo,'inicio'); return; }
   if(S.envio.sinArchivo){ toast('Sube el archivo del envío antes de cerrar la recepción', 3500); return; }
   S.current=null; S.corrigiendo=null; closeSheet();
+  S.pdRech=null; S.pdCambiando=null;
+  if(isPd()) pdFreezeOrder(); else
   S.resumenOrder=new Map(summaryRows().filter(isDelta).sort((a,b)=>(isAcked(a)-isAcked(b)) || Math.abs(b.dif)-Math.abs(a.dif)).map((r,i)=>[r.sku,i]));
   document.getElementById('resumen-title').textContent=`${hubName(S.hub)} · ${areaName(S.area)}`;
   showScreen('screen-resumen'); renderResumen();
@@ -2486,6 +2499,7 @@ function sumRowHtml(r, inner, org){
       <div><b style="color:${r.dif?'var(--c-ink)':'inherit'}">${sign}${fmtQty(r.dif,r.kgpz)}</b><span>Diferencia</span></div></div>${inner||''}`;
 }
 function renderResumen(){
+  if(isPd()) return pdRenderResumen();
   const el=document.getElementById('resumen-body');
   const rows=summaryRows(), deltas=rows.filter(isDelta), oks=rows.filter(r=>!isDelta(r));
   const pend=deltas.filter(r=>!isAcked(r)), rev=revisarItems(), org=origenesResumen(rows);
@@ -2531,6 +2545,7 @@ function openRepesar(kgRows){
 async function flushAndWait(){ for(let i=0;i<100 && _flushing;i++) await new Promise(r=>setTimeout(r,100)); await flushOutbox(); }
 function fileSafe(s){ return normName(s).replace(/ /g,'-') || 'receptor'; }
 async function cerrarRecepcion(){
+  if(isPd()) return pdCerrar();
   if(S.closing) return;
   let rows=summaryRows();
   if(rows.filter(isDelta).some(r=>!isAcked(r))) return;
@@ -2560,6 +2575,199 @@ async function cerrarRecepcion(){
       fecha_corta:rows.filter(r=>fechaCortaDe(r.sku)>0).length||undefined, danadas:rows.filter(r=>danadasDe(r.sku)>0).length||undefined,
       entregas:parciales().length?parciales().length+1:undefined, origenes,
       errores:deltas.map(r=>{ const o=org.get(r.sku), a=armadoDe(r); return { sku_key:r.sku, producto:r.producto, kgpz:r.kgpz, armado:a, enviado:r.env, recibido:r.rec, origen:o.cat, par:o.par||undefined }; }) } });
+    recordEvent(ev); S.closedInfo=closedState(); await flushAndWait();
+    S.closing=false;
+    toast(OUTBOX.length?'Recepción cerrada — se termina de subir al reconectar':'✓ Recepción cerrada', 3500);
+    openRecepcion(Object.assign({ ts:ev.ts, fecha:S.session.fecha, hub:S.hub, area:S.area, session_id:S.session.id, receptor:S.receptor }, ev.detalle), 'inicio');
+  }catch(e){
+    S.closing=false; renderResumen();
+    toast(isNetErr(e)?'Sin conexión: no se pudo cerrar. Intenta de nuevo con internet.':'No se pudo cerrar ('+e.message+')', 4500);
+  }
+}
+/* ── Resumen y cierre for supplier deliveries (proveedorDirecto §4, §6.4, §7). The count is what the receptor
+   accepted. Recibido = min(count, Pedido); Excedente = count − Pedido; never stored, so a re-read order recomputes them.
+   Every line below Pedido is answered one by one: «No llegaron» or «Rechacé piezas» (how many + motivo); the rest of
+   the gap is Faltante. An excess not yet separated on the card (Corregir/Recontar skip the card alert) is asked here.
+   Answers are `confirmacion` events, valid only while the count is unchanged. Kg: CH's scale tolerance. ── */
+const PD_MOTIVO={ fecha_corta:'fecha corta', danada:'dañada' };
+const PD_ESTADO_CLS={ 'Completo':'ok', 'Completo (variación de báscula)':'ok', 'Excedente':'mid', 'Faltante':'bad', 'Rechazo':'bad', 'No solicitado':'bad' };
+function pdExcOkDe(sku){ let n=0; for(const e of S.events) if(e.tipo==='scan' && e.sku_key===sku && e.detalle && e.detalle.excedente_ok) n+=Number(e.detalle.excedente_ok)||0; return round2(n); }
+// Latest answer of that kind, valid only while the count is the one it answered
+function pdAck(sku, kind, count){ let a=null; for(const e of S.events) if(e.tipo==='confirmacion' && e.sku_key===sku && e.detalle && e.detalle[kind]) a=e; return a && round2(a.detalle.recibido)===count ? a : null; }
+function pdRow(base){
+  const r=Object.assign({ rec:0, exc:0, gap:0, rech:0, motivo:'', falt:0, ack:null, excAck:null }, base), d=round2(r.count-r.pedido);
+  const tol=r.kgpz==='Kg' && r.pedido>0 ? kgTol(r.pedido) : 0;
+  if(Math.abs(d)<=tol+1e-9) r.rec=Math.min(r.count, r.pedido);
+  else if(d>0){ r.rec=r.pedido; r.exc=d; }
+  else { r.rec=r.count; r.gap=-d; }
+  if(r.gap>0){ r.ack=pdAck(r.sku, 'faltante', r.count); if(r.ack){ r.rech=Math.min(round2(Number(r.ack.detalle.rechazadas)||0), r.gap); r.motivo=r.rech?r.ack.detalle.motivo||'':''; } r.falt=round2(r.gap-r.rech); }
+  r.excOk=pdExcOkDe(r.sku);
+  if(r.exc>0) r.excAck=pdAck(r.sku, 'excedente', r.count);
+  r.porSeparar = r.exc>0 && !r.excAck ? round2(r.exc-r.excOk) : 0;
+  r.pend = (r.gap>0 && !r.ack) || r.porSeparar>0;
+  r.estado = r.pns ? 'No solicitado' : r.exc>0 ? 'Excedente' : r.gap>0 ? (r.rech>0?'Rechazo':'Faltante') : r.count!==r.pedido ? 'Completo (variación de báscula)' : 'Completo';
+  r.dif = r.pns || r.exc>0 || r.gap>0;
+  return r;
+}
+function pdRows(){
+  const rows=[];
+  for(const l of [...S.lines.values()].sort((a,b)=>a.rowIndex-b.rowIndex))
+    rows.push(pdRow({ sku:l.sku_key, producto:l.producto, barcode:l.barcode, kgpz:l.kgpz, pedido:l.esperado, count:recibidoDe(l.sku_key), cad:l.caducidad_min||'', temp:l.temp||'', rowIndex:l.rowIndex, pns:false }));
+  for(const [sku, ne] of S.noEsperados){
+    const c=recibidoDe(sku);
+    if(c>0) rows.push(pdRow({ sku, producto:ne.producto, barcode:sku.startsWith('name:')?'':sku, kgpz:ne.kgpz, pedido:0, count:c, cad:'', temp:'', rowIndex:1e9, pns:true }));
+  }
+  return rows;
+}
+function pdFreezeOrder(){
+  S.resumenOrder=new Map(pdRows().filter(r=>r.dif).sort((a,b)=>(b.pend-a.pend) || Math.abs(b.count-b.pedido)-Math.abs(a.count-a.pedido)).map((r,i)=>[r.sku,i]));
+}
+function pdRowHtml(r, inner){
+  const u=unitOf(r.kgpz), t=tempLabel(r.temp), q=v=>fmtQty(v,r.kgpz);
+  const third = r.exc>0 ? ['+'+q(r.exc), r.pns?'No solicitado':'Excedente'] : r.gap>0 ? ['−'+q(r.gap), 'Diferencia'] : ['0', 'Diferencia'];
+  const notes=[];
+  if(r.count!==r.rec || r.exc>0) notes.push(`Contaste ${q(r.count)} ${u}`);
+  if(r.rech>0) notes.push(`<b>Rechazadas ${q(r.rech)}</b> (${PD_MOTIVO[r.motivo]||r.motivo})`);
+  if(r.falt>0 && r.ack) notes.push(`<b>Faltan ${q(r.falt)}</b>`);
+  if(r.excOk>r.exc+1e-9 && !r.pns) notes.push(`<span style="color:var(--c-ink);font-weight:700">Separaste ${q(r.excOk)} para rechazo antes de que cambiara la orden: si siguen aquí, ya están en el conteo; si ya se fueron, usa Recontar.</span>`);
+  return `<div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
+      <div class="ritem-meta">${r.kgpz}${t?' · '+escapeHtml(t):''}${r.barcode?'':' · sin código'}</div></div>
+      <span class="estado ${PD_ESTADO_CLS[r.estado]}">${escapeHtml(r.estado)}</span></div>
+    ${notes.length?`<div class="ritem-meta" style="margin-top:4px">${notes.join(' · ')}</div>`:''}
+    <div class="sum-nums"><div><b>${r.pedido?q(r.pedido):'—'}</b><span>Pedido (${u})</span></div><div class="big"><b>${q(r.rec)}</b><span>Recibido (${u})</span></div>
+      <div><b>${third[0]}</b><span>${third[1]}</span></div></div>${inner||''}`;
+}
+function pdQuestionHtml(r){
+  const u=unitOf(r.kgpz), q=v=>fmtQty(v,r.kgpz), sk=escapeHtml(r.sku), rc=`<button class="corr-btn" onclick="resumenRecontar('${sk}')">Recontar</button>`;
+  if(r.porSeparar>0) return `<div class="pd-exc" style="margin-top:10px"><div class="pd-exc-big">Separa ${q(r.porSeparar)} ${u} para rechazo</div>
+      ${r.pns?'No se solicitó este producto.':`Se pidieron ${q(r.pedido)}, contaste ${q(r.count)}.`} Regrésalas al camión.
+      <div class="pcard-actions" style="grid-template-columns:1fr 1fr;margin-top:8px"><button class="btn btn-secondary" onclick="resumenRecontar('${sk}')">Recontar</button><button class="btn btn-primary" onclick="pdExcResumen('${sk}')">Ya separé ${q(r.porSeparar)}</button></div></div>`;
+  if(r.gap>0 && (!r.ack || S.pdCambiando===r.sku)){
+    if(S.pdRech===r.sku){
+      const kg=r.kgpz==='Kg', m=S.pdRechMotivo;
+      return `<div style="margin-top:10px"><div class="sep-q">¿Cuántas rechazaste? (de 1 a ${q(r.gap)} ${u})</div>
+        <input id="pd-rech-n" class="text-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}">
+        <div class="sep-q" style="margin-top:8px">¿Por qué?</div>
+        <div class="sep-btns">${Object.entries(PD_MOTIVO).map(([k,n])=>`<button class="choice ${m===k?'sel':''}" onclick="pdRechMotivo('${k}')">${n[0].toUpperCase()+n.slice(1)}</button>`).join('')}</div>
+        <div class="qty-err" id="pd-rech-err"></div>
+        <div class="pcard-actions" style="grid-template-columns:1fr 1fr;margin-top:8px"><button class="btn btn-secondary" onclick="pdRechCancel()">Cancelar</button><button class="btn btn-primary" onclick="pdRechGuardar('${sk}')">Guardar</button></div></div>`;
+    }
+    const resto = r.kgpz==='Kg' ? `los ${q(r.gap)} kg` : r.gap===1 ? 'la que falta' : `las ${q(r.gap)}`;
+    return `<div style="margin-top:10px;font-weight:700">Se pidieron ${q(r.pedido)}, ${r.count>0?`contaste ${q(r.count)}`:'no contaste ninguna'}. ¿Qué pasó con ${resto}?</div>
+      <div class="pcard-actions" style="grid-template-columns:1fr 1fr"><button class="btn btn-secondary" onclick="pdNoLlegaron('${sk}')">No llegaron</button><button class="btn btn-secondary" onclick="pdRechOpen('${sk}')">Rechacé piezas</button></div>
+      <div class="ritem-meta" style="margin-top:6px">¿Contaste mal? ${rc}</div>`;
+  }
+  const a=r.gap>0?r.ack:r.excAck;
+  const who=a?` por ${escapeHtml(a.receptor||'')}`:'';
+  const txt = r.gap>0 ? (r.rech>0?`Rechazaste ${q(r.rech)} (${PD_MOTIVO[r.motivo]||r.motivo})${r.falt>0?`, faltan ${q(r.falt)}`:''}`:`No llegaron ${q(r.gap)}`)
+    : r.exc>0 ? `${q(r.exc)} separadas para rechazo` : '';
+  return txt ? `<div class="ritem-meta" style="margin-top:6px;color:var(--green-dark);font-weight:700">✓ ${txt}${who} · ${r.gap>0?`<button class="corr-btn" onclick="pdCambiar('${sk}')">Cambiar</button> · `:''}${rc}</div>` : '';
+}
+// «Antes de que se vaya el camión» (§4): what goes back, what isn't invoiced, what is
+function pdCamionHtml(rows){
+  const dev=[], fal=[], fac=rows.filter(r=>r.rec>0);
+  for(const r of rows){
+    const u=unitOf(r.kgpz), q=v=>fmtQty(v,r.kgpz);
+    if(r.exc>0) dev.push(`${escapeHtml(r.producto)}: <b>${q(r.exc)} ${u}</b> ${r.pns?'no solicitado':'excedente'}`);
+    if(r.rech>0) dev.push(`${escapeHtml(r.producto)}: <b>${q(r.rech)} ${u}</b> ${PD_MOTIVO[r.motivo]||r.motivo}`);
+    if(r.falt>0 && r.ack) fal.push(`${escapeHtml(r.producto)}: <b>faltan ${q(r.falt)} ${u}</b>`);
+  }
+  let h=`<div class="section-title" style="margin-top:16px">Antes de que se vaya el camión</div>`;
+  h+=`<div class="info-card"><b>Devolver al proveedor${dev.length?' · '+dev.length:''}</b>${dev.length?dev.map(x=>`<div style="margin-top:4px">${x}</div>`).join(''):'<div class="muted">Nada que devolver.</div>'}</div>`;
+  if(fal.length) h+=`<div class="info-card" style="margin-top:8px"><b>Faltan: que no se facture</b>${fal.map(x=>`<div style="margin-top:4px">${x}</div>`).join('')}</div>`;
+  h+=`<details class="info-card" style="margin-top:8px"><summary style="cursor:pointer"><b>Facturar · ${fac.length} producto${fac.length===1?'':'s'}</b> <span class="muted">(lo recibido, nunca más de lo pedido)</span></summary>
+    ${fac.map(r=>`<div style="margin-top:4px;display:flex;justify-content:space-between;gap:8px"><span>${escapeHtml(r.producto)}</span><b style="white-space:nowrap">${fmtQty(r.rec,r.kgpz)} ${unitOf(r.kgpz)}</b></div>`).join('')}</details>`;
+  return h;
+}
+function pdRenderResumen(){
+  const el=document.getElementById('resumen-body');
+  const rows=pdRows(), difs=rows.filter(r=>r.dif), oks=rows.filter(r=>!r.dif), pend=rows.filter(r=>r.pend);
+  const ord=r=>S.resumenOrder.has(r.sku) ? S.resumenOrder.get(r.sku) : 1e6;
+  difs.sort((a,b)=>ord(a)-ord(b));
+  const o=S.envio.orden;
+  let h=`<h2>Resumen y cierre</h2><div class="muted" style="margin-bottom:8px">${escapeHtml(o.proveedor)}${o.num_oc.length?' · OC '+o.num_oc.map(escapeHtml).join(', '):''} · ${o.fechas_entrega.map(pdFechaLabel).join(', ')}</div>
+    <div class="stat-grid">
+    <div class="stat"><div class="stat-n">${S.lines.size}</div><div class="stat-l">productos en la orden</div></div>
+    <div class="stat"><div class="stat-n">${oks.length}</div><div class="stat-l">completos</div></div>
+    <div class="stat"><div class="stat-n">${difs.length}</div><div class="stat-l">con diferencia</div></div>
+    <div class="stat"><div class="stat-n" style="color:${pend.length?'var(--orange)':'var(--green-dark)'}">${pend.length}</div><div class="stat-l">por contestar</div></div></div>`;
+  if(OUTBOX.length) h+=`<div class="warn-box">Hay ${OUTBOX.length} registro(s) sin subir. Conéctate a internet para poder cerrar.</div>`;
+  if(difs.length){
+    h+=`<div class="section-title">Diferencias · ${difs.length}</div><div class="muted" style="margin-bottom:8px">Contesta cada una mientras el camión sigue aquí.</div>`;
+    h+=difs.map(r=>`<div class="sum-row ${r.pend?'delta':'acked'}">${pdRowHtml(r, pdQuestionHtml(r))}</div>`).join('');
+  } else h+=`<div class="warn-box ok">Todo llegó como se pidió.</div>`;
+  if(oks.length) h+=`<details style="margin-top:14px"><summary class="section-title" style="cursor:pointer">Completos · ${oks.length}</summary>${oks.map(r=>`<div class="sum-row">${pdRowHtml(r)}</div>`).join('')}</details>`;
+  if(!pend.length) h+=pdCamionHtml(rows);
+  const can=!pend.length && !OUTBOX.length && !S.closing;
+  h+=`<button class="btn btn-primary btn-block" style="margin-top:18px" ${can?'':'disabled'} onclick="cerrarRecepcion()">${S.closing?'Cerrando…':pend.length?`Faltan ${pend.length} diferencia(s) por contestar`:OUTBOX.length?'Subiendo registros…':'Cerrar recepción'}</button>`;
+  el.innerHTML=h;
+}
+function pdRowOf(sku){ return pdRows().find(r=>r.sku===sku); }
+function pdNoLlegaron(sku){
+  const r=pdRowOf(sku); if(!r || !(r.gap>0)) return;
+  recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:r.producto, cantidad:r.count, detalle:{ faltante:true, recibido:r.count, pedido:r.pedido, rechazadas:0, motivo:'', kgpz:r.kgpz } }));
+  S.pdRech=null; S.pdCambiando=null; renderResumen();
+}
+function pdRechOpen(sku){ S.pdRech=sku; S.pdRechMotivo=null; renderResumen(); const i=document.getElementById('pd-rech-n'); if(i) setTimeout(()=>i.focus(), 40); }
+function pdRechCancel(){ S.pdRech=null; S.pdCambiando=null; renderResumen(); }
+function pdRechMotivo(k){
+  const i=document.getElementById('pd-rech-n'), v=i?i.value:'';
+  S.pdRechMotivo=k; renderResumen();
+  const j=document.getElementById('pd-rech-n'); if(j){ j.value=v; }
+}
+function pdRechGuardar(sku){
+  const r=pdRowOf(sku), err=document.getElementById('pd-rech-err'), i=document.getElementById('pd-rech-n'); if(!r || !i) return;
+  const n=parseQty(i.value, r.kgpz);
+  if(n==null || n>r.gap){ err.textContent=`Escribe cuántas rechazaste: de 1 a ${fmtQty(r.gap,r.kgpz)}. Si fueron más, las demás eran de sobra.`; i.focus(); return; }
+  if(!S.pdRechMotivo){ err.textContent='Elige por qué: fecha corta o dañada.'; return; }
+  recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:r.producto, cantidad:r.count, detalle:{ faltante:true, recibido:r.count, pedido:r.pedido, rechazadas:n, motivo:S.pdRechMotivo, kgpz:r.kgpz } }));
+  S.pdRech=null; S.pdRechMotivo=null; S.pdCambiando=null; renderResumen();
+}
+// Re-answer a short line: the next answer wins (append-only)
+function pdCambiar(sku){ S.pdCambiando=sku; S.pdRech=null; renderResumen(); }
+function pdExcResumen(sku){
+  const r=pdRowOf(sku); if(!r || !(r.porSeparar>0)) return;
+  recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:r.producto, cantidad:r.count, detalle:{ excedente:true, recibido:r.count, pedido:r.pedido, separar:r.porSeparar, kgpz:r.kgpz } }));
+  renderResumen();
+}
+const PD_REPORT_COLS=['Hub','Proveedor','Orden de compra','Fecha','Receptor(es)','Código','Producto','Und','Pedido','Recibido','Excedente','Rechazadas','Motivo','Faltante','Facturar','Caducidad mínima','Temp','Estado','Notas'];
+function pdBuildReportCsv(rows, receptores){
+  const o=S.envio.orden, head=PD_REPORT_COLS.map(csvCell).join(',');
+  const body=rows.map(r=>{ const q=v=>fmtQty(v,r.kgpz);
+    return [hubName(S.hub), o.proveedor, o.num_oc.join(', '), S.session.fecha, receptores.join(', '), r.barcode, r.producto, r.kgpz,
+      q(r.pedido), q(r.rec), r.exc?q(r.exc):'', r.rech?q(r.rech):'', r.rech?(PD_MOTIVO[r.motivo]||r.motivo):'', r.falt?q(r.falt):'', q(r.rec),
+      r.cad?dmy(r.cad):'', tempLabel(r.temp), r.estado, notasDe(r.sku, r.kgpz)].map(csvCell).join(','); });
+  return [head].concat(body).join('\r\n')+'\r\n';
+}
+async function pdCerrar(){
+  if(S.closing) return;
+  if(pdRows().some(r=>r.pend)) return;
+  S.closing=true; renderResumen();
+  try{
+    await flushAndWait(); if(OUTBOX.length) throw new TypeError('offline');
+    await syncServerEvents();
+    // §6.4 one last read of the order: warn if compras changed it. Gone from the sheet or unreachable → close with the copy we have.
+    let lectura=null; try{ lectura=await pdLeerOrden(); }catch(_){}
+    if(lectura && !lectura.gone && lectura.cambio){
+      const v=await showModal({ title:'La orden cambió en el archivo de compras',
+        html:'<p>Desde que empezaste, compras cambió productos o cantidades de esta orden. Con la orden nueva, revisa otra vez las diferencias antes de cerrar.</p>',
+        buttons:[{label:'Usar la orden nueva', value:'nueva', kind:'primary'}, {label:'Cerrar con la orden que tengo', value:'actual', kind:'secondary'}] });
+      if(v==='nueva'){ await pdAplicarOrden(lectura); S.closing=false; openResumen(); toast('✓ Orden actualizada: revisa las diferencias', 3500); return; }
+      if(v!=='actual'){ S.closing=false; renderResumen(); return; }
+    }
+    const rows=pdRows();
+    if(rows.some(r=>r.pend)){ S.closing=false; renderResumen(); toast('Llegaron escaneos de otro teléfono: revisa las diferencias nuevas', 4000); return; }
+    const now=serverNow(), receptores=receptoresDeSesion(), o=S.envio.orden;
+    const path=`reportes/${S.hub}/${S.area}/${S.session.fecha}_${localHM(now).replace(':','-')}_${fileSafe(S.receptor)}.csv`;
+    await sbUpload(path, pdBuildReportCsv(rows, receptores), 'text/csv; charset=utf-8');
+    const difs=rows.filter(r=>r.dif);
+    const ev=makeEvent('cerrar', { detalle:{ reporte:path, envio:S.envio._path, origen:'proveedor', proveedor:o.proveedor,
+      ocs:o.ocs.map(x=>x.key), num_oc:o.num_oc, fechas_entrega:o.fechas_entrega, orden_cambio_ignorado:lectura&&lectura.cambio?true:undefined,
+      lineas:S.lines.size, recibidas:rows.filter(r=>!r.pns && r.rec>0).length, diferencias:difs.length, receptores,
+      excedente:rows.filter(r=>!r.pns && r.exc>0).length, rechazadas:rows.filter(r=>r.rech>0).length,
+      faltantes:rows.filter(r=>r.falt>0).length, no_solicitados:rows.filter(r=>r.pns).length,
+      lineas_dif:difs.map(r=>({ sku_key:r.sku, producto:r.producto, kgpz:r.kgpz, pedido:r.pedido, contado:r.count, recibido:r.rec,
+        excedente:r.exc||undefined, rechazadas:r.rech||undefined, motivo:r.motivo||undefined, faltante:r.falt||undefined, no_solicitado:r.pns||undefined })) } });
     recordEvent(ev); S.closedInfo=closedState(); await flushAndWait();
     S.closing=false;
     toast(OUTBOX.length?'Recepción cerrada — se termina de subir al reconectar':'✓ Recepción cerrada', 3500);
@@ -2933,7 +3141,12 @@ async function openRecepcion(info, from){
   el.innerHTML='<div class="muted">Cargando reporte…</div>'; showScreen('screen-recepciones');
   let csv; try{ csv=await sbFetch(info.reporte); }catch(e){ el.innerHTML=`<div class="err-box">${isNetErr(e)?'Sin conexión.':'No se encontró el reporte.'} Intenta de nuevo.</div>`; return; }
   const p=Papa.parse(stripBOM(csv), { header:true, skipEmptyLines:true });
+  const pdRep=(p.meta.fields||[]).includes('Pedido'); // supplier report (Phase 5 gives it its own Retool view)
   const rows=(p.data||[]).map((r,i)=>{ const g=n=>pickCol(r, n)||'';
+    if(pdRep){ const ped=parseNum(g('Pedido')), rec=parseNum(g('Recibido')), kgpz=g('Und')==='Kg'?'Kg':'Pz', u=unitOf(kgpz);
+      const extra=[g('Excedente')?`Excedente ${g('Excedente')} ${u} (devuelto)`:'', g('Rechazadas')?`Rechazadas ${g('Rechazadas')} ${u} (${g('Motivo')})`:'', g('Faltante')?`Faltan ${g('Faltante')} ${u}`:''].filter(Boolean);
+      return { i, producto:g('Producto'), barcode:g('Código'), kgpz, pos:'', pasillo:'', armado:'', env:ped, rec, dif:round2(rec-ped), estado:g('Estado'), acum:null,
+        corta:0, cad:g('Caducidad mínima'), dan:0, notas:extra.concat(g('Notas')||[]).join(' · '), _n:normName(g('Producto')), pd:true }; }
     const pos=g('Posición'), kgpz=g('Kg/Pz')==='Kg'?'Kg':'Pz';
     return { i, producto:g('Producto'), barcode:g('Código de barras'), kgpz, pos, pasillo:(pos.split(/[-·\s]/)[0]||'').trim(), armado:g('Armado'),
       env:parseNum(g('Enviado')), rec:parseNum(g('Recibido')), dif:parseNum(g('Diferencia')), estado:info.parcial?'Entrega '+info.entrega:g('Estado'),
@@ -2973,7 +3186,7 @@ function renderRecepcion(){
       ${I.lineas||0} productos · ${I.diferencias?`<b style="color:var(--orange)">${I.diferencias} con diferencia</b>`:'sin diferencias'}${I.no_esperados?` · ${I.no_esperados} no esperado(s)`:''}${I.fecha_corta?` · <b style="color:var(--orange)">${I.fecha_corta} con fecha corta</b>`:''}${I.danadas?` · <b style="color:var(--orange)">${I.danadas} con dañadas</b>`:''}
       <div>${(I.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div></div>`)+`
     ${RV.rows.some(r=>r.corta>0||r.dan>0)?`<div class="warn-box">Registra en el sistema todo lo recibido, también lo de fecha corta y lo dañado. Después regístralo como merma (MNA) y sepáralo.</div>`:''}
-    ${P?'':`<button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="openSlackMensaje()">Mensaje para Slack</button>`}
+    ${P||isPdArea(I.area)?'':`<button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="openSlackMensaje()">Mensaje para Slack</button>`}
     <button class="btn btn-secondary btn-block" onclick="descargarReporte()">Descargar CSV</button>
     ${P?'':'<div class="tabs" id="rv-vistas" style="margin:12px 0 0"></div>'}
     <input class="text-input" style="margin-top:12px" placeholder="Buscar producto…" oninput="rvSet('q',this.value)" autocomplete="off">
@@ -3007,7 +3220,7 @@ function renderRecepcionRows(){
       <input type="checkbox" class="chk" ${on?'checked':''} onchange="rvTick(${r.i})">${imgTag(r.barcode, r.producto, 'thumb')}
       <div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div><div class="ritem-meta">${escapeHtml(r.barcode||'sin código')}${r.pos?' · '+escapeHtml(r.pos):''}${r.corta>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(r.corta,r.kgpz)} ${u} fecha corta · separar para MNA</span>`:''}${r.dan>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(r.dan,r.kgpz)} ${u} dañadas · separar para MNA</span>`:''}</div></div>
       <div style="text-align:right"><div style="font-size:30px;font-weight:800;color:var(--green-dark)">${fmtQty(r.rec,r.kgpz)}</div><div class="ritem-meta">${u} recibido</div></div></div>
-      ${r.acum!=null?`<div class="ritem-meta" style="margin-top:4px">Acumulado en la recepción: ${fmtQty(r.acum,r.kgpz)} ${u}</div>`:`<div class="ritem-meta" style="margin-top:4px">Enviado ${fmtQty(r.env,r.kgpz)}${r.armado&&r.armado!=='—'?' · Armado '+escapeHtml(r.armado):''} · Dif ${r.dif>0?'+':''}${fmtQty(r.dif,r.kgpz)} · <span class="estado ${ESTADO_CLS[r.estado]||'mid'}">${escapeHtml(r.estado)}</span></div>`}
+      ${r.acum!=null?`<div class="ritem-meta" style="margin-top:4px">Acumulado en la recepción: ${fmtQty(r.acum,r.kgpz)} ${u}</div>`:`<div class="ritem-meta" style="margin-top:4px">${r.pd?'Pedido':'Enviado'} ${fmtQty(r.env,r.kgpz)}${r.armado&&r.armado!=='—'?' · Armado '+escapeHtml(r.armado):''} · Dif ${r.dif>0?'+':''}${fmtQty(r.dif,r.kgpz)} · <span class="estado ${ESTADO_CLS[r.estado]||PD_ESTADO_CLS[r.estado]||'mid'}">${escapeHtml(r.estado)}</span></div>`}
       ${r.notas?`<div class="ritem-meta">${escapeHtml(r.notas)}</div>`:''}</div>`; }).join('') || `<div class="empty-hint">${vista==='dif'&&!difs.length?'Sin diferencias: todo llegó igual a lo enviado.':'Nada coincide con el filtro.'}</div>`;
 }
 function descargarReporte(){

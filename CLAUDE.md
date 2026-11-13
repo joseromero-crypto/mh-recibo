@@ -55,7 +55,7 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   PIN file exists, `v1-alerts-rpc.sql` is run. Alert schedules and the Apps Script wait for the real launch. Any
   new local test writes to prod again: use test-hub and tell Jose what to clean up.
 
-## Proveedor directo (proveedorDirecto-plan.md — phases 1–3 built 2026-11-12)
+## Proveedor directo (proveedorDirecto-plan.md — phases 1–4 built 2026-11-13)
 - Supplier deliveries straight to the hub. Orders come read-only from an Apps Script web app
   (`proveedor/apps-script.gs`, reference copy; Jose deploys it). It reads the master «Fill Rate Oc Nacional» («Base
   datos Compras» = open orders of every hub, one orden per Num Oc; «Catalogo2» V Anaquel → caducidad) plus one hub file
@@ -80,6 +80,22 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   orden». `pdReleerRecepcion(extraKey)` re-reads the same OCs (`&fresh=1`); a change (or «Agregar a esta recepción»
   for another open OC of the supplier, `S.pdOtras`) writes a new snapshot in the same session + `reemplazo`
   {orden_releida:true}. `pdBuildEnvio` is shared with Empezar. Phones: `S.pdTel` from the live answer only.
+- `pdLeerOrden(extraKey)` (re-read → `{data, cambio}` or `{gone}`) + `pdAplicarOrden` (snapshot + `reemplazo`) are shared by
+  «Volver a leer la orden» and Cerrar. No «Cerrar entrega parcial» on pd receptions.
+- Resumen y cierre (`renderResumen`/`cerrarRecepcion` hand off to `pdRenderResumen`/`pdCerrar` when `isPd()`). `pdRows()` →
+  `pdRow`: count = fold; within Kg tolerance → Recibido = min(count, Pedido); above → Recibido = Pedido, `exc`; below →
+  `gap`, answered one by one (order frozen by `pdFreezeOrder`): «No llegaron» / «Rechacé piezas» (1..gap + motivo
+  fecha_corta|danada) = `confirmacion {faltante:true, recibido, pedido, rechazadas, motivo}`; rest of gap = Faltante.
+  An excess not covered by the scans' `excedente_ok` (Recontar/Corregir skip the card alert) asks «Ya separé» here =
+  `confirmacion {excedente:true, recibido, separar}`. Answers are valid only while the count is unchanged (`pdAck`).
+  Recibido/Excedente/Faltante are never stored. Then «Antes de que se vaya el camión»: Devolver / Faltan / Facturar.
+  PD recount skips CH's over-enviado modal.
+- `pdCerrar` re-reads the order (`&fresh=1`): changed → modal «Usar la orden nueva» (back to Resumen) or «Cerrar con la
+  orden que tengo» (`orden_cambio_ignorado`); gone or unreachable → closes with the copy. Report
+  `reportes/{hub}/pd-{prov}/{session_fecha}_{HH-MM}_{receptor}.csv`, columns `PD_REPORT_COLS`. `cerrar` detalle: `origen:
+  'proveedor'`, proveedor, `ocs` (pdKeys — what greys orders in Inicio), num_oc, fechas_entrega, excedente / rechazadas /
+  faltantes / no_solicitados (line counts), `lineas_dif` (per line; not `errores`, which Armado CH reads).
+  `openRecepcion` reads a PD report (has `Pedido`) with a stopgap mapping; Slack is hidden for pd áreas until phase 5.
 
 ## How the code is laid out (index.html)
 - Helpers copied from armado-CH sit at the top, each block labelled. Our additions: `codeKey` (cleanBC + strip
