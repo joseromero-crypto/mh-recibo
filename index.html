@@ -973,12 +973,18 @@ async function borrarEnvio(){
   const d=a.data;
   let scans=0; try{ scans=(await pgSelect('rec_events', `session_id=eq.${encodeURIComponent(d.session_id)}&tipo=eq.scan&select=id`)).length; }catch(e){ toast('Sin conexión: conéctate para borrar el envío'); return; }
   scans+=OUTBOX.filter(e=>e.session_id===d.session_id && e.tipo==='scan').length;
-  const v=await showModal({ title:'¿Borrar este envío?',
-    html:`<p><b>${escapeHtml(d.sourceFile||'Envío sin archivo')}</b><br>Cargado el ${fechaLarga(d.fecha)} a las ${localHM(new Date(d.uploadedAt))}${d.receptor?' por '+escapeHtml(d.receptor):''}.</p>`
+  const pd=d.origen==='proveedor', o=d.orden||{}, ocs=[].concat(o.num_oc||[]).filter(Boolean);
+  const quien=`${d.receptor?' por '+escapeHtml(d.receptor):''}`;
+  const head=pd
+    ? `<p><b>${escapeHtml(o.proveedor||areaName(INI.area))}</b>${ocs.length?' · OC '+escapeHtml(ocs.join(', ')):''}<br>Empezada el ${fechaLarga(d.fecha)} a las ${localHM(new Date(d.uploadedAt))}${quien}.</p>`
+    : `<p><b>${escapeHtml(d.sourceFile||'Envío sin archivo')}</b><br>Cargado el ${fechaLarga(d.fecha)} a las ${localHM(new Date(d.uploadedAt))}${quien}.</p>`;
+  const v=await showModal({ title:pd?'¿Borrar esta recepción?':'¿Borrar este envío?',
+    html:head
       +(scans?`<p style="color:var(--c-ink);font-weight:700">Esta recepción tiene ${scans} escaneo${scans===1?'':'s'}: se descartan.</p>`:'')
-      +`<p>Úsalo solo si el archivo se subió por error. Escribe <b>borrar</b> para confirmar.</p>
-        <input id="del-confirm" class="text-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="escribe aquí">`,
-    buttons:[{label:'Borrar envío', value:'del', kind:'danger'}], cancel:true });
+      +(pd?`<p>Úsalo solo si la empezaste por error (otro proveedor u otra orden). La orden sigue cargada: podrás empezarla de nuevo. Escribe <b>borrar</b> para confirmar.</p>`
+          :`<p>Úsalo solo si el archivo se subió por error. Escribe <b>borrar</b> para confirmar.</p>`)
+      +`<input id="del-confirm" class="text-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="escribe aquí">`,
+    buttons:[{label:pd?'Borrar recepción':'Borrar envío', value:'del', kind:'danger'}], cancel:true });
   if(v!=='del') return;
   const typed=(document.getElementById('del-confirm')||{}).value||'';
   if(typed.trim().toLowerCase()!=='borrar'){ toast('No se borró: escribe «borrar» para confirmar', 3500); return; }
@@ -990,9 +996,10 @@ async function borrarEnvio(){
     await sbDeleteEnvio(paths);
     OUTBOX=OUTBOX.filter(e=>e.session_id!==d.session_id); saveOutbox();
     try{ localStorage.removeItem(mirrorPrefix(INI.hub, INI.area)+(d.session_fecha||d.fecha)); }catch(_){}
-    toast('✓ Envío borrado');
+    toast(pd?'✓ Recepción borrada':'✓ Envío borrado');
   }catch(e){ toast(isNetErr(e)?'Sin conexión: no se borró. Intenta de nuevo.':'No se pudo borrar ('+e.message+')', 4500); }
   refreshActive();
+  if(pd && INI.origen==='pd') pdLoad({ prov:o.proveedor||null }); // the supplier list still showed it as «recepción abierta»
 }
 function continuarRecepcion(){ const a=INI.active; if(a && a.data) openRecibir(a.data, { parciales:(a.parciales||[]).length }); }
 
@@ -2597,16 +2604,21 @@ const PD_MOTIVO={ fecha_corta:'fecha corta', danada:'dañada' };
 const PD_ESTADO_CLS={ 'Completo':'ok', 'Completo (variación de báscula)':'ok', 'Excedente':'mid', 'Faltante':'bad', 'Rechazo':'bad', 'No solicitado':'bad' };
 function pdExcOkDe(sku){ let n=0; for(const e of S.events) if(e.tipo==='scan' && e.sku_key===sku && e.detalle && e.detalle.excedente_ok) n+=Number(e.detalle.excedente_ok)||0; return round2(n); }
 // Latest answer of that kind, valid only while the count is the one it answered
-function pdAck(sku, kind, count){ let a=null; for(const e of S.events) if(e.tipo==='confirmacion' && e.sku_key===sku && e.detalle && e.detalle[kind]) a=e; return a && round2(a.detalle.recibido)===count ? a : null; }
+// An answer holds only while the count AND the Pedido it was given for are unchanged (a re-read of the order that
+// changes Pedido re-asks the line, plan §7). Answers stored without pedido are judged on the count alone.
+function pdAck(sku, kind, count, pedido){ let a=null; for(const e of S.events) if(e.tipo==='confirmacion' && e.sku_key===sku && e.detalle && e.detalle[kind]) a=e;
+  if(!a || round2(a.detalle.recibido)!==count) return null;
+  if(a.detalle.pedido!=null && pedido!=null && round2(Number(a.detalle.pedido))!==round2(pedido)) return null;
+  return a; }
 function pdRow(base){
   const r=Object.assign({ rec:0, exc:0, gap:0, rech:0, motivo:'', falt:0, ack:null, excAck:null }, base), d=round2(r.count-r.pedido);
   const tol=r.kgpz==='Kg' && r.pedido>0 ? kgTol(r.pedido) : 0;
   if(Math.abs(d)<=tol+1e-9) r.rec=Math.min(r.count, r.pedido);
   else if(d>0){ r.rec=r.pedido; r.exc=d; }
   else { r.rec=r.count; r.gap=-d; }
-  if(r.gap>0){ r.ack=pdAck(r.sku, 'faltante', r.count); if(r.ack){ r.rech=Math.min(round2(Number(r.ack.detalle.rechazadas)||0), r.gap); r.motivo=r.rech?r.ack.detalle.motivo||'':''; } r.falt=round2(r.gap-r.rech); }
+  if(r.gap>0){ r.ack=pdAck(r.sku, 'faltante', r.count, r.pedido);if(r.ack){ r.rech=Math.min(round2(Number(r.ack.detalle.rechazadas)||0), r.gap); r.motivo=r.rech?r.ack.detalle.motivo||'':''; } r.falt=round2(r.gap-r.rech); }
   r.excOk=pdExcOkDe(r.sku);
-  if(r.exc>0) r.excAck=pdAck(r.sku, 'excedente', r.count);
+  if(r.exc>0) r.excAck=pdAck(r.sku, 'excedente', r.count, r.pedido);
   r.porSeparar = r.exc>0 && !r.excAck ? round2(r.exc-r.excOk) : 0;
   r.pend = (r.gap>0 && !r.ack) || r.porSeparar>0;
   r.estado = r.pns ? 'No solicitado' : r.exc>0 ? 'Excedente' : r.gap>0 ? (r.rech>0?'Rechazo':'Faltante') : r.count!==r.pedido ? 'Completo (variación de báscula)' : 'Completo';
