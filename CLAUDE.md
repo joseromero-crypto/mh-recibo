@@ -114,7 +114,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   pd reception → `sin_cerrar` (área = pd-…), and the digest adds a line per supplier reception of the day.
 
 - **Modo botones (2026-11-13, plan §6.6)** — `pdBotones()` = `isPd()` && envío `modo:'botones'` (set by `pdEmpezar`,
-  carried by re-reads). No blind count: Recibir shows the order (`pdBListRender`, `pdBLineHtml`) and each line gets
+  carried by re-reads). No blind count. Recibir is scan-first (`S.pdTab='scan'`): a scan opens that line alone (`S.pdFoco`) + «Últimos
+  revisados»; «Pendientes» / «Todos» open the order as a list with a search (`pdBListRender`, `pdBLineHtml`). Each line gets
   Completo / Faltante (llegaron) / Excedente (flag, Recibido = Pedido) / Rechazo (motivo + n). Answers are `confirmacion`
   `detalle.marca`, latest wins while `pedido` is unchanged (`pdMarcas`, `pdBRows` → same row shape as `pdRow`, so `pdRows`,
   cerrar, report, Slack, Recepciones serve both modes). Scan → `pdBScan` (jump to the line, or flag `no_solicitado`).

@@ -246,7 +246,8 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .chk{width:30px;height:30px;flex-shrink:0;accent-color:var(--c-teal-dark)}
 .sum-row.ticked{opacity:.5}
 /* Proveedor directo, botones mode: one row per order line, answered with a tap */
-.pdb-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+.pdb-tabs{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:6px;margin-bottom:8px}
+.pdb-hint{background:var(--c-surface);border-radius:var(--r-lg);padding:22px 16px;text-align:center;font-size:15px;font-weight:700;color:var(--c-muted);margin-bottom:8px}
 .pdb-tabs .choice{min-height:44px;padding:0 10px;text-align:center;font-size:14px}
 .pdb-row{background:var(--c-surface);border-radius:var(--r-lg);padding:12px;margin-bottom:8px;border-left:4px solid transparent;scroll-margin-top:90px}
 .pdb-row.done{border-left-color:var(--c-teal)}
@@ -1748,7 +1749,7 @@ function openRecibir(data, opts={}){
   showScreen('screen-recibir');
   renderRecibir(); focusScan();
   loadSorting(S.hub).then(()=>{ buildCatalog(); renderRecibir(); });
-  S.pdOtras=[]; S.pdBusy=false; S.pdTab='pend'; S.pdEdit=null; S.pdForm=null; S.pdFoco=null; const pq=document.getElementById('pd-q'); if(pq) pq.value='';
+  S.pdOtras=[]; S.pdBusy=false; S.pdTab='scan'; S.pdEdit=null; S.pdForm=null; S.pdFoco=null; const pq=document.getElementById('pd-q'); if(pq) pq.value='';
   syncServerEvents().then(()=>{ if(opts.revisar && revisarItems().length) openRevisar(); });
   pdRecibirLive();
   flushOutbox();
@@ -2782,7 +2783,7 @@ function pdMarcar(sku, marca, extra){
   const l=S.lines.get(sku); if(!l) return;
   recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:l.producto, cantidad:extra.recibido, metodo:'boton',
     detalle:Object.assign({ marca, pedido:l.esperado, kgpz:l.kgpz }, extra) }));
-  S.pdEdit=null; S.pdForm=null; S.pdFoco=null; pdBRerender();
+  S.pdEdit=null; S.pdForm=null; S.pdFoco=null; pdBRerender(); if(screenActive('screen-recibir')) focusScan();
 }
 function pdBGuardar(sku){
   const f=S.pdForm, l=S.lines.get(sku), i=document.getElementById('pdb-n'), err=document.getElementById('pdb-err'); if(!f || !l || !i) return;
@@ -2810,12 +2811,25 @@ function pdBQuitarPns(sku){
   recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:e.producto, metodo:'boton', detalle:{ marca:'quitado', kgpz:e.detalle.kgpz||'Pz' } }));
   pdBRerender();
 }
-function pdBTab(t){ S.pdTab=t; pdBListRender(); }
-// Recibir: the order, pending first-tab by default; answered lines leave «Por revisar» (still under «Todos»)
+function pdBTab(t){ S.pdTab=t; S.pdForm=null; S.pdEdit=null; if(t!=='scan') S.pdFoco=null; pdBListRender(); if(t==='scan') focusScan(); }
+// Recibir: scan-first by default (many products share presentations, so the receptor confirms what they hold, not a
+// row picked from a list). «Pendientes» / «Todos» open the order as a list with a search, for products without a code.
 function pdBListRender(){
   const all=pdBRows(), lines=all.filter(r=>!r.pns), pns=all.filter(r=>r.pns), pend=lines.filter(r=>r.pend);
-  const tab=S.pdTab==='todos'?'todos':'pend';
-  document.getElementById('pdb-tabs').innerHTML=`<button class="choice ${tab==='pend'?'sel':''}" onclick="pdBTab('pend')">Por revisar · ${pend.length}</button><button class="choice ${tab==='todos'?'sel':''}" onclick="pdBTab('todos')">Todos · ${lines.length}</button>`;
+  const tab=['pend','todos'].includes(S.pdTab)?S.pdTab:'scan';
+  document.getElementById('pdb-tabs').innerHTML=`<button class="choice ${tab==='scan'?'sel':''}" onclick="pdBTab('scan')">Escanear</button><button class="choice ${tab==='pend'?'sel':''}" onclick="pdBTab('pend')">Pendientes · ${pend.length}</button><button class="choice ${tab==='todos'?'sel':''}" onclick="pdBTab('todos')">Todos · ${lines.length}</button>`;
+  const qEl=document.getElementById('pd-q'); qEl.style.display=tab==='scan'?'none':'';
+  if(tab==='scan'){
+    const foco=S.pdFoco && lines.find(r=>r.sku===S.pdFoco);
+    let h=foco ? pdBLineHtml(foco)
+      : !pend.length ? `<div class="warn-box ok">Revisaste todos los productos de la orden. Toca «Terminé: revisar y cerrar».</div>`
+      : `<div class="pdb-hint">Escanea un producto para ver lo pedido y confirmarlo.<div class="ritem-meta" style="margin-top:6px;font-weight:600">¿No tiene código? Búscalo en Pendientes.</div></div>`;
+    const ult=lines.filter(r=>!r.pend && r.ack && r.sku!==S.pdFoco).sort((a,b)=>String(b.ack.ts).localeCompare(String(a.ack.ts))).slice(0,3);
+    if(ult.length) h+=`<div class="section-title">Últimos revisados</div>`+ult.map(pdBLineHtml).join('');
+    if(pns.length) h+=`<div class="section-title">No solicitados · ${pns.length}</div>`+pns.map(pdBLineHtml).join('');
+    pdBKeepInput(()=>{ document.getElementById('pd-rows').innerHTML=h; });
+    return;
+  }
   const words=normName(document.getElementById('pd-q').value||'').split(' ').filter(Boolean);
   const match=r=>!words.length || words.every(w=>normName(r.producto).includes(w) || (r.barcode||'').includes(w));
   const vis=(tab==='todos'?lines:lines.filter(r=>r.pend || r.sku===S.pdEdit || r.sku===S.pdFoco)).filter(match);
@@ -2827,10 +2841,9 @@ function pdBListRender(){
 // A scan finds the line in the order; a product not in it is flagged «No solicitado» (it goes back, never counted)
 function pdBScan(r, code){
   if(r && r.line){
-    vibrate(true); S.pdFoco=r.line.sku_key; S.pdEdit=null; S.pdForm=null; document.getElementById('pd-q').value='';
-    const row=pdBRows().find(x=>x.sku===S.pdFoco); if(row && !row.pend) S.pdTab='todos';
+    vibrate(true); S.pdFoco=r.line.sku_key; S.pdEdit=null; S.pdForm=null; S.pdTab='scan'; document.getElementById('pd-q').value='';
     pdBListRender();
-    const el=document.querySelector('.pdb-row.foco'); if(el) el.scrollIntoView({ block:'center', behavior:'smooth' });
+    const el=document.querySelector('.pdb-row.foco'); if(el) el.scrollIntoView({ block:'nearest', behavior:'smooth' });
     return;
   }
   vibrate(false);
@@ -2840,7 +2853,8 @@ function pdBScan(r, code){
       recordEvent(makeEvent('confirmacion', { sku_key:p.sku_key, producto:p.producto, metodo:'boton', detalle:{ marca:'no_solicitado', codigo:code, kgpz:p.kgpz||'Pz' } }));
     toast(`${p.producto}: no viene en la orden. No se recibe: regrésalo al camión.`, 5000); renderRecibir(); return;
   }
-  toast('Código no reconocido: búscalo por nombre en la lista', 4000);
+  toast('Código no reconocido: búscalo por nombre en Pendientes', 4000);
+  S.pdTab='pend'; S.pdFoco=null; pdBListRender();
   const q=document.getElementById('pd-q'); if(q) q.focus();
 }
 function pdBRenderResumen(){
