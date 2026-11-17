@@ -132,6 +132,29 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   Supplier list (worst fill rate first) → detail (`pvDetalle`: KPIs, weekly trend Monday-first, receptions, products with
   per-reception history) and CSVs `pvCsv('prov'|'prod'[, provIdx])`.
 
+## Factura del proveedor (facturaProveedor-plan.md — built 2026-11-17)
+- Flags per supplier reception what the invoice charges that we shouldn't pay (we pay only what was ordered AND received,
+  in pieces): no solicitado en OC, piezas de más, cobradas no en físico, cantidad por revisar (unsure piezas or Kg line).
+- Invoice Reader reads the photos; we only call `POST IR_URL` (`irPost`: start → `irPut` each page → submit → read; list).
+  Never its tables or database. CORS admits only the prod origin: **localhost uses `irStub`** (`IR_LOCAL`, fed by gitignored
+  `fixtures/factura_stub.json`, the record shape); `?irlive=1` calls the real one (refused by CORS from localhost).
+- Recibir + Resumen (`pd-*`): status strip `facStripHtml(sid)` (`.fac-strip[data-sid]`, re-rendered by `facRender`), photos ≤8,
+  downscaled to 2576 px JPEG q85 (`facReduce`). Status only, never the invoice's content (blind count). State `FAC[sid]`;
+  `facEstado` derives subiendo/pendiente/error/fotos/leyendo/lista/fallo/vencida; polls read every 4 s (`facPoll`).
+  Unsent photos live in IndexedDB `mr_factura` until submit succeeds (`facSave`/`facDrop`; `enviar` flag = the auxiliar
+  pressed send → retried by `facRetryAll` on `online` and app start). 24 h window from the session id's epoch (`facVigente`).
+- Closed view (`#fac-box` under `pdRecepcionHead`, only when the close has `lineas_todas`): `facBoxLoad(info)` → state
+  `FACV`; `facBoxInner` walks saved → photos → read (page warning when `totals_ok===false` or warnings; picks for no
+  identificados) → leyendo/fallo (Comparar a mano from the 2nd failure) → `list` filtered by `facMismoProveedor` + photos +
+  Comparar a mano. Saved automatically when nothing is asked. `pdCerrar` is untouched: closing never waits for the invoice.
+- Comparison `facComparar` + `facNormCode` (identical to Invoice Reader's lean/match.ts `normCode`) live in the
+  `/* FACTURA-PURE:BEGIN … END */` block, no globals: `node tests/factura.test.mjs` evals it (Arca real fixtures, gitignored,
+  skipped when missing; synthetic cases always).
+- Event `factura` (latest wins; `facGuardarDetalle`, through the outbox): read_id, origen, reference, totals_ok, conteo,
+  piezas, `lineas` (every billed OC line), no_solicitados, picks — or `{manual:true, motivo}`. Every other reader filters
+  on explicit tipos, so it's ignored there. `facReporte` rewrites the report CSV with «Folio factura», «Facturado»,
+  «Revisión factura» + rows Estado «Facturado sin pedir» (skipped by `openRecepcion` and `pvLinesFromCsv`).
+
 ## How the code is laid out (index.html)
 - Helpers copied from armado-CH sit at the top, each block labelled. Our additions: `codeKey` (cleanBC + strip
   inner spaces + bcKey — one export has `083078 003623`), `skuKeyOf`, `presentacion`/`nameHtml`, `familyKey` (§7.2).
