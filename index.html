@@ -332,6 +332,8 @@ textarea.text-input{min-height:110px;font-size:15px;font-weight:500}
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(14,26,25,.45);z-index:60;align-items:flex-end;justify-content:center;padding:16px}
 .modal-bg.open{display:flex}
 @media (min-width:640px){.modal-bg{align-items:center}}
+.fac-opt{margin-bottom:8px}.fac-opt .res-item{margin-bottom:0}.fac-ver-foto{margin:2px 0 0;padding-left:0}
+.fac-foto-full{display:block;width:100%;border-radius:var(--r-md);margin-bottom:8px;border:1px solid var(--c-line)}
 .modal{background:var(--c-white);border-radius:var(--r-xl);padding:24px;width:100%;max-width:440px;max-height:90dvh;overflow-y:auto;box-shadow:var(--shadow-pop)}
 .modal-title{font-size:20px;font-weight:800;letter-spacing:-.02em;margin-bottom:10px;line-height:1.2}
 .modal p{font-size:14px;line-height:1.5;margin-bottom:10px;color:var(--c-muted)}
@@ -3690,7 +3692,9 @@ async function irStub(b){
     return { documentId:id, uploads:Array.from({ length:b.photoCount }, (_,i)=>({ page:i+1, signedUrl:'stub:', token:'', path:'' })) }; }
   if(b.action==='submit'){ const d=IR_STUB.docs.find(x=>x.id===b.documentId); if(d) d.t=Date.now(); return { status:'queued' }; }
   if(b.action==='read') return { reads:IR_STUB.docs.filter(d=>d.sid===b.sessionId && d.t!==Infinity).map(asRead) };
-  if(b.action==='list') return { reads:IR_STUB.rec?[Object.assign({ read_id:'stub-list', status:'done', error:null, invoice_date:todayStr(), external_ref:null }, IR_STUB.rec)]:[] };
+  if(b.action==='list') return { reads:IR_STUB.rec?[Object.assign({ read_id:'stub-list', status:'done', error:null, invoice_date:todayStr(), external_ref:null, purpose:'captura',
+    created_at:new Date(Date.now()-3600e3).toISOString(), scanned_by:'Auxiliar de prueba' }, IR_STUB.rec)]:[] };
+  if(b.action==='photos') return { photos:[{ page:1, url:'icon-512.png' }] };
 }
 
 /* ── Photos waiting to be sent live in IndexedDB, so a reload or a lost signal never loses them ── */
@@ -3961,7 +3965,7 @@ function facBoxInner(){
     const quien=`<div class="muted" style="margin-top:6px">Revisada ${localDateStr(new Date(S0.ts))!==localDateStr()?fechaLarga(localDateStr(new Date(S0.ts)))+' ':''}${localHM(new Date(S0.ts))}${S0.receptor?' · '+escapeHtml(S0.receptor):''}</div>`;
     const nueva=done && done.read_id!==d.read_id && (d.manual || d.origen!=='lista') ? `<div class="warn-box">Hay una lectura más nueva de la factura.<button class="btn btn-secondary btn-block" onclick="facCambiar()">Comparar con la nueva</button></div>`:'';
     if(d.manual) return h+`<div class="info-card"><b>Sin revisión de factura</b><div>${escapeHtml(d.motivo||'')}</div>${quien}</div>${nueva}<button class="link-btn" onclick="facCambiar()">Revisar con la factura</button>`;
-    return h+`<div class="info-card">${facResultadoHtml(d)}${quien}</div>${nueva}<button class="link-btn" onclick="facCambiar()">Cambiar factura</button>`;
+    return h+`<div class="info-card">${facResultadoHtml(d)}${quien}${d.read_id?facFotoLink(d.read_id):''}</div>${nueva}<button class="link-btn" onclick="facCambiar()">Cambiar factura</button>`;
   }
   if(FACV.manual) return h+facManualHtml();
   if(['fotos','subiendo','pendiente','error'].includes(st) || f.preparando) return h+facStripHtml(sid, true)+(st==='error'?`<button class="link-btn" onclick="facManual()">Comparar a mano</button>`:'');
@@ -3992,12 +3996,12 @@ function facBoxInner(){
   if(FACV.lista===null){ facCargarLista(); return h+'<div class="muted">Buscando facturas del proveedor…</div>'; }
   const prov=I.proveedor||areaName(I.area), mine=FACV.lista.filter(x=>x.status==='done' && (facMismoProveedor(prov, x.supplier) || facMismoProveedor(prov, x.printed_supplier)));
   const otras=FACV.lista.filter(x=>x.status==='done' && !mine.includes(x));
-  const opt=x=>`<button class="res-item" onclick="facElegir(${facJs(x.read_id)})"><div style="flex:1"><div class="res-name">${escapeHtml(x.reference||'Sin folio')} · ${escapeHtml(x.supplier||x.printed_supplier||'')}</div>
-    <div class="res-sub">${x.invoice_date?fechaLarga(x.invoice_date)+' · ':''}${(x.rows||[]).length} renglones</div></div><span style="font-size:20px">›</span></button>`;
+  const opt=x=>`<div class="fac-opt"><button class="res-item" onclick="facElegir(${facJs(x.read_id)})"><div style="flex:1"><div class="res-name">${escapeHtml(facNombre(x))}</div>
+    <div class="res-sub">${facSub(x)}</div></div><span style="font-size:20px">›</span></button>${facFotoLink(x.read_id)}</div>`;
   h+=f.readErr?`<div class="err-box">${escapeHtml(f.readErr)}</div>`:'';
   if(mine.length===1){ const x=mine[0];
-    h+=`<div class="info-card"><div class="muted">Factura de ${escapeHtml(prov)} escaneada en Invoice Reader:</div><div class="res-name" style="margin-top:4px">${escapeHtml(x.reference||'Sin folio')} · ${escapeHtml(x.supplier||x.printed_supplier||'')}</div>
-      <div class="muted">${x.invoice_date?'Factura del '+fechaLarga(x.invoice_date)+' · ':''}${(x.rows||[]).length} renglones</div>
+    h+=`<div class="info-card"><div class="muted">Factura de ${escapeHtml(prov)} escaneada en Invoice Reader:</div><div class="res-name" style="margin-top:4px">${escapeHtml(facNombre(x))}</div>
+      <div class="muted">${facSub(x)}</div>${facFotoLink(x.read_id)}
       <button class="btn btn-warn btn-block" style="margin-top:10px" onclick="facElegir(${facJs(x.read_id)})">Sí, es esta factura</button></div>`; }
   else if(mine.length) h+=`<div class="muted" style="margin-bottom:8px">Facturas de ${escapeHtml(prov)} escaneadas en Invoice Reader:</div>`+mine.map(opt).join('');
   else h+=`<div class="muted" style="margin-bottom:8px">No hay factura leída de ${escapeHtml(prov)}.</div>`;
@@ -4019,6 +4023,26 @@ async function facCargarLista(force){
   }
   catch(e){ FACV.lista=[]; const f=FAC[FACV.info.session_id]; if(f) f.readErr=isNetErr(e)?'Sin conexión: no se pudieron buscar facturas.':e.message; }
   FACV._listando=false; facBoxRender();
+}
+// Name of an Invoice Reader scan: its label («LALA · CWB-02783952 · 17 nov · 9:05 a.m. · Auxiliar …»), built by Invoice
+// Reader; the fallback is for a reader not yet deployed with it.
+function facNombre(x){
+  if(x.label) return x.label;
+  const t=x.created_at?new Date(x.created_at):null;
+  return [x.supplier||x.printed_supplier||'Proveedor sin identificar', x.reference||'Sin folio', t?fechaLarga(localDateStr(t))+' '+localHM(t):''].filter(Boolean).join(' · ');
+}
+function facSub(x){ return `${x.invoice_date?'Factura del '+fechaLarga(x.invoice_date)+' · ':''}${(x.rows||[]).length} renglones`; }
+function facFotoLink(id){ return `<button class="link-btn fac-ver-foto" onclick="facVerFoto(${facJs(id)})">Ver foto cargada</button>`; }
+// «Ver foto cargada»: Invoice Reader hands 10-minute links, only for this reception's hub; asked again on every tap.
+async function facVerFoto(id){
+  if(!FACV || !FACV.info) return;
+  let p; try{ p=(await irPost({ action:'photos', sessionId:FACV.info.session_id, readId:id })).photos||[]; }
+  catch(e){ toast(isNetErr(e)?'Sin conexión: no se pudo abrir la foto':e.message); return; }
+  if(!p.length){ toast('Esta lectura no tiene fotos'); return; }
+  await showModal({ title:p.length===1?'Foto de la factura':`Fotos de la factura · ${p.length}`,
+    html:p.map(x=>`<a href="${escapeHtml(x.url)}" target="_blank" rel="noopener"><img class="fac-foto-full" src="${escapeHtml(x.url)}" alt="Página ${x.page}"></a>`).join('')
+      +'<div class="muted" style="margin-top:6px">Toca una foto para abrirla en grande.</div>',
+    buttons:[{ label:'Cerrar', value:null }] });
 }
 function facElegir(id){ const r=(FACV.lista||[]).find(x=>x.read_id===id); if(!r) return; FACV.elegida=r; FACV.picks={}; FACV.ack=false; facBoxRender(); }
 function facPickLinea(row, v){ if(v) FACV.picks[row]=v; else delete FACV.picks[row]; facBoxRender(); }

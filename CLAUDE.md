@@ -138,6 +138,10 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - Invoice Reader reads the photos; we only call `POST IR_URL` (`irPost`: start → `irPut` each page → submit → read; list).
   Never its tables or database. CORS admits only the prod origin: **localhost uses `irStub`** (`IR_LOCAL`, fed by gitignored
   `fixtures/factura_stub.json`, the record shape); `?irlive=1` calls the real one (refused by CORS from localhost).
+- List names (2026-11-17): `facNombre` shows Invoice Reader's `label` (supplier · folio · day · time · who scanned; `list`
+  now includes its default «captura» scans too), with a local fallback for an older reader. «Ver foto cargada»
+  (`facVerFoto`) asks IR `photos {sessionId, readId}` for 10-minute links on every tap (receptions up to 7 days old);
+  shown on each listed scan and on the saved review. Photos are never cached here.
 - Expected use: invoice scanned on the phone in Invoice Reader, count on the laptop here, scan picked from the list at the
   close. The Recibir/Resumen strip is a one-line «Foto de factura» link (`fac-mini`, `facAbrir`) until opened or sent.
 - Recibir + Resumen (`pd-*`): status strip `facStripHtml(sid)` (`.fac-strip[data-sid]`, re-rendered by `facRender`), photos ≤8,
