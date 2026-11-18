@@ -2794,8 +2794,12 @@ function pdBLineHtml(r){
     h+=`<div class="qty-err" id="pdb-err"></div>
         <div class="pcard-actions" style="grid-template-columns:1fr 1fr;margin-top:4px"><button class="btn btn-secondary" onclick="pdBCancel()">Cancelar</button><button class="btn btn-primary" onclick="pdBGuardar('${sk}')">Guardar</button></div></div>`;
   } else if(editing){
-    h+=`<div class="pdb-btns"><button class="btn btn-primary btn-main" onclick="pdBTap('${sk}','completo')">Completo</button><button class="btn btn-secondary btn-main" onclick="pdBTap('${sk}','nollego')">No llegó</button></div>
+    // «No llegó» only in Resumen, for the lines nobody scanned (Recibir answers products in hand)
+    h+=(screenActive('screen-resumen')
+      ? `<div class="pdb-btns"><button class="btn btn-primary btn-main" onclick="pdBTap('${sk}','nollego')">No llegó</button><button class="btn btn-secondary btn-main" onclick="pdBTap('${sk}','completo')">Completo</button></div>
       <div class="pdb-btns3"><button class="btn btn-secondary" onclick="pdBTap('${sk}','faltante')">Llegaron menos</button><button class="btn btn-secondary" onclick="pdBTap('${sk}','excedente')">Excedente</button><button class="btn btn-secondary" onclick="pdBTap('${sk}','rechazo')">Rechazo</button></div>`
+      : `<div class="pdb-btns"><button class="btn btn-primary" onclick="pdBTap('${sk}','completo')">Completo</button><button class="btn btn-secondary" onclick="pdBTap('${sk}','faltante')">Faltante</button>
+      <button class="btn btn-secondary" onclick="pdBTap('${sk}','excedente')">Excedente</button><button class="btn btn-secondary" onclick="pdBTap('${sk}','rechazo')">Rechazo</button></div>`)
       +(r.pend?'':`<button class="link-btn" style="margin-top:0" onclick="pdBCancel()">Dejar como estaba</button>`);
   } else {
     const who=r.ack&&r.ack.receptor&&r.ack.receptor!==S.receptor?` · ${escapeHtml(r.ack.receptor)}`:'';

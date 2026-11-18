@@ -121,7 +121,7 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   cerrar, report, Slack, Recepciones serve both modes). Scan → `pdBScan` (jump to the line, or flag `no_solicitado`).
   `pdBRenderResumen`; «Copiar lista para el sistema» (`pdCopiarFacturar`). Report Excedente = «Sí». Receptions opened
   before keep the count flow.
-- **Live test fixes (Danone at MH Contry, 2026-11-18)** — modo botones: line buttons Completo / **No llegó** (= faltante 0)
+- **Live test fixes (Danone at MH Contry, 2026-11-18)** — modo botones: Recibir keeps Completo / Faltante / Excedente / Rechazo; Resumen («Por revisar», lines never scanned) shows **No llegó** (= faltante 0) + Completo
   big, then Llegaron menos / Excedente / Rechazo; Caducidad mínima is a big `.pdb-cad` row; no input autofocus (pdb-n, pd-q,
   pd-rech-n: the receptor taps the field). A scan not in the order focuses a «No viene en la orden» card with «Siguiente»
   (`pdBSiguiente`). Buttons: «Terminar revisión física» (Recibir) and «Cerrar y comparar contra factura» (Resumen).
