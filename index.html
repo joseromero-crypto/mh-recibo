@@ -106,7 +106,8 @@ h2{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.15;margin:
 .warn-box{background:var(--c-surface);border-left:4px solid var(--c-ink);border-radius:var(--r-md);padding:12px 14px;font-size:14px;margin:12px 0;line-height:1.45}
 .warn-box .btn{margin-top:10px}
 .fac-strip{background:var(--c-surface);border-radius:var(--r-lg);padding:12px 14px;margin:0 0 10px;font-size:14px;line-height:1.45}
-.fac-strip.bare{background:none;padding:0}
+.fac-strip.bare,.fac-strip:has(.fac-mini){background:none;padding:0}.fac-strip:empty{display:none}
+.fac-mini{display:inline-flex;align-items:center;gap:6px;background:none;border:none;color:var(--c-teal-dark);font:inherit;font-size:14px;font-weight:700;cursor:pointer;padding:8px 2px;min-height:40px}
 .fac-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .fac-btns{display:flex;gap:8px;margin-top:10px}.fac-btns .btn{flex:1;background:var(--c-white)}
 .fac-strip .btn-block{margin-top:8px;background:var(--c-white)}
@@ -3639,6 +3640,13 @@ function facComparar({ lines=[], todas=[], rows=[], picks={} }){
     piezas:{ facturadas:sum(rows.filter(r=>r.piezas!=null && !lineas.some(x=>x.kgpz==='Kg' && x.filas.includes(r.sourceRow))),'piezas'), de_mas:sum(lineas,'de_mas'), no_fisico:sum(lineas,'no_fisico'), no_solicitado:sum(no_solicitados,'piezas') },
     limpia:!flagged.length && !no_solicitados.length && !no_identificados.length };
 }
+// read_ids another reception has linked: each session's latest 'factura' event counts (a later one, or a bypass,
+// frees the read it replaced). events: factura rows in id order; sid: the reception asking (its own link never hides).
+function facLigadas(events, sid){
+  const last=new Map(); for(const e of events) last.set(e.session_id, e);
+  const out=new Set(); for(const [s, e] of last) if(s!==sid && e.detalle && e.detalle.read_id && !e.detalle.manual) out.add(e.detalle.read_id);
+  return out;
+}
 // Supplier names from the order vs the read: norm, company suffixes out, any shared significant word counts.
 function facMismoProveedor(a, b){
   const STOP=new Set('s a de c v sa cv rl r l sab sapi s.a. del la el y grupo distribuidora comercializadora mexico'.split(' '));
@@ -3743,6 +3751,7 @@ function facPoll(sid){ const f=FAC[sid]; if(!f || f.poll) return; f.poll=setInte
 function facStopPoll(f){ if(f.poll){ clearInterval(f.poll); f.poll=null; } }
 
 /* ── Taking the photos: camera or files, downscaled here to ≤2576 px, JPEG q85 ── */
+function facAbrir(sid){ const f=FAC[sid]; if(f){ f.abierto=true; facRender(sid); } }
 function facPick(sid, cam){
   let inp=document.getElementById('fac-input');
   if(!inp){ inp=document.createElement('input'); inp.type='file'; inp.id='fac-input'; inp.accept='image/*'; inp.hidden=true; inp.onchange=()=>facAddFiles(inp); document.body.appendChild(inp); }
@@ -3820,6 +3829,7 @@ function facStripInner(sid, bare){
   const st=facEstado(f), r=(f.reads||[])[0], J=facJs(sid);
   const head=(t, tag)=>(bare?(tag?`<div class="fac-head">${tag}</div>`:''):`<div class="fac-head"><b>Factura del proveedor</b>${tag||''}</div>`)+(t?`<div class="muted">${t}</div>`:'');
   if(f.preparando) return head('Preparando las fotos…');
+  if(st==='sin' && !bare && !f.abierto) return facVigente(sid)?`<button class="fac-mini" onclick="facAbrir(${J})"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Foto de factura</button>`:'';
   if(st==='sin') return head(facVigente(sid)?(bare?'Todas las páginas de la factura.':'Tómale foto a la factura (todas las páginas). Se lee mientras sigues contando.'):'La recepción tiene más de 24 horas: elige la factura al ver el cierre.')+(facVigente(sid)?facFotoBtns(sid,0):'');
   if(st==='fotos'||st==='pendiente'||st==='error'||st==='subiendo'){
     const thumbs=`<div class="fac-thumbs">${f.urls.map((u,i)=>`<div class="fac-thumb"><img src="${u}" alt="Página ${i+1}">${st==='subiendo'?'':`<button aria-label="Quitar" onclick="facQuitar(${J},${i})"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>`}</div>`).join('')}</div>`;
@@ -3985,9 +3995,14 @@ function facBoxInner(){
   const opt=x=>`<button class="res-item" onclick="facElegir(${facJs(x.read_id)})"><div style="flex:1"><div class="res-name">${escapeHtml(x.reference||'Sin folio')} · ${escapeHtml(x.supplier||x.printed_supplier||'')}</div>
     <div class="res-sub">${x.invoice_date?fechaLarga(x.invoice_date)+' · ':''}${(x.rows||[]).length} renglones</div></div><span style="font-size:20px">›</span></button>`;
   h+=f.readErr?`<div class="err-box">${escapeHtml(f.readErr)}</div>`:'';
-  if(mine.length) h+=`<div class="muted" style="margin-bottom:8px">Facturas de ${escapeHtml(prov)} escaneadas en Invoice Reader:</div>`+mine.map(opt).join('');
+  if(mine.length===1){ const x=mine[0];
+    h+=`<div class="info-card"><div class="muted">Factura de ${escapeHtml(prov)} escaneada en Invoice Reader:</div><div class="res-name" style="margin-top:4px">${escapeHtml(x.reference||'Sin folio')} · ${escapeHtml(x.supplier||x.printed_supplier||'')}</div>
+      <div class="muted">${x.invoice_date?'Factura del '+fechaLarga(x.invoice_date)+' · ':''}${(x.rows||[]).length} renglones</div>
+      <button class="btn btn-warn btn-block" style="margin-top:10px" onclick="facElegir(${facJs(x.read_id)})">Sí, es esta factura</button></div>`; }
+  else if(mine.length) h+=`<div class="muted" style="margin-bottom:8px">Facturas de ${escapeHtml(prov)} escaneadas en Invoice Reader:</div>`+mine.map(opt).join('');
   else h+=`<div class="muted" style="margin-bottom:8px">No hay factura leída de ${escapeHtml(prov)}.</div>`;
-  if(otras.length) h+=`<details style="margin:8px 0"><summary class="muted" style="cursor:pointer">Otras facturas del hub · ${otras.length}</summary>${otras.map(opt).join('')}</details>`;
+  if(otras.length) h+=`<details style="margin:8px 0"><summary class="muted" style="cursor:pointer">${mine.length===1?'No es esta: ver o':'O'}tras facturas del hub · ${otras.length}</summary>${otras.map(opt).join('')}</details>`;
+  if(FACV.ligadas) h+=`<div class="muted" style="margin:4px 0 8px">${FACV.ligadas===1?'Una factura ya está ligada':FACV.ligadas+' facturas ya están ligadas'} a otra recepción y no se muestra${FACV.ligadas===1?'':'n'}.</div>`;
   if(facVigente(sid) && st!=='vencida') h+=`<div class="muted" style="margin-top:10px">O tómale foto ahora:</div>`+facStripHtml(sid, true);
   return h+`<button class="link-btn" onclick="facCargarLista(true)">Actualizar</button>`
     +(FACV.cambiando?`<button class="link-btn" onclick="FACV.cambiando=false;facBoxRender()">Dejar la revisión guardada</button>`:`<button class="link-btn" onclick="facManual()">Comparar a mano (sin factura leída)</button>`);
@@ -3995,7 +4010,13 @@ function facBoxInner(){
 async function facCargarLista(force){
   if(!FACV || (FACV._listando && !force)) return; FACV._listando=true;
   if(force){ FACV.lista=null; facBoxRender(); const f=FAC[FACV.info.session_id]; if(f) await facRefresh(f.sid); }
-  try{ FACV.lista=(await irPost({ action:'list', hubSlug:FACV.info.hub, since:FACV.info.fecha+'T00:00:00-06:00' })).reads||[]; }
+  try{
+    const I=FACV.info, [l, evs]=await Promise.all([irPost({ action:'list', hubSlug:I.hub, since:I.fecha+'T00:00:00-06:00' }),
+      pgSelectAll('rec_events', `hub=eq.${encodeURIComponent(I.hub)}&tipo=eq.factura&fecha=gte.${ymdAdd(I.fecha,-30)}&select=id,session_id,detalle&order=id.asc`)]);
+    const ligadas=facLigadas(evs.concat(OUTBOX.filter(e=>e.tipo==='factura' && e.hub===I.hub)), I.session_id);
+    FACV.ligadas=(l.reads||[]).filter(x=>ligadas.has(x.read_id)).length;
+    FACV.lista=(l.reads||[]).filter(x=>!ligadas.has(x.read_id));
+  }
   catch(e){ FACV.lista=[]; const f=FAC[FACV.info.session_id]; if(f) f.readErr=isNetErr(e)?'Sin conexión: no se pudieron buscar facturas.':e.message; }
   FACV._listando=false; facBoxRender();
 }

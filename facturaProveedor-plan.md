@@ -41,7 +41,10 @@ candidates[{sku, name, score, barcodes[], supplierSku}], notes[], matchKeys[]` (
 
 ## 3. Foto de factura (Recibir and Resumen, `pd-*` only)
 
-- A status strip above the scanner (`facStripHtml`): **Tomar foto** (camera) / **Elegir archivos**, up to 8 pages,
+- Expected flow: the receptor scans the invoice on the phone **in Invoice Reader** and counts on the laptop in MH Recibo;
+  at the close they pick that scan from the list (§4.5). Photos from MH Recibo stay available for whoever prefers them.
+- While nothing was sent, the strip is a single «Foto de factura» link (`fac-mini`); tapping it opens the box (`f.abierto`).
+- The open box (`facStripHtml`): **Tomar foto** (camera) / **Elegir archivos**, up to 8 pages,
   thumbnails with ×, **Enviar a leer**. Photos are downscaled in the browser to ≤2576 px on the long edge, JPEG q85
   (`facReduce`).
 - Send (`facEnviar`): flush the outbox first (start needs the `abrir` on the server) → start → PUT each page → submit.
@@ -71,6 +74,10 @@ Shown on every closed `pd-*` reception that has `lineas_todas` (Inicio after clo
 5. No read for the session → `list {hubSlug, since: session fecha 00:00 −06:00}` filtered to this supplier
    (`facMismoProveedor`: shared significant word, company suffixes out; the hub's other invoices under a fold), photos if
    still within 24 h, «Actualizar», **Comparar a mano (sin factura leída)**.
+   - Reads another reception already linked are left out (`facLigadas`: each session's latest `factura` event of the hub,
+     last 30 days, + the outbox; a later event or a bypass frees the read). The list says how many were hidden.
+   - Exactly one read of this supplier → shown as a card «Sí, es esta factura» (still one tap, never linked on its own);
+     the hub's other invoices stay folded under «No es esta: ver otras».
 
 Comparar a mano: motivo «No trajo factura» / «La factura no se puede leer» / Otro (text) → `factura {manual:true, motivo}`.
 
@@ -118,7 +125,8 @@ warnings, rows}`); a read turns done 6 s after submit. `?irlive=1` calls the rea
   esperado, 223 pz, 6 OC lines not billed and received 0 → **zero flags**.
 - Synthetic: wrong flavor → no solicitado; billed 12 / pedido 10 / recibido 6 → 2 de más + 4 no en físico; unknown code
   (not confident) → no identificado with the candidate's line suggested; quantityOk false → por revisar; Kg line; a code
-  on two lines → ambiguous; «001177» vs «1177»; two rows billing one line; picks; a line billed but received 0.
+  on two lines → ambiguous; «001177» vs «1177»; two rows billing one line; picks; a line billed but received 0;
+  `facLigadas` (latest event per session wins, bypass frees, own link stays).
 
 ## 9. Later (not built)
 

@@ -138,6 +138,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - Invoice Reader reads the photos; we only call `POST IR_URL` (`irPost`: start → `irPut` each page → submit → read; list).
   Never its tables or database. CORS admits only the prod origin: **localhost uses `irStub`** (`IR_LOCAL`, fed by gitignored
   `fixtures/factura_stub.json`, the record shape); `?irlive=1` calls the real one (refused by CORS from localhost).
+- Expected use: invoice scanned on the phone in Invoice Reader, count on the laptop here, scan picked from the list at the
+  close. The Recibir/Resumen strip is a one-line «Foto de factura» link (`fac-mini`, `facAbrir`) until opened or sent.
 - Recibir + Resumen (`pd-*`): status strip `facStripHtml(sid)` (`.fac-strip[data-sid]`, re-rendered by `facRender`), photos ≤8,
   downscaled to 2576 px JPEG q85 (`facReduce`). Status only, never the invoice's content (blind count). State `FAC[sid]`;
   `facEstado` derives subiendo/pendiente/error/fotos/leyendo/lista/fallo/vencida; polls read every 4 s (`facPoll`).
@@ -145,8 +147,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   pressed send → retried by `facRetryAll` on `online` and app start). 24 h window from the session id's epoch (`facVigente`).
 - Closed view (`#fac-box` under `pdRecepcionHead`, only when the close has `lineas_todas`): `facBoxLoad(info)` → state
   `FACV`; `facBoxInner` walks saved → photos → read (page warning when `totals_ok===false` or warnings; picks for no
-  identificados) → leyendo/fallo (Comparar a mano from the 2nd failure) → `list` filtered by `facMismoProveedor` + photos +
-  Comparar a mano. Saved automatically when nothing is asked. `pdCerrar` is untouched: closing never waits for the invoice.
+  identificados) → leyendo/fallo (Comparar a mano from the 2nd failure) → `list` filtered by `facMismoProveedor`, minus reads
+  another reception linked (`facLigadas`), a single match as a «Sí, es esta factura» card + photos + Comparar a mano. Saved automatically when nothing is asked. `pdCerrar` is untouched: closing never waits for the invoice.
 - Comparison `facComparar` + `facNormCode` (identical to Invoice Reader's lean/match.ts `normCode`) live in the
   `/* FACTURA-PURE:BEGIN … END */` block, no globals: `node tests/factura.test.mjs` evals it (Arca real fixtures, gitignored,
   skipped when missing; synthetic cases always).

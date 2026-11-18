@@ -10,7 +10,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const html = readFileSync(join(root, 'index.html'), 'utf8');
 const block = html.slice(html.indexOf('/* FACTURA-PURE:BEGIN'), html.indexOf('/* FACTURA-PURE:END */'));
 assert.ok(block.length > 100, 'FACTURA-PURE block not found');
-const { facNormCode, facComparar, facMismoProveedor } = new Function(block + '\nreturn { facNormCode, facComparar, facMismoProveedor };')();
+const { facNormCode, facComparar, facMismoProveedor, facLigadas } = new Function(block + '\nreturn { facNormCode, facComparar, facMismoProveedor, facLigadas };')();
 
 let n = 0;
 const test = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -124,6 +124,12 @@ test('synthetic: billed for a line received 0', () => {
   assert.equal(r.no_solicitados.length, 1, "a 'name:' sku_key is never a code");
   const r2 = facComparar({ lines: [L('123', 'A', 5)], todas: [T('123', 5, 0)], rows: [R(1, ['123'], 5)] });
   assert.deepEqual([r2.lineas[0].de_mas, r2.lineas[0].no_fisico], [0, 5]);
+});
+
+test('reads already linked to another reception', () => {
+  const E = (session_id, detalle) => ({ session_id, detalle });
+  const evs = [E('a', { read_id: 'r1' }), E('b', { read_id: 'r2' }), E('b', { read_id: 'r3' }), E('c', { read_id: 'r4' }), E('c', { manual: true, motivo: 'x' }), E('me', { read_id: 'r5' })];
+  assert.deepEqual([...facLigadas(evs, 'me')].sort(), ['r1', 'r3'], "b moved to r3 (r2 free), c went manual (r4 free), my own r5 stays visible");
 });
 
 console.log(`${n} tests passed`);
