@@ -172,6 +172,25 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   on explicit tipos, so it's ignored there. `facReporte` rewrites the report CSV with «Folio factura», «Facturado»,
   «Revisión factura» + rows Estado «Facturado sin pedir» (skipped by `openRecepcion` and `pvLinesFromCsv`).
 
+## Modo prueba (2026-11-18)
+- `?demo={semilla}` runs the whole app unchanged on fake data; Admin → **Modo prueba** opens it in a new tab (no PIN
+  inside a test tab). Nothing reaches production: `demoFetch` (top of the script) replaces `window.fetch` and answers
+  `rec_*` tables (small PostgREST emulator `demoPgSelect`), the `recibo` bucket (upload/list/delete/public read), Armado
+  `picks`, `PD_URL` (`demoOrdenes`) and `IR_URL` (`demoIr`, signed PUTs to `demo:`) from memory. Read-only catalogs still come
+  from prod (Masterview, Sorting Hub, `recibo/config/*` when not written in the test). Any other write to Supabase or the
+  bridges gets 403. `localStorage` is replaced by an in-memory `MemStorage` (refuses to start if the browser won't allow it);
+  IndexedDB uses `mr_factura_demo`. State survives a reload in this tab's sessionStorage (`mr_demo_{seed}`), dies with the tab.
+- `demoGenerar` (near BOOT) builds four deliveries from the seed + Masterview (products sold in every city): CH Abarrotes
+  (CSV + picks: menos/más/no llegó/fecha corta/dañada/sin código/no en envío/código desconocido), CH Carnes (Kg within and out
+  of tolerance), «Lácteos Prueba» (1 OC + invoice: de más, no llegó, rechazos, no solicitado, renglón sin identificar, Kg)
+  and «Abarrotes Prueba» (2 OCs, one late, shared product). Same seed = same data on any device.
+- Panel (`PRUEBA` tab on the left edge, `demoRender`): Qué llegó (Escanear → `processScan` like the scanner + a chip with the
+  quantity), what the app should flag, Archivos (envío CSV into `#envio-file`, invoice image into `facAddFiles`), printable
+  list with Code 128 barcodes (`demoC128`, checked with BarcodeDetector), Ajustes (reiniciar / otra semilla / salir).
+- **Keeping it working:** any new network call must go through `fetch` (no XHR/sendBeacon); a new `rec_*` table goes in
+  `DEMO.st.tables`, a new bucket or bridge needs a branch in `demoFetch`; new IndexedDB names need a demo variant. New
+  features are tested by adding a planted case to `demoGenerar` and its `espera` line.
+
 ## How the code is laid out (index.html)
 - Helpers copied from armado-CH sit at the top, each block labelled. Our additions: `codeKey` (cleanBC + strip
   inner spaces + bcKey — one export has `083078 003623`), `skuKeyOf`, `presentacion`/`nameHtml`, `familyKey` (§7.2).

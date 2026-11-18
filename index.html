@@ -485,6 +485,140 @@ const BUCKET = 'recibo';                    // ours
 const SORTING_BUCKET = 'sorting-hub';       // read-only: sorting/{slug}/*
 const MV_BASE = `${SB_URL}/storage/v1/object/public/masterview/`; // shared catalog, read-only: latest.json, version.txt
 
+/* ════════════════════════════════════════════════════════════════════════════════════
+   MODO PRUEBA (?demo={semilla}) — the whole app runs unchanged against a fake backend in this tab's memory.
+   Everything that leaves the page goes through window.fetch, so this one shim is the only switch: rec_* tables,
+   the 'recibo' bucket, Armado picks, the supplier-order bridge and Invoice Reader answer from memory; read-only
+   catalogs (Masterview, Sorting Hub, recibo/config/*) still come from production. Any other write to Supabase or
+   the bridges is refused. localStorage is swapped for an in-memory copy (the real outbox and mirrors are never
+   seen), IndexedDB uses its own database. State survives a reload in sessionStorage (this tab only) and dies
+   with the tab. The fake data is built at boot from Masterview (demoGenerar, near the end of the script).
+   ════════════════════════════════════════════════════════════════════════════════════ */
+const DEMO=(()=>{
+  const m=/[?&]demo=([A-Za-z0-9-]{1,20})/.exec(location.search); if(!m) return null;
+  const seed=m[1], key='mr_demo_'+seed;
+  let ss=null; try{ ss=window.sessionStorage; }catch(_){}
+  let st=null; try{ st=JSON.parse(ss&&ss.getItem(key)||'null'); }catch(_){}
+  if(!st || st.v!==1) st={ v:1, nextId:1, tables:{ rec_events:[], rec_alert_config:[], rec_alerts:[] }, files:{}, ls:{}, hechos:{} };
+  // localStorage → memory. Methods live on the prototype so Object.keys(localStorage) lists only the items, as on a real Storage.
+  function MemStorage(){}
+  MemStorage.prototype.getItem=function(k){ return Object.prototype.hasOwnProperty.call(this,k)?this[k]:null; };
+  MemStorage.prototype.setItem=function(k,v){ this[k]=String(v); DEMO_SAVE(); };
+  MemStorage.prototype.removeItem=function(k){ delete this[k]; DEMO_SAVE(); };
+  MemStorage.prototype.clear=function(){ for(const k of Object.keys(this)) delete this[k]; DEMO_SAVE(); };
+  MemStorage.prototype.key=function(i){ return Object.keys(this)[i]??null; };
+  Object.defineProperty(MemStorage.prototype,'length',{ get(){ return Object.keys(this).length; } });
+  const mem=Object.assign(new MemStorage(), st.ls);
+  try{ Object.defineProperty(window,'localStorage',{ value:mem, configurable:true, writable:false }); }catch(_){}
+  let ok=false; try{ ok=window.localStorage===mem; }catch(_){}
+  if(!ok){ // never run a fake reception on top of the real storage
+    document.addEventListener('DOMContentLoaded',()=>{ document.body.innerHTML='<p style="padding:24px;font:16px sans-serif">Este navegador no permite el modo prueba. <a href="'+location.pathname+'">Volver</a></p>'; });
+    throw new Error('Modo prueba no disponible en este navegador');
+  }
+  return { seed, key, st, mem, ss, realFetch:window.fetch.bind(window), data:null, ready:null, _ready:null };
+})();
+let _demoSaveT=null;
+function DEMO_SAVE(){
+  if(!DEMO) return;
+  clearTimeout(_demoSaveT);
+  _demoSaveT=setTimeout(()=>{ if(!DEMO.st) return; DEMO.st.ls=Object.assign({}, DEMO.mem); try{ DEMO.ss&&DEMO.ss.setItem(DEMO.key, JSON.stringify(DEMO.st)); }catch(_){} }, 250);
+}
+if(DEMO){
+  DEMO.ready=new Promise(r=>{ DEMO._ready=r; });
+  window.addEventListener('pagehide', ()=>{ clearTimeout(_demoSaveT); if(!DEMO.st) return; DEMO.st.ls=Object.assign({}, DEMO.mem); try{ DEMO.ss.setItem(DEMO.key, JSON.stringify(DEMO.st)); }catch(_){} });
+  window.fetch=demoFetch;
+}
+function demoRes(body, status=200, type='application/json'){
+  return new Response(body==null?null:(typeof body==='string'?body:JSON.stringify(body)), { status, headers:{ 'Content-Type':type } });
+}
+async function demoBodyText(b){ if(b==null) return ''; if(typeof b==='string') return b; if(b.text) return await b.text(); return String(b); }
+async function demoFetch(input, init={}){
+  const url=typeof input==='string'?input:input.url, method=String(init.method||'GET').toUpperCase();
+  await new Promise(r=>setTimeout(r, 60+Math.random()*120)); // a little latency, so loaders and «Subiendo…» show
+  if(url.startsWith(SB_URL+'/rest/v1/')){
+    if(method==='HEAD') return DEMO.realFetch(input, init); // syncClock: the server's Date header
+    const [path, qs='']=url.slice((SB_URL+'/rest/v1/').length).split('?');
+    if(path==='picks'){ await DEMO.ready; return demoRes(demoPgSelect(DEMO.data.picks, qs.replace(/(^|&)hub=[^&]*/,''))); } // any hub gets the fake assembly
+    const T=DEMO.st.tables[path];
+    if(!T) return demoRes({ message:'modo prueba: tabla no disponible' }, 403);
+    if(method==='GET') return demoRes(demoPgSelect(T, qs));
+    if(method==='POST'){
+      const rows=JSON.parse(await demoBodyText(init.body)), oc=new URLSearchParams(qs).get('on_conflict');
+      for(const r of rows){
+        const keys=oc?oc.split(','):null, i=keys?T.findIndex(x=>keys.every(k=>x[k]===r[k])):-1;
+        if(i>=0) T[i]=Object.assign({}, T[i], r);
+        else T.push(Object.assign({ ts:serverNow().toISOString() }, r, { id:DEMO.st.nextId++ }));
+      }
+      DEMO_SAVE(); return demoRes(null, 201);
+    }
+    return demoRes({ message:'modo prueba: no permitido' }, 403);
+  }
+  if(url.startsWith(SB_URL+'/storage/v1/')){
+    const rest=url.slice((SB_URL+'/storage/v1/').length).split('?')[0];
+    const F=DEMO.st.files;
+    if(rest==='object/list/'+BUCKET && method==='POST'){
+      const b=JSON.parse(await demoBodyText(init.body)); let pre=b.prefix||''; if(pre && !pre.endsWith('/')) pre+='/';
+      const out=new Map();
+      for(const p of Object.keys(F)) if(p.startsWith(pre)){
+        const r=p.slice(pre.length), dir=r.indexOf('/');
+        if(dir>=0){ const n=r.slice(0,dir); if(!out.has(n)) out.set(n,{ name:n, id:null }); }
+        else out.set(r,{ name:r, id:'demo-'+r, created_at:F[p].t, updated_at:F[p].t, metadata:{ size:F[p].text.length, mimetype:F[p].type } });
+      }
+      return demoRes([...out.values()].sort((a,b)=>a.name<b.name?1:-1).slice(0, b.limit||100));
+    }
+    if(rest.startsWith('object/public/'+BUCKET+'/')){
+      const p=decodeURIComponent(rest.slice(('object/public/'+BUCKET+'/').length));
+      if(F[p]) return demoRes(F[p].text, 200, F[p].type);
+      if(p.startsWith('config/')) return DEMO.realFetch(input, init); // receptores, slack tags, PIN: read-only
+      return demoRes({ error:'not_found' }, 400);
+    }
+    if(rest.startsWith('object/public/')) return DEMO.realFetch(input, init); // sorting-hub, masterview
+    if(rest.startsWith('object/'+BUCKET+'/') && method==='POST'){
+      const p=decodeURIComponent(rest.slice(('object/'+BUCKET+'/').length)), h=init.headers||{};
+      F[p]={ text:await demoBodyText(init.body), type:String(h['Content-Type']||'text/plain'), t:serverNow().toISOString() };
+      DEMO_SAVE(); return demoRes({ Key:BUCKET+'/'+p });
+    }
+    if(rest==='object/'+BUCKET && method==='DELETE'){
+      const b=JSON.parse(await demoBodyText(init.body)); for(const p of (b.prefixes||[])) delete F[p];
+      DEMO_SAVE(); return demoRes([]);
+    }
+    return demoRes({ message:'modo prueba: no permitido' }, 403);
+  }
+  if(typeof PD_URL!=='undefined' && PD_URL && url.startsWith(PD_URL)){ await DEMO.ready; return demoRes(demoOrdenes(new URL(url).searchParams)); }
+  if(typeof IR_URL!=='undefined' && url.startsWith(IR_URL)){ await DEMO.ready; return demoRes(await demoIr(JSON.parse(await demoBodyText(init.body)))); }
+  if(url.startsWith('demo:')) return demoRes(null, 200); // Invoice Reader's signed upload URLs
+  if(/script\.google\.com|invoicereader/.test(url)) return demoRes({ error:'modo prueba' }, 403);
+  return DEMO.realFetch(input, init); // the app's own files, CDNs
+}
+// A small PostgREST: eq/neq/gt/gte/lt/lte/like/in/is (+not.), json paths a->b / a->>b, select, order, limit, offset.
+function demoPgSelect(rows, qs){
+  const P=new URLSearchParams(qs); let out=rows.slice();
+  const val=(r,k)=>{ const m=/^(\w+)->(>?)(\w+)$/.exec(k); if(!m) return r[k]; const o=r[m[1]]; const v=o==null?undefined:o[m[3]]; return m[2]&&v!=null?String(v):v; };
+  const cmp=(a,b)=>{ if(typeof a==='number') return a-Number(b); a=String(a); return a<b?-1:a>b?1:0; };
+  for(const [k,raw] of P){
+    if(['select','order','limit','offset','on_conflict'].includes(k)) continue;
+    const m=/^(not\.)?(eq|neq|gt|gte|lt|lte|like|ilike|in|is)\.([\s\S]*)$/.exec(raw); if(!m) continue;
+    const [,neg,op,arg]=m;
+    const test=r=>{ const v=val(r,k);
+      if(op==='is') return arg==='null' ? v==null : String(v)===arg;
+      if(v==null) return false;
+      if(op==='eq') return String(v)===arg;
+      if(op==='neq') return String(v)!==arg;
+      if(op==='gt') return cmp(v,arg)>0; if(op==='gte') return cmp(v,arg)>=0;
+      if(op==='lt') return cmp(v,arg)<0; if(op==='lte') return cmp(v,arg)<=0;
+      if(op==='like'||op==='ilike') return new RegExp('^'+arg.split('*').map(s=>s.replace(/[.+?^${}()|[\]\\%]/g,'\\$&')).join('.*')+'$', op==='ilike'?'i':'').test(String(v));
+      if(op==='in') return arg.replace(/^\(|\)$/g,'').split(',').map(s=>s.replace(/^"|"$/g,'')).includes(String(v));
+      return true; };
+    out=out.filter(r=>neg?!test(r):test(r));
+  }
+  const ord=P.get('order');
+  if(ord){ const keys=ord.split(',').map(s=>s.split('.')); out.sort((a,b)=>{ for(const [k,d] of keys){ const c=a[k]==null?-1:b[k]==null?1:cmp(a[k],b[k]); if(c) return d==='desc'?-c:c; } return 0; }); }
+  const off=Number(P.get('offset')||0), lim=P.get('limit'); out=out.slice(off, lim!=null?off+Number(lim):undefined);
+  const sel=P.get('select');
+  if(sel && sel!=='*'){ const cols=sel.split(','); out=out.map(r=>{ const o={}; for(const c of cols) o[c]=r[c]; return o; }); }
+  return JSON.parse(JSON.stringify(out));
+}
+
 const HUBS = [
   { name:'MH Contry',      slug:'mh-contry' },
   { name:'MH Cumbres',     slug:'mh-cumbres' },
@@ -497,7 +631,7 @@ const HUBS = [
 // Local runs write to production (CLAUDE.md). On localhost a 'test-hub' is offered so every test write is
 // isolated; it reads MH Contry's sorting so cards still show real basket letters.
 const IS_LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
-if (IS_LOCAL) HUBS.push({ name:'Test hub (local)', slug:'test-hub' });
+if (IS_LOCAL && !/[?&]demo=/.test(location.search)) HUBS.push({ name:'Test hub (local)', slug:'test-hub' }); // modo prueba writes nothing: no test-hub needed
 const SORTING_SLUG = { 'test-hub':'mh-contry' };
 // §6.2b "Empezar sin archivo" — built (Phase 2) but switched off: receptors would get used to scanning before
 // uploading and miss the real-time flags. Kept for emergencies / a future version.
@@ -1121,7 +1255,7 @@ const PD_URL='https://script.google.com/macros/s/AKfycbyRm-_zx8282SNSSNDNi5LK7NF
 // and returns no phone numbers (decision 2026-11-13).
 const PD_TOKEN='9306d8e2e82845304cabcfec4d8b87602365f808';
 // Localhost reads the gitignored fixture unless ?pdlive=1 (and PD_URL is set). test-hub borrows MH Contry's orders.
-const PD_FIXTURE = IS_LOCAL && (!PD_URL || !/[?&]pdlive=1/.test(location.search));
+const PD_FIXTURE = IS_LOCAL && !DEMO && (!PD_URL || !/[?&]pdlive=1/.test(location.search));
 const PD_HUB={ 'test-hub':'mh-contry' };
 const PD_NAMES={}; // 'pd-lala' → 'LALA' (filled from every read; areaName uses it)
 function provSlug(name){ return normName(name).replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || 'proveedor'; }
@@ -3762,7 +3896,7 @@ function facMismoProveedor(a, b){
    ════════════════════════════════════════════════════════════════════════════════════ */
 const IR_URL='https://invoicereader.joseromero.co/api/recepcion';
 // CORS only lets https://mh-recibo.joseromero.co in, so localhost uses a stub fed by fixtures/factura_stub.json
-const IR_LOCAL = IS_LOCAL && !/[?&]irlive=1/.test(location.search);
+const IR_LOCAL = IS_LOCAL && !DEMO && !/[?&]irlive=1/.test(location.search);
 const FAC_MAX=8, FAC_PX=2576, FAC_Q=0.85, FAC_POLL_MS=4000, FAC_HORAS=24;
 const FAC={}; // session_id → { sid, hub, fotos:[Blob], urls:[], estado, documentId, subido, error, reads, poll, esperando, busy }
 let FACV=null; // closed-view box: { info, lines, saved, savedLocal, lista, elegida, picks, ack, cambiando, manual, error, saving }
@@ -3795,7 +3929,7 @@ async function irStub(b){
 }
 
 /* ── Photos waiting to be sent live in IndexedDB, so a reload or a lost signal never loses them ── */
-function facDb(){ return new Promise((ok,ko)=>{ const r=indexedDB.open('mr_factura', 1); r.onupgradeneeded=()=>r.result.createObjectStore('fotos'); r.onsuccess=()=>ok(r.result); r.onerror=()=>ko(r.error); }); }
+function facDb(){ return new Promise((ok,ko)=>{ const r=indexedDB.open(DEMO?'mr_factura_demo':'mr_factura', 1); r.onupgradeneeded=()=>r.result.createObjectStore('fotos'); r.onsuccess=()=>ok(r.result); r.onerror=()=>ko(r.error); }); }
 async function facIdb(mode, fn){
   try{ const db=await facDb(); return await new Promise((ok,ko)=>{ const tx=db.transaction('fotos', mode), req=fn(tx.objectStore('fotos')); tx.oncomplete=()=>ok(req&&req.result); tx.onerror=()=>ko(tx.error); }); }
   catch(_){ return undefined; }
@@ -4188,7 +4322,7 @@ function facGuardarManual(){ const m=String(FACV.motivo||'').trim(); if(!m || m=
    ADMIN (§6.8) + ALERTAS (§6.9). PIN read from recibo/config/admin_pin.txt, kept in memory for this visit
    only. No hard deletes: every admin action on a reception is itself an event (tipo='admin').
    ════════════════════════════════════════════════════════════════════════════════════ */
-const ADM={ ok:false, tab:'recep', hub:'mh-contry', area:'abarrotes', alertCount:0 };
+const ADM={ ok:!!DEMO, tab:'recep', hub:'mh-contry', area:'abarrotes', alertCount:0 };
 const ADM_HUBS=()=>HUBS.filter(h=>h.slug!=='test-hub' || IS_LOCAL);
 const DIAS=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
 async function pgUpsert(table, rows, onConflict){
@@ -4228,10 +4362,10 @@ async function admLogin(){
 }
 function admTab(t){ ADM.tab=t; renderAdmin(); }
 async function renderAdmin(){
-  const tabs=[['recep','Recepciones'],['cal','Calendario'],['prov','Proveedores'],['resp','Respaldos'],['recept','Receptores'],['codigos','Códigos'],['slack','Slack'],['alert',`Alertas${ADM.alertCount?' ('+ADM.alertCount+')':''}`]];
+  const tabs=[['recep','Recepciones'],['cal','Calendario'],['prov','Proveedores'],['resp','Respaldos'],['recept','Receptores'],['codigos','Códigos'],['slack','Slack'],['alert',`Alertas${ADM.alertCount?' ('+ADM.alertCount+')':''}`],['demo','Modo prueba']];
   document.getElementById('admin-body').innerHTML=`<div class="tabs">${tabs.map(([k,n])=>`<button class="choice ${ADM.tab===k?'sel':''}" onclick="admTab('${k}')">${n}</button>`).join('')}</div><div id="adm-tab"><div class="muted">Cargando…</div></div>`;
   admAlertCount();
-  try{ await ({ recep:admRecepciones, cal:admCalendario, prov:admProveedores, resp:admRespaldos, recept:admReceptores, codigos:admCodigos, slack:admSlack, alert:admAlertas })[ADM.tab](); }
+  try{ await ({ recep:admRecepciones, cal:admCalendario, prov:admProveedores, resp:admRespaldos, recept:admReceptores, codigos:admCodigos, slack:admSlack, alert:admAlertas, demo:admDemo })[ADM.tab](); }
   catch(e){ document.getElementById('adm-tab').innerHTML=`<div class="err-box">${isNetErr(e)?'Sin conexión.':'Error: '+escapeHtml(e.message)}</div>`; }
 }
 async function admAlertCount(){
@@ -4811,6 +4945,315 @@ function closeCamera(){
   if(wasOpen) focusScan();
 }
 
+/* ════════════════════════════════════════════════════════════════════════════════════
+   MODO PRUEBA — fake data and the test panel. The backend shim is at the top of the script (DEMO, demoFetch).
+   One seed = the same deliveries on every device (built from Masterview), so a laptop can show the printable
+   list while a phone scans it. Four deliveries: CH Abarrotes and Carnes (envío CSV + Armado picks) and two suppliers
+   (orders from the fake bridge + an invoice the fake Invoice Reader reads). Each one plants known differences;
+   the panel lists what arrived and what the app should flag.
+   ════════════════════════════════════════════════════════════════════════════════════ */
+function demoHash(s){ let h=2166136261; for(const c of String(s)) h=Math.imul(h^c.charCodeAt(0),16777619); return h>>>0; }
+function demoRng(seed){ let a=seed>>>0; return ()=>{ a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+const DEMO_CARNE=/\b(res|cerdo|pollo|pechuga|arrachera|carne|bistec|molida|chuleta|salmon|queso|jamon|tocino|chorizo|salchicha|pavo|camaron|pescado|filete|costilla|pierna)\b/;
+const DEMO_HEAD=['Producto','Proveedor','Código de barras','SKU proveedor','Temp','Posición inventario','Tiers','Vida anaquel proveedores (min. días)','Vida anaquel proveedores (min. fecha)','Vida anaquel usuarios (min. días)','Vida anaquel usuarios (min. fecha)','Categoría','Kg/Pz','Actualización recepción','Registrado por','Nro. de unidades','Notas','Posición armado','Unidad','Peso neto o piezas por unidad','Envío (nro. de unidades)','Actualización envío','Envío (peso neto o piezas por unidad)','Solicitud','Compra','Envío registrado por','Recepción (kg o pz)','Recepción - Envío (#)','Recepción - Envío (%)','Envío (kg o pz)','Requiere confirmar','Recepción - Compra (#)','Recepción - Compra (%)','¿Discrepancia envío?','¿Discrepancia compra?'];
+function demoGenerar(){
+  const rnd=demoRng(demoHash(DEMO.seed)), int=(a,b)=>a+Math.floor(rnd()*(b-a+1));
+  const hoy=todayStr(), ayer=addDaysStr(hoy,-1);
+  // Products: Masterview barcodes with a name and a photo (no variable-weight 2… codes), shuffled by the seed
+  const seen=new Set(); let pool=[];
+  for(const k of Object.keys(S.imgDb).sort()){
+    if(!/^\d{8,13}$/.test(k) || /^2\d{12}$/.test(k)) continue;
+    const e=S.imgDb[k], n=imgName(e); if(!n || !imgUrl(e) || (e.c && e.c.length<4)) continue; // sold in every city: no «no se vende en» noise
+    const nn=normName(n); if(seen.has(nn)) continue; seen.add(nn); pool.push({ code:k, producto:String(n).trim() });
+  }
+  if(pool.length<60) pool=Array.from({ length:60 }, (_,i)=>({ code:String(7500000000000+i*97+13), producto:`Producto de prueba ${i+1} 500g` }));
+  for(let i=pool.length-1;i>0;i--){ const j=Math.floor(rnd()*(i+1)); [pool[i],pool[j]]=[pool[j],pool[i]]; }
+  const carne=pool.filter(p=>DEMO_CARNE.test(normName(p.producto))), usados=new Set();
+  const take=(n, from=pool)=>{ const out=[]; for(const p of from){ if(out.length>=n) break; if(!usados.has(p.code)){ usados.add(p.code); out.push(p); } }
+    for(const p of pool){ if(out.length>=n) break; if(!usados.has(p.code)){ usados.add(p.code); out.push(p); } } return out; };
+  const it=(p, o)=>Object.assign({ id:p.code||normName(p.producto), code:p.code, producto:p.producto, kgpz:'Pz' }, o);
+  const ent={};
+
+  /* ── CH Abarrotes: 13 lines (one without barcode) + 6 catalog rows; Armado picks from yesterday ── */
+  {
+    const L=take(13).map((p,i)=>({ ...p, kgpz:'Pz', esperado:int(1,8)+(i<5?2:0), vida:[7,14,30][int(0,2)], temp:'Ambiente' }));
+    L[5].sinCodigo=true; const cat=take(6);
+    const items=[], espera=[];
+    L.forEach((l,i)=>{
+      const code=l.sinCodigo?null:l.code;
+      if(i===0){ items.push(it(l,{ code, llego:l.esperado-2, tipo:'menos' })); espera.push(`${l.producto}: llegaron 2 menos (Armado = enviado → «Faltante: armado o traslado»)`); }
+      else if(i===1){ items.push(it(l,{ code, llego:l.esperado+1, tipo:'mas' })); espera.push(`${l.producto}: llegó 1 de más (Armado = recibido → «Error de captura en CH»)`); }
+      else if(i===2){ items.push(it(l,{ code, llego:0, tipo:'nollego' })); espera.push(`${l.producto}: no llegó (aparece en Pendientes / Resumen como faltante)`); }
+      else if(i===3){ items.push(it(l,{ code, llego:l.esperado, tipo:'fecha_corta', nota:'2 con fecha corta' })); espera.push(`${l.producto}: 2 piezas con fecha corta (se reciben y van a merma)`); }
+      else if(i===4){ items.push(it(l,{ code, llego:l.esperado, tipo:'danadas', nota:'1 dañada' })); espera.push(`${l.producto}: 1 dañada (se recibe y va a merma)`); }
+      else if(i===5){ items.push(it(l,{ code:null, llego:l.esperado, tipo:'sin_codigo', nota:'Sin etiqueta: búscalo con «Sin código»' })); espera.push(`${l.producto}: no trae código, se registra con «Sin código»`); }
+      else items.push(it(l,{ code, llego:l.esperado, tipo:'ok' }));
+    });
+    items.push(it(cat[0],{ llego:2, tipo:'no_envio', nota:'No viene en el envío' })); espera.push(`${cat[0].producto}: llegó sin venir en el envío (aviso «no viene en el envío»)`);
+    let desc; do{ desc='750'+String(int(1000000000,9999999999)); }while(S.imgDb[bcKey(desc)]);
+    items.push({ id:desc, code:desc, producto:'Producto sin registro', kgpz:'Pz', llego:1, tipo:'desconocido', nota:'Código que nadie conoce' }); espera.push(`Código ${desc}: «Código no reconocido»`);
+    const row=(l, envio)=>{ const r={}; DEMO_HEAD.forEach(h=>r[h]='');
+      Object.assign(r,{ 'Producto':l.producto, 'Código de barras':l.sinCodigo?'':l.code, 'Temp':l.temp||'Ambiente', 'Vida anaquel usuarios (min. días)':String(l.vida||14),
+        'Categoría':'Prueba', 'Kg/Pz':l.kgpz||'Pz', 'Envío (kg o pz)':String(envio), 'Actualización envío':ayer+'T19:30:00.000-06:00',
+        'Envío registrado por':'prueba@calii', 'Requiere confirmar':'true', '¿Discrepancia envío?':'false', '¿Discrepancia compra?':'false' }); return r; };
+    const csv=Papa.unparse({ fields:DEMO_HEAD, data:[...L.map(l=>row(l,l.esperado)), ...cat.map(c=>row(c,0))].map(r=>DEMO_HEAD.map(h=>r[h])) });
+    const picks=L.map((l,i)=>({ id:i+1, sku_key:l.sinCodigo?'norm:'+normName(l.producto):l.code, cantidad:i===1?l.esperado+1:l.esperado, ronda:1, order_date:ayer, unidad:'pz' }));
+    ent.ab={ key:'ab', titulo:'CH · Abarrotes', area:'abarrotes', csv, archivo:`envio_prueba_abarrotes_${hoy}.csv`, items, espera, picks,
+      como:'Inicio → <b>CH Guadalupe</b> → cualquier hub → <b>Abarrotes</b> → en «Cargar envío» usa <b>Archivos → Cargar en la app</b>.' };
+  }
+  /* ── CH Carnes: 7 lines, 3 weighed ── */
+  {
+    const L=take(7, carne).map((p,i)=>({ ...p, kgpz:i<3?'Kg':'Pz', esperado:i<3?round2(1.5+rnd()*3):int(2,6), vida:7, temp:i%2?'Congelado':'Refrigerado' }));
+    const items=[], espera=[];
+    L.forEach((l,i)=>{
+      if(i===0){ items.push(it(l,{ kgpz:'Kg', llego:round2(l.esperado+0.04), tipo:'ok', nota:'Báscula: +0.04 kg (dentro de tolerancia)' })); espera.push(`${l.producto}: +0.04 kg, dentro de tolerancia`); }
+      else if(i===1){ items.push(it(l,{ kgpz:'Kg', llego:round2(l.esperado-0.45), tipo:'menos', nota:'Pesó 0.45 kg menos' })); espera.push(`${l.producto}: 0.45 kg menos (diferencia)`); }
+      else if(i===2) items.push(it(l,{ kgpz:'Kg', llego:l.esperado, tipo:'ok' }));
+      else if(i===3){ items.push(it(l,{ llego:l.esperado-1, tipo:'menos' })); espera.push(`${l.producto}: 1 pieza menos`); }
+      else if(i===4){ items.push(it(l,{ llego:l.esperado, tipo:'fecha_corta', nota:'1 con fecha corta' })); espera.push(`${l.producto}: 1 con fecha corta`); }
+      else items.push(it(l,{ llego:l.esperado, tipo:'ok' }));
+    });
+    const row=l=>{ const r={}; DEMO_HEAD.forEach(h=>r[h]='');
+      Object.assign(r,{ 'Producto':l.producto, 'Código de barras':l.code, 'Temp':l.temp, 'Vida anaquel usuarios (min. días)':'7', 'Categoría':'Prueba', 'Kg/Pz':l.kgpz,
+        'Envío (kg o pz)':String(l.esperado), 'Actualización envío':ayer+'T19:30:00.000-06:00', 'Envío registrado por':'prueba@calii', 'Requiere confirmar':'true' }); return DEMO_HEAD.map(h=>r[h]); };
+    ent.ca={ key:'ca', titulo:'CH · Carnes', area:'carnes', csv:Papa.unparse({ fields:DEMO_HEAD, data:L.map(row) }), archivo:`envio_prueba_carnes_${hoy}.csv`, items, espera, picks:[],
+      como:'Inicio → <b>CH Guadalupe</b> → cualquier hub → <b>Carnes</b> → en «Cargar envío» usa <b>Archivos → Cargar en la app</b>. Las de Kg: escribe el peso que dice la lista.' };
+  }
+  /* ── Suppliers: orders for the fake bridge + the invoice the fake Invoice Reader returns ── */
+  const oc=()=>'OC-PRB-'+int(10000,99999), cad=d=>addDaysStr(hoy,d);
+  const linea=(p,i,o)=>Object.assign({ codigo:p.code, sku_marca:'SM'+(100+i), producto:p.producto, kgpz:'Pz', pedido:int(4,12), caducidad_min:cad(int(10,40)), temp:'4' }, o);
+  const invRow=(n, l, piezas, o)=>Object.assign({ sourceRow:n, sku:l.sku_marca, productName:l.producto, matchedBy:'barcode', confident:true, piezas, quantityOk:true,
+    printedCodes:[{ header:'CODIGO', value:l.codigo }], printedDescription:String(l.producto).toUpperCase(), printedQuantities:[], printedUnit:l.kgpz==='Kg'?'KG':'PZ',
+    candidates:[], notes:[], matchKeys:[facNormCode(l.codigo), facNormCode(l.sku_marca)] }, o);
+  const ordenes=[], catalogo=[], invoices=[];
+  {
+    const prov='Lácteos Prueba', ls=take(9).map((p,i)=>linea(p,i, i===8?{ kgpz:'Kg', pedido:3.5 }:{})), ns=take(1)[0];
+    const o={ num_oc:oc(), proveedor:prov, fecha_entrega:hoy, comercial:'Ana Prueba', comprador:'Luis Prueba', lineas:ls }; ordenes.push(o);
+    catalogo.push({ proveedor:prov, codigo:ns.code, producto:ns.producto, kgpz:'Pz' });
+    const items=[], espera=[];
+    ls.forEach((l,i)=>{
+      const p={ code:l.codigo, producto:l.producto };
+      if(i===1){ items.push(it(p,{ llego:l.pedido-3, tipo:'menos', nota:`Llegaron 3 menos (pedido ${l.pedido})` })); espera.push(`${l.producto}: faltan 3`); }
+      else if(i===2){ items.push(it(p,{ llego:l.pedido+2, tipo:'mas', nota:'2 de más: se separan para rechazo' })); espera.push(`${l.producto}: 2 de excedente`); }
+      else if(i===3){ items.push(it(p,{ llego:l.pedido, tipo:'rechazo', nota:'Rechaza 2 por fecha corta' })); espera.push(`${l.producto}: rechazo de 2 (fecha corta)`); }
+      else if(i===4){ items.push(it(p,{ llego:0, tipo:'nollego' })); espera.push(`${l.producto}: no llegó`); }
+      else if(i===5){ items.push(it(p,{ llego:l.pedido, tipo:'rechazo', nota:'Rechaza 1 dañada' })); espera.push(`${l.producto}: rechazo de 1 (dañada)`); }
+      else if(i===8) items.push(it(p,{ kgpz:'Kg', llego:3.55, tipo:'ok', nota:'Pesó 3.55 kg' }));
+      else items.push(it(p,{ llego:l.pedido, tipo:'ok' }));
+    });
+    items.push(it(ns,{ llego:3, tipo:'no_envio', nota:'No viene en la orden: se rechaza' })); espera.push(`${ns.producto}: no solicitado (3)`);
+    const rows=ls.map((l,i)=>invRow(i+1, l, i===2?l.pedido+2:i===8?4:l.pedido));
+    rows.push(invRow(rows.length+1, { codigo:ns.code, sku_marca:'SM900', producto:ns.producto }, 3));
+    rows.push({ sourceRow:rows.length+1, sku:null, productName:null, matchedBy:null, confident:false, piezas:1, quantityOk:true, printedCodes:[{ header:'CODIGO', value:'EXH-01' }],
+      printedDescription:'EXHIBIDOR PROMOCIONAL', printedQuantities:[], printedUnit:'PZ', candidates:[], notes:[], matchKeys:['EXH01'] });
+    espera.push('Factura: cobra 2 de más, cobra lo que no llegó (3 + la línea que no llegó), un no solicitado, un renglón sin identificar y la línea en Kg por revisar');
+    invoices.push({ area:pdArea(prov), read_id:'demo-fac-lacteos', rec:{ supplier:prov, printed_supplier:'LACTEOS PRUEBA SA DE CV', reference:'F-'+int(10000,99999), totals_ok:true, warnings:[], rows } });
+    ent.pa={ key:'pa', titulo:prov, prov, items, espera, como:'Inicio → <b>Proveedor directo</b> → cualquier hub → <b>'+prov+'</b> → marca la orden → Empezar recepción.' };
+  }
+  {
+    const prov='Abarrotes Prueba', ls1=take(5).map((p,i)=>linea(p,i,{ temp:'24' })), ls2=take(3).map((p,i)=>linea(p,i+5,{ temp:'24' }));
+    ls2.unshift(linea({ code:ls1[0].codigo, producto:ls1[0].producto }, 0, { temp:'24', pedido:2 }));
+    ordenes.push({ num_oc:oc(), proveedor:prov, fecha_entrega:hoy, comercial:'Ana Prueba', comprador:'Marta Prueba', lineas:ls1 });
+    ordenes.push({ num_oc:oc(), proveedor:prov, fecha_entrega:addDaysStr(hoy,-2), comercial:'Ana Prueba', comprador:'Marta Prueba', lineas:ls2 });
+    const tot=new Map(); for(const l of [...ls1,...ls2]) tot.set(l.codigo, (tot.get(l.codigo)||0)+l.pedido);
+    const items=[], espera=['Si marcas las dos órdenes: el primer producto viene en ambas y se suma'];
+    [...tot.keys()].forEach((code,i)=>{
+      const l=[...ls1,...ls2].find(x=>x.codigo===code), p={ code, producto:l.producto }, n=tot.get(code);
+      if(i===2){ items.push(it(p,{ llego:n-1, tipo:'menos', nota:'Llegó 1 menos' })); espera.push(`${l.producto}: falta 1`); }
+      else if(i===6){ items.push(it(p,{ llego:0, tipo:'nollego', nota:'Solo de la orden atrasada' })); espera.push(`${l.producto}: no llegó (orden atrasada)`); }
+      else items.push(it(p,{ llego:n, tipo:'ok' }));
+    });
+    const all=[...ls1,...ls2]; let n=0;
+    const rows=all.map(l=>invRow(++n, l, l===ls1[3]?l.pedido+1:l.pedido));
+    espera.push(`Factura: cobra 1 de más de ${ls1[3].producto} y cobra lo que no llegó`);
+    invoices.push({ area:pdArea(prov), read_id:'demo-fac-abarrotes', rec:{ supplier:prov, printed_supplier:'ABARROTES PRUEBA SA DE CV', reference:'A-'+int(10000,99999), totals_ok:false,
+      warnings:['El total impreso no coincide con la suma de renglones.'], rows } });
+    ent.pb={ key:'pb', titulo:prov, prov, items, espera, como:'Inicio → <b>Proveedor directo</b> → cualquier hub → <b>'+prov+'</b> → marca <b>las dos órdenes</b> (una está atrasada) → Empezar recepción.' };
+  }
+  const contactos={ 'Lácteos Prueba':{ comercial:'Ana Prueba', comprador:'Luis Prueba' }, 'Abarrotes Prueba':{ comercial:'Ana Prueba', comprador:'Marta Prueba' } };
+  DEMO.data={ ent, picks:ent.ab.picks, invoices, bridge:{ ordenes, catalogo, contactos, proveedores:['Abarrotes Prueba','Lácteos Prueba','Proveedor Sin Orden'], avisos:[] } };
+  DEMO._ready();
+}
+// The order bridge (proveedor/apps-script.gs) answers {leido, ordenes, contactos, proveedores, catalogo, avisos}
+function demoOrdenes(q){
+  const B=DEMO.data.bridge, prov=q.get('proveedor');
+  const d=JSON.parse(JSON.stringify(Object.assign({ leido:serverNow().toISOString() }, B)));
+  if(prov){ d.ordenes=d.ordenes.filter(o=>sameName(o.proveedor, prov)); d.catalogo=d.catalogo.filter(c=>sameName(c.proveedor, prov)); }
+  return d;
+}
+// Invoice Reader's /api/recepcion: start → PUT pages → submit → read (processing ~5 s, then the planted invoice); list; photos
+function demoInvDe(sid){ const a=String(sid||'').split('__')[1]; return DEMO.data.invoices.find(v=>v.area===a) || DEMO.data.invoices[0]; }
+async function demoIr(b){
+  const docs=DEMO.st.irDocs||(DEMO.st.irDocs=[]), hoy=todayStr();
+  if(b.action==='start'){ const id='demo-doc-'+Date.now().toString(36); docs.unshift({ id, sid:b.sessionId, t:null }); DEMO_SAVE();
+    return { documentId:id, uploads:Array.from({ length:b.photoCount }, (_,i)=>({ page:i+1, signedUrl:'demo:put', token:'', path:'' })) }; }
+  if(b.action==='submit'){ const d=docs.find(x=>x.id===b.documentId); if(d){ d.t=Date.now(); DEMO_SAVE(); } return { status:'queued' }; }
+  if(b.action==='read') return { reads:docs.filter(d=>d.sid===b.sessionId && d.t).map(d=>{ const done=Date.now()-d.t>=5000;
+    return Object.assign({ read_id:d.id, status:done?'done':'processing', error:null, invoice_date:hoy, external_ref:d.sid }, done?JSON.parse(JSON.stringify(demoInvDe(d.sid).rec)):{ rows:[], warnings:[] }); }) };
+  if(b.action==='list'){ const t=new Date(serverNow().getTime()-40*60000);
+    return { reads:DEMO.data.invoices.map(v=>Object.assign({ read_id:v.read_id, status:'done', error:null, invoice_date:hoy, external_ref:null, purpose:'captura',
+      created_at:t.toISOString(), scanned_by:'Auxiliar de prueba', label:`${v.rec.supplier} · ${v.rec.reference} · ${fechaLarga(hoy)} · ${localHM(t)} · Auxiliar de prueba` }, JSON.parse(JSON.stringify(v.rec)))) }; }
+  if(b.action==='photos'){ const d=docs.find(x=>x.id===b.readId), v=d?demoInvDe(d.sid):(DEMO.data.invoices.find(x=>x.read_id===b.readId)||DEMO.data.invoices[0]);
+    return { photos:[{ page:1, url:demoFacturaUrl(v) }] }; }
+  return { error:'acción desconocida' };
+}
+// A printed-looking invoice, for «Foto de factura» and «Ver foto cargada»
+const _demoFacImg=new Map();
+function demoFacturaUrl(v){
+  if(_demoFacImg.has(v.read_id)) return _demoFacImg.get(v.read_id);
+  const rows=v.rec.rows, W=1240, H=420+rows.length*54+200, c=document.createElement('canvas'); c.width=W; c.height=H;
+  const g=c.getContext('2d'), fit=(t,w)=>{ t=String(t); while(t.length>3 && g.measureText(t).width>w) t=t.slice(0,-2); return t; };
+  g.fillStyle='#fff'; g.fillRect(0,0,W,H); g.fillStyle='#111';
+  g.font='bold 38px sans-serif'; g.fillText(v.rec.printed_supplier, 60, 90);
+  g.font='22px sans-serif'; g.fillText('RFC PRU010101AB1 · Av. Prueba 100, Monterrey, N.L.', 60, 128);
+  g.font='bold 34px sans-serif'; g.fillText('FACTURA', W-330, 90);
+  g.font='24px sans-serif'; g.fillText('Folio: '+v.rec.reference, W-330, 128); g.fillText('Fecha: '+todayStr(), W-330, 162);
+  g.fillText('Cliente: CALII · Entrega en micro hub', 60, 220);
+  g.fillRect(60, 270, W-120, 3); g.font='bold 22px sans-serif';
+  g.fillText('CÓDIGO', 70, 305); g.fillText('DESCRIPCIÓN', 300, 305); g.fillText('CANT.', W-280, 305); g.fillText('UNIDAD', W-170, 305);
+  g.fillRect(60, 322, W-120, 2); g.font='22px sans-serif';
+  let y=362, tot=0;
+  for(const r of rows){ g.fillText(fit((r.printedCodes[0]||{}).value||'', 220), 70, y); g.fillText(fit(r.printedDescription, W-640), 300, y);
+    g.fillText(String(r.piezas), W-280, y); g.fillText(r.printedUnit||'PZ', W-170, y); tot+=Number(r.piezas)||0; y+=54; }
+  g.fillRect(60, y-24, W-120, 2); g.font='bold 24px sans-serif'; g.fillText('Total de renglones: '+rows.length+'   ·   Cantidad total: '+(v.rec.totals_ok?tot:tot+5), 70, y+20);
+  g.font='bold 26px sans-serif'; g.fillStyle='#888'; g.fillText('DOCUMENTO DE PRUEBA — SIN VALOR FISCAL', 60, H-60);
+  const url=c.toDataURL('image/jpeg', .85); _demoFacImg.set(v.read_id, url); return url;
+}
+// Code 128-B, for the printable list (any scanner or the app's camera reads it)
+const C128='212222 222122 222221 121223 121322 131222 122213 122312 132212 221213 221312 231212 112232 122132 122231 113222 123122 123221 223211 221132 221231 213212 223112 312131 311222 321122 321221 312212 322112 322211 212123 212321 232121 111323 131123 131321 112313 132113 132311 211313 231113 231311 112133 112331 132131 113123 113321 133121 313121 211331 231131 213113 213311 213131 311123 311321 331121 312113 312311 332111 314111 221411 431111 111224 111422 121124 121421 141122 141221 112214 112412 122114 122411 142112 142211 241211 221114 413111 241112 134111 111242 121142 121241 114212 124112 124211 411212 421112 421211 212141 214121 412121 111143 111341 131141 114113 114311 411113 411311 113141 114131 311141 411131 211412 211214 211232 2331112'.split(' ');
+function demoC128(text, h=56){
+  const v=[104, ...[...String(text)].map(c=>c.charCodeAt(0)-32)]; let sum=104; for(let i=1;i<v.length;i++) sum+=v[i]*i; v.push(sum%103, 106);
+  let x=12, bars='';
+  for(const n of v){ const w=C128[n]; for(let i=0;i<w.length;i++){ const k=+w[i]; if(i%2===0) bars+=`<rect x="${x}" y="0" width="${k}" height="${h}"/>`; x+=k; } }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${x+12} ${h}" width="${(x+12)*2}" height="${h}" style="max-width:100%"><rect width="100%" height="100%" fill="#fff"/><g fill="#000">${bars}</g></svg>`;
+}
+
+/* ── The test panel ── */
+const DUI={ tab:'llego', ent:'ab', open:false, chipT:null };
+function demoUi(){
+  const st=document.createElement('style');
+  st.textContent=`.demo-frame{position:fixed;inset:0;border:3px solid var(--c-ink);pointer-events:none;z-index:90}
+.demo-pill{position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:91;background:var(--c-ink);color:var(--c-white);border:0;border-radius:0 10px 10px 0;padding:12px 5px;font:800 11px/1 inherit;letter-spacing:.12em;writing-mode:vertical-rl;box-shadow:var(--shadow-pop)}
+.demo-chip{position:fixed;left:50%;top:6px;transform:translateX(-50%);z-index:91;width:max-content;max-width:calc(100% - 24px);box-shadow:var(--shadow-pop);background:var(--c-white);color:var(--c-ink);border:2px solid var(--c-ink);border-radius:var(--r-md);padding:8px 12px;font-size:14px;font-weight:600;display:none}
+.demo-panel{position:fixed;inset:0;z-index:95;background:var(--c-white);display:none;flex-direction:column}
+.demo-panel.open{display:flex}
+.demo-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1.5px solid var(--c-line)}
+.demo-body{flex:1;overflow:auto;padding:12px 16px 80px}
+.demo-row{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--c-line)}
+.demo-row img{width:48px;height:48px;object-fit:contain;border-radius:8px;background:var(--c-white);flex:none}
+.demo-row .noimg{width:48px;height:48px;border-radius:8px;background:var(--c-line);flex:none}
+.demo-row .t{flex:1;min-width:0}.demo-row .n{font-weight:600;font-size:14px;line-height:1.25}
+.demo-row .c{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--c-faint)}
+.demo-row .q{font-weight:800;font-size:15px;white-space:nowrap}
+.demo-row.hecho{opacity:.45}.demo-nota{font-size:13px;color:var(--c-ink);font-weight:600;margin-top:2px}
+.demo-sec{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--c-faint);margin:18px 0 4px}
+.demo-espera li{margin:4px 0;font-size:14px}`;
+  document.head.appendChild(st);
+  const wrap=document.createElement('div');
+  wrap.innerHTML=`<div class="demo-frame"></div><button class="demo-pill" onclick="demoAbrir()">PRUEBA</button><div class="demo-chip" id="demo-chip" onclick="this.style.display='none'"></div>
+    <div class="demo-panel" id="demo-panel"><div class="demo-head"><div style="flex:1;font-weight:800">Modo prueba <span class="muted" style="font-weight:600">· semilla ${escapeHtml(DEMO.seed)} · nada se guarda</span></div>
+    <button class="back" onclick="demoCerrar()">Cerrar</button></div><div class="demo-body" id="demo-body"></div></div>`;
+  document.body.appendChild(wrap);
+  const v=document.getElementById('app-ver'); if(v) v.textContent=APP_VERSION+' · MODO PRUEBA (semilla '+DEMO.seed+')';
+}
+function demoAbrir(){ DUI.open=true; document.getElementById('demo-panel').classList.add('open'); demoRender(); }
+function demoCerrar(){ DUI.open=false; document.getElementById('demo-panel').classList.remove('open'); if(typeof focusScan==='function') focusScan(); }
+function demoRender(){
+  const el=document.getElementById('demo-body'); if(!el) return;
+  if(!DEMO.data){ el.innerHTML='<div class="muted">Preparando los datos de prueba…</div>'; DEMO.ready.then(()=>{ if(DUI.open) demoRender(); }); return; }
+  const tabs=[['llego','Qué llegó'],['archivos','Archivos y factura'],['ajustes','Ajustes']];
+  let h=`<div class="tabs">${tabs.map(([k,n])=>`<button class="choice ${DUI.tab===k?'sel':''}" onclick="DUI.tab='${k}';demoRender()">${n}</button>`).join('')}</div>`;
+  const E=DEMO.data.ent;
+  if(DUI.tab==='llego'){
+    h+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">${Object.values(E).map(e=>`<button class="choice ${DUI.ent===e.key?'sel':''}" style="min-height:0;padding:12px 8px;font-size:14px" onclick="DUI.ent='${e.key}';demoRender()">${escapeHtml(e.titulo)}</button>`).join('')}</div>`;
+    const e=E[DUI.ent], hecho=k=>DEMO.st.hechos[e.key+':'+k];
+    h+=`<div class="info-card" style="margin-top:10px;font-size:14px">${e.como}<br><span class="muted">«Escanear» manda el código como el escáner; la cantidad la escribes tú en la tarjeta.</span></div>`;
+    const row=x=>{ const img=getImgUrl(x.code, x.producto), u=unitOf(x.kgpz);
+      return `<div class="demo-row ${hecho(x.id)?'hecho':''}">${img?`<img src="${escapeHtml(img)}" alt="">`:'<div class="noimg"></div>'}
+        <div class="t"><div class="n">${escapeHtml(x.producto)}</div><div class="c">${x.code?escapeHtml(x.code):'sin código'}</div>${x.nota?`<div class="demo-nota">${escapeHtml(x.nota)}</div>`:''}</div>
+        <div style="text-align:right"><div class="q">${x.llego>0?fmtQty(x.llego,x.kgpz)+' '+u:'—'}</div>
+        ${x.code&&x.llego>0?`<button class="btn btn-secondary" style="margin-top:6px;padding:8px 12px;min-height:0" onclick="demoScan('${e.key}','${escapeHtml(x.id)}')">${hecho(x.id)?'Otra vez':'Escanear'}</button>`:''}</div></div>`; };
+    const llego=e.items.filter(x=>x.llego>0), no=e.items.filter(x=>!(x.llego>0));
+    h+=`<div class="demo-sec">Llegó (${llego.length})</div>`+llego.map(row).join('');
+    if(no.length) h+=`<div class="demo-sec">No llegó · no lo busques</div>`+no.map(row).join('');
+    h+=`<div class="demo-sec">Lo que la app debería marcar</div><ul class="demo-espera">${e.espera.map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ul>`;
+  } else if(DUI.tab==='archivos'){
+    for(const k of ['ab','ca']){ const e=E[k];
+      h+=`<div class="demo-sec">${escapeHtml(e.titulo)} · archivo de envío</div><div class="muted" style="font-size:13px">${escapeHtml(e.archivo)} · ${e.items.filter(x=>x.tipo!=='no_envio'&&x.tipo!=='desconocido').length} productos</div>
+        <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-primary" style="flex:1" onclick="demoCargarEnvio('${k}')">Cargar en la app</button><button class="btn btn-secondary" style="flex:1" onclick="demoBajarEnvio('${k}')">Descargar CSV</button></div>`; }
+    for(const k of ['pa','pb']){ const e=E[k], v=DEMO.data.invoices.find(x=>x.area===pdArea(e.prov));
+      h+=`<div class="demo-sec">${escapeHtml(e.titulo)} · factura ${escapeHtml(v.rec.reference)}</div>
+        <img src="${demoFacturaUrl(v)}" alt="Factura de prueba" style="width:100%;max-width:360px;border:1px solid var(--c-line);border-radius:8px;display:block">
+        <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-primary" style="flex:1" onclick="demoUsarFactura('${k}')">Usar como foto de factura</button><button class="btn btn-secondary" style="flex:1" onclick="demoBajarFactura('${k}')">Descargar imagen</button></div>
+        <div class="muted" style="font-size:13px;margin-top:4px">También aparece ya escaneada en la lista de Invoice Reader al comparar en la recepción cerrada.</div>`; }
+    h+=`<div class="demo-sec">Para escanear con escáner o cámara</div><button class="btn btn-secondary btn-block" onclick="demoImprimir()">Lista con códigos de barras (para imprimir o abrir en otra pantalla)</button>
+      <div class="muted" style="font-size:13px;margin-top:4px">Abre la app en el teléfono con <b>?demo=${escapeHtml(DEMO.seed)}</b> y verás las mismas entregas.</div>`;
+  } else {
+    h+=`<p style="font-size:14px">Todo funciona como en producción, pero lo que se escribe (escaneos, archivos, reportes, cierres, facturas) vive solo en esta pestaña. Catálogos, receptores y posiciones se leen de producción sin cambiarlos.</p>
+      <button class="btn btn-secondary btn-block" style="margin-top:10px" onclick="demoReiniciar(false)">Reiniciar esta prueba (borra lo escaneado)</button>
+      <button class="btn btn-secondary btn-block" style="margin-top:10px" onclick="demoReiniciar(true)">Prueba nueva con otros productos</button>
+      <button class="btn btn-primary btn-block" style="margin-top:10px" onclick="location.href=location.pathname">Salir del modo prueba</button>`;
+  }
+  el.innerHTML=h;
+}
+function demoScan(ek, id){
+  const x=DEMO.data.ent[ek].items.find(i=>i.id===id); if(!x) return;
+  if(!document.getElementById('screen-recibir').classList.contains('active')){ toast('Primero abre la recepción en la pantalla de escanear'); return; }
+  DEMO.st.hechos[ek+':'+id]=true; DEMO_SAVE(); demoCerrar();
+  const chip=document.getElementById('demo-chip');
+  chip.textContent=`Llegaron ${fmtQty(x.llego,x.kgpz)} ${unitOf(x.kgpz)}${x.nota?' · '+x.nota:''}`; chip.style.display='block';
+  clearTimeout(DUI.chipT); DUI.chipT=setTimeout(()=>{ chip.style.display='none'; }, 20000);
+  setTimeout(()=>processScan(x.code, 'scanner'), 120);
+}
+function demoFile(text, name, type){ return new File([text], name, { type }); }
+function demoCargarEnvio(k){
+  const e=DEMO.data.ent[k], inp=document.getElementById('envio-file');
+  if(!document.getElementById('screen-subir').classList.contains('active')){ toast(`Abre «Cargar envío» de ${e.titulo} (CH Guadalupe → hub → ${areaName(e.area)})`, 4000); return; }
+  const dt=new DataTransfer(); dt.items.add(demoFile('﻿'+e.csv, e.archivo, 'text/csv')); inp.files=dt.files;
+  demoCerrar(); inp.dispatchEvent(new Event('change'));
+}
+function demoBajarEnvio(k){ const e=DEMO.data.ent[k]; downloadText(e.archivo, e.csv); }
+async function demoUsarFactura(k){
+  const e=DEMO.data.ent[k], sid=S.session&&S.session.id, f=sid&&FAC[sid];
+  if(!f || !S.area || S.area!==pdArea(e.prov)){ toast(`Abre la recepción de ${e.prov} (escanear o resumen) primero`, 4000); return; }
+  const v=DEMO.data.invoices.find(x=>x.area===S.area), blob=await (await DEMO.realFetch(demoFacturaUrl(v))).blob();
+  demoCerrar(); f.abierto=true; await facAddFiles({ dataset:{ sid }, files:[new File([blob], 'factura-prueba.jpg', { type:'image/jpeg' })] });
+}
+function demoBajarFactura(k){ const e=DEMO.data.ent[k], v=DEMO.data.invoices.find(x=>x.area===pdArea(e.prov));
+  const a=document.createElement('a'); a.href=demoFacturaUrl(v); a.download=`factura-prueba-${provSlug(e.prov)}.jpg`; document.body.appendChild(a); a.click(); a.remove(); }
+function demoImprimir(){
+  const w=window.open('', '_blank'); if(!w){ toast('El navegador bloqueó la ventana'); return; }
+  let h=`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lista de prueba ${escapeHtml(DEMO.seed)}</title>
+    <style>body{font:14px/1.3 system-ui,sans-serif;margin:16px;color:#111}h2{margin:28px 0 6px;page-break-before:auto}.r{display:flex;gap:14px;align-items:center;padding:10px 0;border-bottom:1px solid #ddd;page-break-inside:avoid}.r b{font-size:16px}.n{flex:1}.m{color:#666;font:12px ui-monospace,monospace}</style>
+    <h1>Modo prueba · semilla ${escapeHtml(DEMO.seed)}</h1><p>Lo que llegó físicamente. Escanea el código y escribe la cantidad.</p>`;
+  for(const e of Object.values(DEMO.data.ent)){
+    h+=`<h2>${escapeHtml(e.titulo)}</h2>`;
+    for(const x of e.items.filter(i=>i.llego>0)) h+=`<div class="r"><div class="n"><div>${escapeHtml(x.producto)}</div><div class="m">${x.code?escapeHtml(x.code):'sin código: búscalo por nombre'}</div>${x.nota?`<div><i>${escapeHtml(x.nota)}</i></div>`:''}</div>
+      <b>${fmtQty(x.llego,x.kgpz)} ${unitOf(x.kgpz)}</b><div>${x.code?demoC128(x.code):''}</div></div>`;
+  }
+  w.document.write(h); w.document.close();
+}
+async function demoReiniciar(nueva){
+  if(!confirm(nueva?'¿Empezar una prueba nueva con otros productos?':'¿Borrar todo lo de esta prueba y empezar de cero?')) return;
+  clearTimeout(_demoSaveT); try{ DEMO.ss.removeItem(DEMO.key); }catch(_){}
+  DEMO.st=null;
+  try{ indexedDB.deleteDatabase('mr_factura_demo'); }catch(_){}
+  const seed=nueva?String(1000+Math.floor(Math.random()*9000)):DEMO.seed;
+  location.replace(location.pathname+'?demo='+seed);
+}
+// Admin → Modo prueba
+async function admDemo(){
+  const el=document.getElementById('adm-tab');
+  if(DEMO){ el.innerHTML=`<p>Estás en modo prueba (semilla <b>${escapeHtml(DEMO.seed)}</b>). Lo que ves en Admin son solo los datos de esta prueba.</p>
+    <button class="btn btn-primary btn-block" style="margin-top:10px" onclick="demoAbrir()">Abrir el panel de prueba</button>
+    <button class="btn btn-secondary btn-block" style="margin-top:10px" onclick="location.href=location.pathname">Salir del modo prueba</button>`; return; }
+  const seed=String(1000+Math.floor(Math.random()*9000));
+  el.innerHTML=`<p>Corre la app completa con datos falsos: un envío de CH (Abarrotes y Carnes), dos proveedores con su orden y su factura, y la lista de lo que «llegó» para escanearla. Nada se guarda en producción y todo se borra al cerrar la pestaña.</p>
+    <p class="muted" style="font-size:14px">Misma semilla = mismos productos en otro teléfono o computadora (para escanear la lista impresa).</p>
+    <div style="display:flex;gap:8px;margin-top:12px"><input id="demo-seed" class="text-input" value="${seed}" inputmode="numeric" style="max-width:140px" aria-label="Semilla">
+    <button class="btn btn-primary" style="flex:1" onclick="const s=(document.getElementById('demo-seed').value||'').replace(/[^A-Za-z0-9-]/g,'').slice(0,20);if(s)window.open(location.pathname+'?demo='+s,'_blank')">Empezar prueba (pestaña nueva)</button></div>`;
+}
+
 /* ── BOOT ── */
 function registerServiceWorker(){
   if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
@@ -4818,10 +5261,12 @@ function registerServiceWorker(){
 async function boot(){
   document.getElementById('app-ver').textContent=APP_VERSION+(IS_LOCAL?' · local (escribe en producción: usa Test hub)':'');
   registerServiceWorker();
+  if(DEMO) demoUi();
   renderInicio(); // always Inicio, nothing pre-selected (rule 7)
   loadReceptores();
   await Promise.all([syncClock(), loadImageDB()]);
   _imgMemo.clear();
+  if(DEMO){ try{ demoGenerar(); }catch(e){ console.error(e); toast('No se pudieron preparar los datos de prueba: '+e.message, 6000); } }
   flushOutbox(); // events left over from an earlier visit
 }
 boot();
