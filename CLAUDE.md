@@ -121,6 +121,17 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   cerrar, report, Slack, Recepciones serve both modes). Scan → `pdBScan` (jump to the line, or flag `no_solicitado`).
   `pdBRenderResumen`; «Copiar lista para el sistema» (`pdCopiarFacturar`). Report Excedente = «Sí». Receptions opened
   before keep the count flow.
+- **Live test fixes (Danone at MH Contry, 2026-11-18)** — modo botones: line buttons Completo / **No llegó** (= faltante 0)
+  big, then Llegaron menos / Excedente / Rechazo; Caducidad mínima is a big `.pdb-cad` row; no input autofocus (pdb-n, pd-q,
+  pd-rech-n: the receptor taps the field). A scan not in the order focuses a «No viene en la orden» card with «Siguiente»
+  (`pdBSiguiente`). Buttons: «Terminar revisión física» (Recibir) and «Cerrar y comparar contra factura» (Resumen).
+  Closed PD view: tabs **Llegó** (default, Recibido > 0) / Completo / Con diferencia / Faltante / Todos; «Terminar e ir al menú
+  principal» at the bottom. **Corregir lo recibido** (`rvCorr*`, modo botones, ≤24 h from the session id, not from Admin):
+  `pdCargarSesion` reloads the session, a new marca with `detalle.post_cierre`, the report rewritten at the same path and a
+  new `cerrar` with `detalle.correccion` (built by `pdCerrarDetalle`, shared with `pdCerrar`); `openRecepcion(info, from,
+  {recomparar, csv})` takes the fresh CSV (the storage CDN serves the old one for a while) and `facBoxLoad` compares the
+  same invoice read again (`FACV.recomparar`). Invoice result = big `.fac-act` blocks: Regresar (no en OC) / Reportar:
+  cobradas que no llegaron / Reportar: más de lo pedido, then Revisar a mano; «Comparando…» loader ≥ `FAC_COMP_MS`.
 - **Supplier insights (2026-11-13)** — every pd `cerrar` stores `detalle.lineas_todas` (`pdLineasTodas`): one object per
   order line + no solicitados {sku_key, producto, kgpz, pedido, contado, recibido, excedente (pieces, or `true` in modo
   botones), rechazadas, motivo, faltante, no_solicitado}; zero fields omitted. `lineas_dif` stays for old readers. No motivo

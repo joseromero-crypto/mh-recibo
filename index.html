@@ -180,7 +180,7 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .pd-exc .btn-warn{background:var(--c-white);color:var(--c-ink)}
 .pd-exc .btn+.btn{margin-top:8px}
 .cad-box{background:var(--c-white);border-radius:var(--r-md);padding:8px 8px 8px 14px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
-.cad-main{flex:1;min-width:0;font-size:15px;font-weight:800;line-height:1.2;font-variant-numeric:tabular-nums}
+.cad-main{flex:1;min-width:0;font-size:20px;font-weight:800;line-height:1.2;font-variant-numeric:tabular-nums}
 .cad-main small{display:block;font-size:12px;font-weight:600;color:var(--c-muted);white-space:nowrap}
 .sep-q{font-size:13px;font-weight:600;color:var(--c-muted);margin:2px 0 6px}
 .sep-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -273,6 +273,25 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .pdb-btns .btn-secondary{background:var(--c-white)}
 .pdb-row .btn-secondary{background:var(--c-white)}
 .pdb-res{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;font-size:14px;font-weight:700}
+.pdb-btns .btn-main{min-height:56px;font-size:17px}
+.pdb-btns3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:6px}
+.pdb-btns3 .btn{min-height:44px;padding:0 6px;font-size:14px;background:var(--c-white)}
+.pdb-cad{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-top:8px;padding:8px 12px;background:var(--c-white);border-radius:var(--r-md)}
+.pdb-cad small{font-size:13px;font-weight:700;color:var(--c-muted)}
+.pdb-cad b{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.pdb-pns{margin-top:10px;padding:12px 14px;background:var(--c-white);border-left:4px solid var(--c-ink);border-radius:var(--r-md)}
+.pdb-pns b{display:block;font-size:20px;font-weight:800;line-height:1.2}
+.fac-act{background:var(--c-white);border:2px solid var(--c-ink);border-radius:var(--r-lg);padding:14px 16px;margin:12px 0}
+.fac-act h3{font-size:20px;font-weight:800;margin:0;line-height:1.2}
+.fac-act .fac-act-sub{font-size:14px;color:var(--c-muted);margin:2px 0 6px}
+.fac-act .fac-item{font-size:16px;padding:8px 0}
+.fac-act .fac-item b{font-size:18px}
+.fac-act.ok{border-color:var(--c-teal)}
+.fac-load{display:flex;align-items:center;gap:14px;background:var(--c-teal-light);border-radius:var(--r-lg);padding:18px 16px;margin:8px 0 12px;font-size:16px;font-weight:700}
+.fac-load small{display:block;font-size:13px;font-weight:600;color:var(--c-muted)}
+.spin{width:30px;height:30px;flex:none;border-radius:50%;border:4px solid var(--c-white);border-top-color:var(--c-teal-dark);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.rv-corr{margin-top:8px;padding:10px 12px;background:var(--c-white);border-radius:var(--r-md)}
 .badge-warn{display:inline-block;font-size:12px;font-weight:700;padding:3px 10px;border-radius:var(--r-pill);background:var(--c-ink);color:var(--c-white);margin:2px 4px 2px 0}
 
 /* Admin */
@@ -1881,7 +1900,7 @@ function renderRecibir(){
   document.getElementById('rec-footer').innerHTML = S.closedInfo ? '' : sinArch
     ? `<div class="muted" style="text-align:center">Para cerrar la recepción, primero sube el archivo del envío.</div>`
     : (isPd()?'':`<button class="btn btn-secondary btn-block" style="margin-bottom:10px" onclick="openParcial()">Cerrar entrega parcial (sigo después)</button>`)
-      +`<button class="btn btn-primary btn-block" onclick="openResumen()">${isPd()?'Terminé de contar: revisar y cerrar':'Terminé todo: revisar y cerrar'}</button>`
+      +`<button class="btn btn-primary btn-block" onclick="openResumen()">${isPd()?'Terminar revisión física':'Terminé todo: revisar y cerrar'}</button>`
       +(isPd()?`<button class="link-btn" ${S.pdBusy?'disabled':''} onclick="pdReleerRecepcion()">${S.pdBusy?'Leyendo la orden…':'Volver a leer la orden'}</button>`:'');
   const B=pdBotones();
   for(const id of ['rec-row2','rec-canastas','card-area','recent-title','recent-list']) document.getElementById(id).style.display=B?'none':'';
@@ -1890,7 +1909,7 @@ function renderRecibir(){
     const rs=pdBRows().filter(r=>!r.pns), done=rs.filter(r=>!r.pend).length;
     document.getElementById('rec-progress').innerHTML=`<b>${done}</b> / ${rs.length} productos revisados`;
     document.getElementById('rec-bar').style.width=(rs.length?Math.round(done*100/rs.length):0)+'%';
-    if(!S.closedInfo) document.getElementById('rec-footer').innerHTML=`<button class="btn btn-primary btn-block" onclick="openResumen()">Terminé: revisar y cerrar</button>`
+    if(!S.closedInfo) document.getElementById('rec-footer').innerHTML=`<button class="btn btn-primary btn-block" onclick="openResumen()">Terminar revisión física</button>`
       +`<button class="link-btn" ${S.pdBusy?'disabled':''} onclick="pdReleerRecepcion()">${S.pdBusy?'Leyendo la orden…':'Volver a leer la orden'}</button>`;
     pdBListRender();
   }
@@ -2556,7 +2575,7 @@ function openResumen(){
   if(S.closedInfo){ openRecepcion(S.closedInfo,'inicio'); return; }
   if(S.envio.sinArchivo){ toast('Sube el archivo del envío antes de cerrar la recepción', 3500); return; }
   S.current=null; S.corrigiendo=null; closeSheet();
-  S.pdRech=null; S.pdCambiando=null;
+  S.pdRech=null; S.pdCambiando=null; S.pdFoco=null;
   if(isPd()){ pdFreezeOrder(); if(FAC[S.session.id]) facRefresh(S.session.id); } else
   S.resumenOrder=new Map(summaryRows().filter(isDelta).sort((a,b)=>(isAcked(a)-isAcked(b)) || Math.abs(b.dif)-Math.abs(a.dif)).map((r,i)=>[r.sku,i]));
   document.getElementById('resumen-title').textContent=`${hubName(S.hub)} · ${areaName(S.area)}`;
@@ -2749,20 +2768,24 @@ function pdBResTxt(r){
 const pdBEsc=s=>escapeHtml(s).replace(/'/g,'&#39;');
 function pdBLineHtml(r){
   const sk=pdBEsc(r.sku), q=v=>fmtQty(v,r.kgpz), u=unitOf(r.kgpz), t=tempLabel(r.temp), P=r.pedido;
-  const meta=[r.kgpz, r.cad?'Caducidad mínima <b>'+dmy(r.cad)+'</b>':'', r.barcode?'':'sin código'].filter(Boolean).join(' · ');
+  const meta=[r.kgpz, r.barcode?'':'sin código'].filter(Boolean).join(' · ');
   const editing=!r.pns && !S.closedInfo && (r.pend || S.pdEdit===r.sku), f=S.pdForm&&S.pdForm.sku===r.sku?S.pdForm:null;
   let h=`<div class="pdb-row ${r.pend?'':r.dif?'dif':'done'} ${S.pdFoco===r.sku?'foco':''}" data-sku="${escapeHtml(r.sku)}">
     <div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
       <div class="ritem-meta">${meta}</div></div>${r.pend?'':`<span class="estado ${PD_ESTADO_CLS[r.estado]||'bad'}">${escapeHtml(r.estado)}</span>`}</div>`;
-  if(!r.pns) h+=`<div class="pdb-ped"><span>Pedido</span><b>${q(P)}</b><span>${u}</span>${t?`<span class="temp-chip" style="margin-left:auto">${escapeHtml(t)}</span>`:''}</div>`;
+  if(!r.pns) h+=`<div class="pdb-ped"><span>Pedido</span><b>${q(P)}</b><span>${u}</span>${t?`<span class="temp-chip" style="margin-left:auto">${escapeHtml(t)}</span>`:''}</div>`
+    +(r.cad && (r.pend || S.pdEdit===r.sku || S.pdFoco===r.sku)?`<div class="pdb-cad"><small>Caducidad mínima</small><b>${dmy(r.cad)}</b></div>`:'');
   if(r.cambio && r.pend) h+=`<div class="ritem-meta" style="color:var(--c-ink);font-weight:700;margin-top:4px">La orden cambió la cantidad pedida: vuelve a revisar este producto.</div>`;
-  if(r.pns){
+  if(r.pns && S.pdFoco===r.sku && !S.closedInfo){
+    h+=`<div class="pdb-pns"><b>No viene en la orden</b>No se recibe: regrésalo al camión.</div>
+      <div class="pcard-actions" style="grid-template-columns:1fr 2fr;margin-top:8px"><button class="btn btn-secondary" onclick="pdBQuitarPns('${sk}')">Me equivoqué</button><button class="btn btn-primary" onclick="pdBSiguiente()">Siguiente</button></div>`;
+  } else if(r.pns){
     h+=`<div class="pdb-res"><span>${pdBResTxt(r)}</span>${S.closedInfo?'':`<button class="corr-btn" onclick="pdBQuitarPns('${sk}')">Me equivoqué</button>`}</div>`;
   } else if(editing && f){
     const kg=r.kgpz==='Kg', m=f.motivo;
-    if(f.kind==='faltante') h+=`<div style="margin-top:10px"><div class="sep-q">¿Cuántas llegaron? ${kg?`(menos de ${q(P)} kg)`:`(de 0 a ${q(P-1)})`}</div>
+    if(f.kind==='faltante') h+=`<div style="margin-top:10px"><div class="sep-q">¿Cuántas llegaron? ${kg?`(menos de ${q(P)} kg)`:`(de 1 a ${q(P-1)})`}</div>
         <input id="pdb-n" class="text-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}" onkeydown="if(event.key==='Enter')pdBGuardar('${sk}')">
-        <button class="corr-btn" style="margin-top:6px" onclick="pdBNinguna('${sk}')">No llegó ninguna</button>`;
+        `;
     else h+=`<div style="margin-top:10px"><div class="sep-q">¿Por qué?</div>
         <div class="sep-btns">${Object.entries(PD_MOTIVO).map(([k,n])=>`<button class="choice ${m===k?'sel':''}" onclick="pdBMotivo('${k}')">${n[0].toUpperCase()+n.slice(1)}</button>`).join('')}</div>
         <div class="sep-q" style="margin-top:8px">¿Cuántas rechazaste? (de 1 a ${q(P)} ${u})</div>
@@ -2771,8 +2794,8 @@ function pdBLineHtml(r){
     h+=`<div class="qty-err" id="pdb-err"></div>
         <div class="pcard-actions" style="grid-template-columns:1fr 1fr;margin-top:4px"><button class="btn btn-secondary" onclick="pdBCancel()">Cancelar</button><button class="btn btn-primary" onclick="pdBGuardar('${sk}')">Guardar</button></div></div>`;
   } else if(editing){
-    h+=`<div class="pdb-btns"><button class="btn btn-primary" onclick="pdBTap('${sk}','completo')">Completo</button><button class="btn btn-secondary" onclick="pdBTap('${sk}','faltante')">Faltante</button>
-      <button class="btn btn-secondary" onclick="pdBTap('${sk}','excedente')">Excedente</button><button class="btn btn-secondary" onclick="pdBTap('${sk}','rechazo')">Rechazo</button></div>`
+    h+=`<div class="pdb-btns"><button class="btn btn-primary btn-main" onclick="pdBTap('${sk}','completo')">Completo</button><button class="btn btn-secondary btn-main" onclick="pdBTap('${sk}','nollego')">No llegó</button></div>
+      <div class="pdb-btns3"><button class="btn btn-secondary" onclick="pdBTap('${sk}','faltante')">Llegaron menos</button><button class="btn btn-secondary" onclick="pdBTap('${sk}','excedente')">Excedente</button><button class="btn btn-secondary" onclick="pdBTap('${sk}','rechazo')">Rechazo</button></div>`
       +(r.pend?'':`<button class="link-btn" style="margin-top:0" onclick="pdBCancel()">Dejar como estaba</button>`);
   } else {
     const who=r.ack&&r.ack.receptor&&r.ack.receptor!==S.receptor?` · ${escapeHtml(r.ack.receptor)}`:'';
@@ -2787,12 +2810,13 @@ function pdBKeepInput(fn){
   fn();
   const j=document.getElementById('pdb-n'); if(j && v!=null){ j.value=v; if(foc) j.focus(); }
 }
-function pdBFocusInput(){ setTimeout(()=>{ const i=document.getElementById('pdb-n'); if(i) i.focus(); }, 40); }
 function pdBTap(sku, kind){
   const l=S.lines.get(sku); if(!l || S.closedInfo) return;
   if(kind==='completo'){ pdMarcar(sku, 'completo', { recibido:l.esperado }); toast(`✓ Completo · ${l.producto}`); return; }
   if(kind==='excedente'){ pdMarcar(sku, 'excedente', { recibido:l.esperado }); toast(`✓ Recibe ${fmtQty(l.esperado,l.kgpz)} ${unitOf(l.kgpz)} · lo de más regrésalo al camión`, 4000); return; }
-  S.pdForm={ sku, kind, motivo:null }; pdBRerender(); pdBFocusInput();
+  if(kind==='nollego'){ pdMarcar(sku, 'faltante', { recibido:0, llegaron:0, faltan:l.esperado }); toast(`✓ ${l.producto}: no llegó`); return; }
+  // No autofocus: the receptor taps the field when they need the keyboard (live test, 2026-11-18)
+  S.pdForm={ sku, kind, motivo:null }; pdBRerender();
 }
 function pdMarcar(sku, marca, extra){
   const l=S.lines.get(sku); if(!l) return;
@@ -2816,13 +2840,14 @@ function pdBGuardar(sku){
     toast(`✓ ${l.producto}: ${q(n)} ${u} rechazadas`);
   }
 }
-function pdBNinguna(sku){ const i=document.getElementById('pdb-n'); if(i){ i.value='0'; pdBGuardar(sku); } }
 function pdBTodas(sku){ const l=S.lines.get(sku), i=document.getElementById('pdb-n'); if(l && i){ i.value=fmtQty(l.esperado,l.kgpz); if(S.pdForm.motivo) pdBGuardar(sku); else document.getElementById('pdb-err').textContent='Elige por qué: fecha corta o dañada.'; } }
 function pdBMotivo(k){ if(!S.pdForm) return; S.pdForm.motivo=k; pdBKeepInput(pdBRerender); }
 function pdBCancel(){ S.pdForm=null; S.pdEdit=null; pdBRerender(); }
 function pdBCambiar(sku){ S.pdEdit=sku; S.pdForm=null; pdBRerender(); }
+function pdBSiguiente(){ S.pdFoco=null; pdBRerender(); focusScan(); }
 function pdBQuitarPns(sku){
   const e=pdMarcas().get(sku); if(!e) return;
+  if(S.pdFoco===sku) S.pdFoco=null;
   recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:e.producto, metodo:'boton', detalle:{ marca:'quitado', kgpz:e.detalle.kgpz||'Pz' } }));
   pdBRerender();
 }
@@ -2835,13 +2860,14 @@ function pdBListRender(){
   document.getElementById('pdb-tabs').innerHTML=`<button class="choice ${tab==='scan'?'sel':''}" onclick="pdBTab('scan')">Escanear</button><button class="choice ${tab==='pend'?'sel':''}" onclick="pdBTab('pend')">Pendientes · ${pend.length}</button><button class="choice ${tab==='todos'?'sel':''}" onclick="pdBTab('todos')">Todos · ${lines.length}</button>`;
   const qEl=document.getElementById('pd-q'); qEl.style.display=tab==='scan'?'none':'';
   if(tab==='scan'){
-    const foco=S.pdFoco && lines.find(r=>r.sku===S.pdFoco);
+    const foco=S.pdFoco && all.find(r=>r.sku===S.pdFoco);
     let h=foco ? pdBLineHtml(foco)
-      : !pend.length ? `<div class="warn-box ok">Revisaste todos los productos de la orden. Toca «Terminé: revisar y cerrar».</div>`
+      : !pend.length ? `<div class="warn-box ok">Revisaste todos los productos de la orden. Toca «Terminar revisión física».</div>`
       : `<div class="pdb-hint">Escanea un producto para ver lo pedido y confirmarlo.<div class="ritem-meta" style="margin-top:6px;font-weight:600">¿No tiene código? Búscalo en Pendientes.</div></div>`;
     const ult=lines.filter(r=>!r.pend && r.ack && r.sku!==S.pdFoco).sort((a,b)=>String(b.ack.ts).localeCompare(String(a.ack.ts))).slice(0,3);
     if(ult.length) h+=`<div class="section-title">Últimos revisados</div>`+ult.map(pdBLineHtml).join('');
-    if(pns.length) h+=`<div class="section-title">No solicitados · ${pns.length}</div>`+pns.map(pdBLineHtml).join('');
+    const pnsO=pns.filter(r=>r.sku!==S.pdFoco);
+    if(pnsO.length) h+=`<div class="section-title">No solicitados · ${pnsO.length}</div>`+pnsO.map(pdBLineHtml).join('');
     pdBKeepInput(()=>{ document.getElementById('pd-rows').innerHTML=h; });
     return;
   }
@@ -2849,7 +2875,7 @@ function pdBListRender(){
   const match=r=>!words.length || words.every(w=>normName(r.producto).includes(w) || (r.barcode||'').includes(w));
   const vis=(tab==='todos'?lines:lines.filter(r=>r.pend || r.sku===S.pdEdit || r.sku===S.pdFoco)).filter(match);
   let h=vis.map(pdBLineHtml).join('');
-  if(!vis.length) h=tab==='pend' && !pend.length ? `<div class="warn-box ok">Revisaste todos los productos de la orden. Toca «Terminé: revisar y cerrar».</div>` : `<div class="empty-hint">Ningún producto coincide.</div>`;
+  if(!vis.length) h=tab==='pend' && !pend.length ? `<div class="warn-box ok">Revisaste todos los productos de la orden. Toca «Terminar revisión física».</div>` : `<div class="empty-hint">Ningún producto coincide.</div>`;
   if(pns.length) h+=`<div class="section-title">No solicitados · ${pns.length}</div>`+pns.map(pdBLineHtml).join('');
   pdBKeepInput(()=>{ document.getElementById('pd-rows').innerHTML=h; });
 }
@@ -2866,11 +2892,10 @@ function pdBScan(r, code){
     const p=r.product, e=pdMarcas().get(p.sku_key);
     if(!(e && e.detalle.marca==='no_solicitado'))
       recordEvent(makeEvent('confirmacion', { sku_key:p.sku_key, producto:p.producto, metodo:'boton', detalle:{ marca:'no_solicitado', codigo:code, kgpz:p.kgpz||'Pz' } }));
-    toast(`${p.producto}: no viene en la orden. No se recibe: regrésalo al camión.`, 5000); renderRecibir(); return;
+    S.pdFoco=p.sku_key; S.pdEdit=null; S.pdForm=null; S.pdTab='scan'; renderRecibir(); return;
   }
   toast('Código no reconocido: búscalo por nombre en Pendientes', 4000);
   S.pdTab='pend'; S.pdFoco=null; pdBListRender();
-  const q=document.getElementById('pd-q'); if(q) q.focus();
 }
 function pdBRenderResumen(){
   const el=document.getElementById('resumen-body');
@@ -2891,7 +2916,7 @@ function pdBRenderResumen(){
   if(oks.length) h+=`<details style="margin-top:14px" ${S.pdEdit&&oks.some(r=>r.sku===S.pdEdit)?'open':''}><summary class="section-title" style="cursor:pointer">Completos · ${oks.length}</summary>${oks.map(pdBLineHtml).join('')}</details>`;
   if(!pend.length) h+=pdCamionHtml(rows);
   const can=!pend.length && !OUTBOX.length && !S.closing;
-  h+=`<button class="btn btn-primary btn-block" style="margin-top:18px" ${can?'':'disabled'} onclick="cerrarRecepcion()">${S.closing?'Cerrando…':pend.length?`Faltan ${pend.length} producto(s) por revisar`:OUTBOX.length?'Subiendo registros…':'Cerrar recepción'}</button>`;
+  h+=`<button class="btn btn-primary btn-block" style="margin-top:18px" ${can?'':'disabled'} onclick="cerrarRecepcion()">${S.closing?'Cerrando…':pend.length?`Faltan ${pend.length} producto(s) por revisar`:OUTBOX.length?'Subiendo registros…':'Cerrar y comparar contra factura'}</button>`;
   pdBKeepInput(()=>{ el.innerHTML=h; });
 }
 // Facturar list as Código · Producto · Recibido, tab-separated, to type it in the system
@@ -2986,7 +3011,7 @@ function pdRenderResumen(){
   if(oks.length) h+=`<details style="margin-top:14px"><summary class="section-title" style="cursor:pointer">Completos · ${oks.length}</summary>${oks.map(r=>`<div class="sum-row">${pdRowHtml(r)}</div>`).join('')}</details>`;
   if(!pend.length) h+=pdCamionHtml(rows);
   const can=!pend.length && !OUTBOX.length && !S.closing;
-  h+=`<button class="btn btn-primary btn-block" style="margin-top:18px" ${can?'':'disabled'} onclick="cerrarRecepcion()">${S.closing?'Cerrando…':pend.length?`Faltan ${pend.length} diferencia(s) por contestar`:OUTBOX.length?'Subiendo registros…':'Cerrar recepción'}</button>`;
+  h+=`<button class="btn btn-primary btn-block" style="margin-top:18px" ${can?'':'disabled'} onclick="cerrarRecepcion()">${S.closing?'Cerrando…':pend.length?`Faltan ${pend.length} diferencia(s) por contestar`:OUTBOX.length?'Subiendo registros…':'Cerrar y comparar contra factura'}</button>`;
   el.innerHTML=h;
 }
 function pdRowOf(sku){ return pdRows().find(r=>r.sku===sku); }
@@ -2995,7 +3020,7 @@ function pdNoLlegaron(sku){
   recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:r.producto, cantidad:r.count, detalle:{ faltante:true, recibido:r.count, pedido:r.pedido, rechazadas:0, motivo:'', kgpz:r.kgpz } }));
   S.pdRech=null; S.pdCambiando=null; renderResumen();
 }
-function pdRechOpen(sku){ S.pdRech=sku; S.pdRechMotivo=null; renderResumen(); const i=document.getElementById('pd-rech-n'); if(i) setTimeout(()=>i.focus(), 40); }
+function pdRechOpen(sku){ S.pdRech=sku; S.pdRechMotivo=null; renderResumen(); }
 function pdRechCancel(){ S.pdRech=null; S.pdCambiando=null; renderResumen(); }
 function pdRechMotivo(k){
   const i=document.getElementById('pd-rech-n'), v=i?i.value:'';
@@ -3033,6 +3058,66 @@ function pdLineasTodas(rows){
     excedente:r.exc||(r.excFlag?true:undefined), rechazadas:r.rech||undefined, motivo:r.rech?(r.motivo||undefined):undefined,
     faltante:r.falt||undefined, no_solicitado:r.pns||undefined }));
 }
+function pdCerrarDetalle(rows, path, receptores, cambioIgnorado){
+  const o=S.envio.orden, difs=rows.filter(r=>r.dif);
+  return { reporte:path, envio:S.envio._path, origen:'proveedor', proveedor:o.proveedor, comercial:o.comercial||undefined, comprador:o.comprador||undefined,
+    ocs:o.ocs.map(x=>x.key), num_oc:o.num_oc, fechas_entrega:o.fechas_entrega, orden_cambio_ignorado:cambioIgnorado?true:undefined,
+    lineas:S.lines.size, recibidas:rows.filter(r=>!r.pns && r.rec>0).length, diferencias:difs.length, receptores,
+    modo:S.envio.modo||undefined, excedente:rows.filter(r=>!r.pns && (r.exc>0||r.excFlag)).length, rechazadas:rows.filter(r=>r.rech>0).length,
+    faltantes:rows.filter(r=>r.falt>0).length, no_solicitados:rows.filter(r=>r.pns).length,
+    lineas_dif:difs.map(r=>({ sku_key:r.sku, producto:r.producto, kgpz:r.kgpz, pedido:r.pedido, contado:r.count, recibido:r.rec,
+      excedente:r.exc||(r.excFlag?true:undefined), rechazadas:r.rech||undefined, motivo:r.motivo||undefined, faltante:r.falt||undefined, no_solicitado:r.pns||undefined })),
+    lineas_todas:pdLineasTodas(rows) };
+}
+/* ── Corregir después de cerrar (modo botones, live test 2026-11-18): after the invoice check the supplier can still bring
+   a missing product from the truck. The receptor fixes that line in the closed view: a new marca (detalle.post_cierre) and a
+   new `cerrar` over the same report path (latest cerrar wins everywhere); a saved invoice review is compared again. ── */
+async function pdCargarSesion(info){
+  if(!(S.session && S.session.id===info.session_id && S.envio && S.envio._path===info.envio)){
+    const env=JSON.parse(await sbFetch(info.envio)); env._path=info.envio;
+    S.hub=info.hub; S.area=info.area; S.receptor=INI.receptor||info.receptor;
+    S.session={ id:info.session_id, fecha:info.fecha }; setEnvio(env);
+    S.events=[]; S.eventUids=new Set(); S.lastId=0; S.resumenOrder=new Map(); S.current=null; S.corrigiendo=null; S.pdEdit=S.pdForm=S.pdFoco=null;
+    addEvents(OUTBOX.filter(e=>e.session_id===info.session_id));
+  }
+  // A full read that throws: a correction must never rebuild the report from half the events
+  const rows=await pgSelectAll('rec_events', `session_id=eq.${encodeURIComponent(info.session_id)}&select=*`);
+  for(const r of rows) if(r.id>(S.lastId||0)) S.lastId=r.id;
+  addEvents(rows); fold(); S.closedInfo=closedState();
+}
+function rvEditable(){ const I=RV&&RV.info; return !!(RV && RV.pd && I && !I.parcial && I.modo==='botones' && I.envio && RV.from!=='admin' && facVigente(I.session_id)); }
+function rvSkuOf(r){ return skuKeyOf(cleanBC(r.barcode||''), r.producto); }
+function rvCorr(i){ RV.corr=i; renderRecepcionRows(); }
+function rvCorrCancel(){ RV.corr=null; renderRecepcionRows(); }
+async function rvCorrGuardar(i){
+  const r=RV.rows.find(x=>x.i===i), inp=document.getElementById('rv-corr-n'), err=document.getElementById('rv-corr-err'); if(!r || !inp || RV.corrBusy) return;
+  const n=parseQty(inp.value, r.kgpz, true);
+  if(n==null || n>r.env){ err.textContent=`Escribe cuántas recibiste al final: de 0 a ${fmtQty(r.env,r.kgpz)} ${unitOf(r.kgpz)}. Lo de más se regresa.`; return; }
+  if(round2(n)===round2(r.rec)){ rvCorrCancel(); return; }
+  RV.corrBusy=true; renderRecepcionRows();
+  const I=RV.info, from=RV.from;
+  try{
+    await pdCargarSesion(I);
+    const sku=rvSkuOf(r), l=S.lines.get(sku); if(!l) throw new Error('el producto ya no está en la orden');
+    const P=l.esperado, prev=pdMarcas().get(sku), pm=prev&&prev.detalle.marca;
+    if(n>=P) pdMarcar(sku, pm==='excedente'?'excedente':'completo', { recibido:P, post_cierre:true });
+    else if(pm==='rechazo') pdMarcar(sku, 'rechazo', { recibido:n, rechazadas:round2(P-n), motivo:prev.detalle.motivo, post_cierre:true });
+    else pdMarcar(sku, 'faltante', { recibido:n, llegaron:n, faltan:round2(P-n), post_cierre:true });
+    const rows=pdRows();
+    if(rows.some(x=>x.pend)) throw new Error('la orden cambió: hay productos por revisar');
+    const csv=pdBuildReportCsv(rows, receptoresDeSesion());
+    await sbUpload(I.reporte, csv, 'text/csv; charset=utf-8');
+    const det=Object.assign(pdCerrarDetalle(rows, I.reporte, receptoresDeSesion(), I.orden_cambio_ignorado),
+      { correccion:{ sku_key:sku, producto:l.producto, antes:r.rec, despues:Math.min(n,P) } });
+    const ev=makeEvent('cerrar', { detalle:det }); recordEvent(ev); S.closedInfo=closedState(); await flushAndWait();
+    toast(`✓ ${l.producto}: recibido ${fmtQty(Math.min(n,P),l.kgpz)} ${unitOf(l.kgpz)}`, 3500);
+    // The CSV goes in by hand: the storage CDN can still serve the old report for a while after an overwrite
+    openRecepcion(Object.assign({ ts:I.ts, fecha:I.fecha, hub:I.hub, area:I.area, session_id:I.session_id, receptor:I.receptor }, det), from, { recomparar:true, csv });
+  }catch(e){
+    if(RV) RV.corrBusy=false; renderRecepcionRows();
+    toast(isNetErr(e)?'Sin conexión: no se guardó la corrección. Intenta de nuevo con internet.':'No se pudo corregir ('+e.message+')', 4500);
+  }
+}
 async function pdCerrar(){
   if(S.closing) return;
   if(pdRows().some(r=>r.pend)) return;
@@ -3054,15 +3139,7 @@ async function pdCerrar(){
     const now=serverNow(), receptores=receptoresDeSesion(), o=S.envio.orden;
     const path=`reportes/${S.hub}/${S.area}/${S.session.fecha}_${localHM(now).replace(':','-')}_${fileSafe(S.receptor)}.csv`;
     await sbUpload(path, pdBuildReportCsv(rows, receptores), 'text/csv; charset=utf-8');
-    const difs=rows.filter(r=>r.dif);
-    const ev=makeEvent('cerrar', { detalle:{ reporte:path, envio:S.envio._path, origen:'proveedor', proveedor:o.proveedor, comercial:o.comercial||undefined, comprador:o.comprador||undefined,
-      ocs:o.ocs.map(x=>x.key), num_oc:o.num_oc, fechas_entrega:o.fechas_entrega, orden_cambio_ignorado:lectura&&lectura.cambio?true:undefined,
-      lineas:S.lines.size, recibidas:rows.filter(r=>!r.pns && r.rec>0).length, diferencias:difs.length, receptores,
-      modo:S.envio.modo||undefined, excedente:rows.filter(r=>!r.pns && (r.exc>0||r.excFlag)).length, rechazadas:rows.filter(r=>r.rech>0).length,
-      faltantes:rows.filter(r=>r.falt>0).length, no_solicitados:rows.filter(r=>r.pns).length,
-      lineas_dif:difs.map(r=>({ sku_key:r.sku, producto:r.producto, kgpz:r.kgpz, pedido:r.pedido, contado:r.count, recibido:r.rec,
-        excedente:r.exc||(r.excFlag?true:undefined), rechazadas:r.rech||undefined, motivo:r.motivo||undefined, faltante:r.falt||undefined, no_solicitado:r.pns||undefined })),
-      lineas_todas:pdLineasTodas(rows) } });
+    const ev=makeEvent('cerrar', { detalle:pdCerrarDetalle(rows, path, receptores, lectura&&lectura.cambio) });
     recordEvent(ev); S.closedInfo=closedState(); await flushAndWait();
     S.closing=false;
     toast(OUTBOX.length?'Recepción cerrada — se termina de subir al reconectar':'✓ Recepción cerrada', 3500);
@@ -3463,13 +3540,13 @@ async function verResumenCerrado(){
     openRecepcion(Object.assign({ ts:r[0].ts, fecha:r[0].fecha, hub:r[0].hub, area:r[0].area, receptor:r[0].receptor, session_id:r[0].session_id }, r[0].detalle), 'inicio');
   }catch(e){ toast('Sin conexión'); }
 }
-async function openRecepcion(info, from){
+async function openRecepcion(info, from, opts={}){
   const el=document.getElementById('recep-body');
   document.getElementById('recep-title').textContent=`${hubName(info.hub||INI.hub)} · ${areaName(info.area||INI.area)}`;
   document.getElementById('recep-back').onclick = from==='lista' ? ()=>openRecepciones(_recepPd) : from==='admin' ? openAdmin : recepBack;
   document.getElementById('recep-back').textContent = from==='lista' ? '← Recepciones' : from==='admin' ? '← Admin' : '← Inicio';
   el.innerHTML='<div class="muted">Cargando reporte…</div>'; showScreen('screen-recepciones');
-  let csv; try{ csv=await sbFetch(info.reporte); }catch(e){ el.innerHTML=`<div class="err-box">${isNetErr(e)?'Sin conexión.':'No se encontró el reporte.'} Intenta de nuevo.</div>`; return; }
+  let csv=opts.csv; if(csv==null) try{ csv=await sbFetch(info.reporte); }catch(e){ el.innerHTML=`<div class="err-box">${isNetErr(e)?'Sin conexión.':'No se encontró el reporte.'} Intenta de nuevo.</div>`; return; }
   const p=Papa.parse(stripBOM(csv), { header:true, skipEmptyLines:true });
   const pdRep=(p.meta.fields||[]).includes('Pedido'); // supplier report (Phase 5 gives it its own Retool view)
   const rows=(p.data||[]).filter(r=>!pdRep || pickCol(r,'Estado')!==FAC_ESTADO_SIN_PEDIR).map((r,i)=>{ const g=n=>pickCol(r, n)||'';
@@ -3484,10 +3561,10 @@ async function openRecepcion(info, from){
       env:parseNum(g('Enviado')), rec:parseNum(g('Recibido')), dif:parseNum(g('Diferencia')), estado:info.parcial?'Entrega '+info.entrega:g('Estado'),
       acum:info.parcial?parseNum(g('Recibido acumulado')):null, corta:parseNum(g('Fecha corta'))||0, cad:g('Caducidad mínima'), dan:parseNum(g('Dañadas'))||0, notas:g('Notas (correcciones / confirmaciones)'), _n:normName(g('Producto')) }; });
   let ticks=new Set(); try{ ticks=new Set(JSON.parse(localStorage.getItem('mr_ticks_'+info.reporte)||'[]')); }catch(_){}
-  RV={ info, rows, csv, ticks, pd:pdRep, f:{ q:'', vista:info.parcial?'todos':rows.some(r=>!r.pns && rvDistinto(r))?'dif':'igual', solo:'', estado:'', kgpz:'', pasillo:'', sort:'archivo' } };
+  RV={ info, rows, csv, ticks, pd:pdRep, from, corr:null, corrBusy:false, f:{ q:'', vista:info.parcial?'todos':pdRep?'llego':rows.some(r=>!r.pns && rvDistinto(r))?'dif':'igual', solo:'', estado:'', kgpz:'', pasillo:'', sort:'archivo' } };
   FACV=null;
   renderRecepcion();
-  if(pdRep && !info.parcial && info.lineas_todas) facBoxLoad(info);
+  if(pdRep && !info.parcial && info.lineas_todas) facBoxLoad(info, opts);
   if(PENDING_UPLOAD && from==='inicio' && info.hub===INI.hub && info.area===INI.area)
     document.getElementById('recep-body').insertAdjacentHTML('afterbegin', `<button class="btn btn-primary btn-block" style="margin-bottom:12px" onclick="resumePendingUpload()">Ahora carga el archivo nuevo (${escapeHtml(PENDING_UPLOAD.file.name)})</button>`);
 }
@@ -3526,12 +3603,13 @@ function renderRecepcion(){
     <input class="text-input" style="margin-top:12px" placeholder="Buscar producto…" oninput="rvSet('q',this.value)" autocomplete="off">
     <div class="filters">
       ${!RV.rows.some(r=>r.corta>0||r.dan>0)?'':`<select id="rv-solo" onchange="rvFiltro('solo',this.value)"><option value="">Fecha corta / dañadas</option>${RV.rows.some(r=>r.corta>0)?'<option value="corta">Solo fecha corta</option>':''}${RV.rows.some(r=>r.dan>0)?'<option value="dan">Solo dañadas</option>':''}</select>`}
-      ${P?'':`<select id="rv-estado" onchange="rvFiltro('estado',this.value)"><option value="">Estado</option>${est.map(e=>`<option>${escapeHtml(e)}</option>`).join('')}</select>`}
+      ${P||RV.pd?'':`<select id="rv-estado" onchange="rvFiltro('estado',this.value)"><option value="">Estado</option>${est.map(e=>`<option>${escapeHtml(e)}</option>`).join('')}</select>`}
       <select onchange="rvSet('kgpz',this.value)"><option value="">Kg/Pz</option><option>Kg</option><option>Pz</option></select>
       ${RV.pd?'':`<select onchange="rvSet('pasillo',this.value)"><option value="">Pasillo</option>${pas.map(p=>`<option>${escapeHtml(p)}</option>`).join('')}</select>`}
       <select onchange="rvSet('sort',this.value)"><option value="archivo">${RV.pd?'Orden de la OC':'Orden del archivo'}</option><option value="az">A-Z</option>${RV.pd?'':'<option value="pasillo">Pasillo</option>'}<option value="dif">Diferencia</option></select>
     </div>
-    <div class="muted" id="rv-hint"></div><div class="muted" id="rv-count" style="margin-bottom:8px"></div><div id="rv-rows"></div>`;
+    <div class="muted" id="rv-hint"></div><div class="muted" id="rv-count" style="margin-bottom:8px"></div><div id="rv-rows"></div>
+    ${RV.pd&&!P&&RV.from!=='admin'?`<button class="btn btn-primary btn-block" style="margin-top:18px;min-height:56px;font-size:17px" onclick="goInicio()">Terminar e ir al menú principal</button>`:''}`;
   renderRecepcionRows();
 }
 function renderRecepcionRows(){
@@ -3539,14 +3617,19 @@ function renderRecepcionRows(){
   // Supplier report: products not in the order were all sent back, so they get their own section and are never registered
   const base=RV.pd?RV.rows.filter(r=>!r.pns):RV.rows, devueltos=RV.pd?RV.rows.filter(r=>r.pns):[];
   const vista=words.length?'todos':f.vista, difs=base.filter(rvDistinto); // a search looks through every product
+  // Supplier: what is captured in the system is what physically arrived (partials too), so «Llegó» is the default tab
+  const PDV={ llego:r=>r.rec>0, completo:r=>!rvDistinto(r), dif:rvDistinto, faltante:r=>r.falt>0, todos:()=>true };
+  const enVista=r=>vista==='todos' || (RV.pd ? (PDV[vista]||PDV.todos)(r) : rvDistinto(r)===(vista==='dif'));
   const tabs=document.getElementById('rv-vistas');
-  if(tabs) tabs.innerHTML=[['dif','Diferencias',difs.length],['igual','Sin diferencia',base.length-difs.length],['todos','Todos',base.length]]
+  if(tabs) tabs.innerHTML=(RV.pd?[['llego','Llegó'],['completo','Completo'],['dif','Con diferencia'],['faltante','Faltante'],['todos','Todos']].map(([k,n])=>[k,n,base.filter(PDV[k]).length])
+      :[['dif','Diferencias',difs.length],['igual','Sin diferencia',base.length-difs.length],['todos','Todos',base.length]])
     .map(([k,n,c])=>`<button class="choice ${vista===k?'sel':''}" onclick="rvVista('${k}')">${n} · ${c}</button>`).join('');
   const bascula=difs.filter(r=>/^Completo/.test(r.estado)).length;
-  document.getElementById('rv-hint').textContent=vista==='dif'&&difs.length?`Primero edita estas cantidades en el sistema${RV.pd?': el Recibido es lo que se factura':''}.${bascula?` Incluye ${bascula} con variación de báscula.`:''}`
-    :vista==='igual'?`Recibido igual a lo ${RV.pd?'pedido':'enviado'}: apruébalos juntos en el sistema.`:'';
+  document.getElementById('rv-hint').textContent=RV.pd ? (vista==='llego'?'Lo que llegó en físico: captura en el sistema el Recibido de cada uno (es lo que se factura).':vista==='faltante'?'No llegaron o llegaron incompletos: no se facturan.':'')
+    :vista==='dif'&&difs.length?`Primero edita estas cantidades en el sistema.${bascula?` Incluye ${bascula} con variación de báscula.`:''}`
+    :vista==='igual'?`Recibido igual a lo enviado: apruébalos juntos en el sistema.`:'';
   let rows=base.filter(r=>(!words.length || words.every(w=>r._n.includes(w)))
-    && (vista==='todos' || rvDistinto(r)===(vista==='dif'))
+    && enVista(r)
     && (!f.solo || (f.solo==='corta' ? r.corta>0 : r.dan>0)) && (!f.estado || r.estado===f.estado) && (!f.kgpz || r.kgpz===f.kgpz) && (!f.pasillo || r.pasillo===f.pasillo));
   const cmp={ archivo:(a,b)=>a.i-b.i, az:(a,b)=>a._n.localeCompare(b._n), pasillo:(a,b)=>(a.pos||'~').localeCompare(b.pos||'~','es',{numeric:true})||a.i-b.i, dif:(a,b)=>Math.abs(b.dif)-Math.abs(a.dif)||a.i-b.i }[f.sort];
   rows=rows.slice().sort(cmp);
@@ -3557,12 +3640,22 @@ function renderRecepcionRows(){
       <div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div><div class="ritem-meta">${escapeHtml(r.barcode||'sin código')}${r.pos?' · '+escapeHtml(r.pos):''}${r.corta>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(r.corta,r.kgpz)} ${u} fecha corta · separar para MNA</span>`:''}${r.dan>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(r.dan,r.kgpz)} ${u} dañadas · separar para MNA</span>`:''}</div></div>
       <div style="text-align:right"><div style="font-size:30px;font-weight:800;color:var(--green-dark)">${fmtQty(r.rec,r.kgpz)}</div><div class="ritem-meta">${u} recibido</div></div></div>
       ${r.acum!=null?`<div class="ritem-meta" style="margin-top:4px">Acumulado en la recepción: ${fmtQty(r.acum,r.kgpz)} ${u}</div>`:`<div class="ritem-meta" style="margin-top:4px">${r.pd?'Pedido':'Enviado'} ${fmtQty(r.env,r.kgpz)}${r.armado&&r.armado!=='—'?' · Armado '+escapeHtml(r.armado):''} · Dif ${r.dif>0?'+':''}${fmtQty(r.dif,r.kgpz)} · <span class="estado ${ESTADO_CLS[r.estado]||PD_ESTADO_CLS[r.estado]||'mid'}">${escapeHtml(r.estado)}</span></div>`}
-      ${r.notas?`<div class="ritem-meta">${escapeHtml(r.notas)}</div>`:''}</div>`; }).join('') || `<div class="empty-hint">${vista==='dif'&&!difs.length?`Sin diferencias: todo llegó igual a lo ${RV.pd?'pedido':'enviado'}.`:'Nada coincide con el filtro.'}</div>`;
+      ${r.notas?`<div class="ritem-meta">${escapeHtml(r.notas)}</div>`:''}${rvCorrHtml(r)}</div>`; }).join('') || `<div class="empty-hint">${vista==='dif'&&!difs.length?`Sin diferencias: todo llegó igual a lo ${RV.pd?'pedido':'enviado'}.`:'Nada coincide con el filtro.'}</div>`;
   const dv=devueltos.filter(r=>!words.length || words.every(w=>r._n.includes(w)));
   if(dv.length) document.getElementById('rv-rows').insertAdjacentHTML('beforeend', `<div class="section-title" style="margin-top:16px">No solicitados · ${dv.length}</div>
     <div class="muted" style="margin-bottom:8px">Se regresaron al proveedor. No se registran en el sistema.</div>`
     +dv.map(r=>`<div class="sum-row"><div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
       <div class="ritem-meta">${escapeHtml(r.barcode||'sin código')} · ${r.exc?`${fmtQty(r.exc,r.kgpz)} ${unitOf(r.kgpz)} devueltas`:'devuelto'}</div></div></div></div>`).join(''));
+}
+function rvCorrHtml(r){
+  if(!r.pd || !rvEditable()) return '';
+  if(RV.corr!==r.i) return `<button class="corr-btn" style="margin-top:6px" onclick="rvCorr(${r.i})">Corregir lo recibido</button>`;
+  const kg=r.kgpz==='Kg', u=unitOf(r.kgpz);
+  return `<div class="rv-corr"><div class="sep-q">¿Cuántas recibiste al final? (pedido ${fmtQty(r.env,r.kgpz)} ${u})</div>
+    <input id="rv-corr-n" class="text-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" value="${fmtQty(r.rec,r.kgpz)}" onkeydown="if(event.key==='Enter')rvCorrGuardar(${r.i})">
+    <div class="qty-err" id="rv-corr-err"></div>
+    <div class="pcard-actions" style="grid-template-columns:1fr 1fr;margin-top:6px"><button class="btn btn-secondary" ${RV.corrBusy?'disabled':''} onclick="rvCorrCancel()">Cancelar</button><button class="btn btn-primary" ${RV.corrBusy?'disabled':''} onclick="rvCorrGuardar(${r.i})">${RV.corrBusy?'Guardando…':'Guardar'}</button></div>
+    <div class="muted" style="margin-top:6px">Se vuelve a guardar el cierre${FACV&&FACV.saved&&!FACV.saved.detalle.manual?' y se compara otra vez con la factura':''}.</div></div>`;
 }
 function pdRecepcionHead(I){
   const dev=RV.rows.filter(r=>!r.pns && (r.exc>0||r.excFlag||r.rech>0)).length, fal=RV.rows.filter(r=>r.falt>0).length;
@@ -3851,9 +3944,9 @@ function facStripInner(sid, bare){
 }
 
 /* ── Closed reception: compare, ask, save ── */
-async function facBoxLoad(info){
+async function facBoxLoad(info, opts={}){
   const sid=info.session_id;
-  FACV={ info, lines:null, saved:null, lista:null, elegida:null, picks:{}, ack:false, cambiando:false, manual:false, motivo:'', error:null, saving:false };
+  FACV={ info, lines:null, saved:null, lista:null, elegida:null, picks:{}, ack:false, cambiando:false, manual:false, motivo:'', error:null, saving:false, recomparar:null, compStart:0 };
   facOf(sid, info.hub); facBoxRender();
   try{
     const [ev, env]=await Promise.all([
@@ -3864,6 +3957,12 @@ async function facBoxLoad(info){
     FACV.saved=local?{ detalle:local.detalle, ts:local.ts, receptor:local.receptor }:ev[0]||null;
     FACV.lines=(env&&env.lines)||[];
   }catch(e){ if(FACV) FACV.error=isNetErr(e)?'Sin conexión: no se pudo cargar la revisión de la factura.':'No se pudo cargar la orden ('+e.message+').'; }
+  // After «Corregir lo recibido»: compare the same invoice again against the new close (manual reviews only get their CSV columns back)
+  const sv=FACV && FACV.saved && FACV.saved.detalle;
+  if(opts.recomparar && sv && !FACV.error){
+    if(sv.manual || !sv.read_id) facReporte(info, sv).catch(()=>{});
+    else Object.assign(FACV, { recomparar:sv.read_id, cambiando:true, ack:true, picks:Object.assign({}, sv.picks||{}) });
+  }
   await facInit(sid, info.hub);
   facBoxRender();
 }
@@ -3877,7 +3976,9 @@ const facDone=f=>(f.reads||[]).find(r=>r.status==='done')||null;
 // one already saved — the auxiliar is choosing another).
 function facLectura(){
   if(FACV.elegida) return FACV.elegida;
-  const f=FAC[FACV.info.session_id], d=f && facDone(f); if(!d) return null;
+  const f=FAC[FACV.info.session_id], d=f && facDone(f);
+  if(FACV.recomparar){ const id=FACV.recomparar; return (f&&f.reads||[]).find(x=>x.read_id===id && x.status==='done') || (FACV.lista||[]).find(x=>x.read_id===id && x.status==='done') || null; }
+  if(!d) return null;
   if(FACV.cambiando && FACV.saved && FACV.saved.detalle && FACV.saved.detalle.read_id===d.read_id) return null;
   return d;
 }
@@ -3889,11 +3990,22 @@ function facAutoGuardar(){
   const f=FAC[FACV.info.session_id], r=facLectura(); if(!r || !f || ['fotos','subiendo','pendiente','error'].includes(facEstado(f))) return;
   if(facAvisos(r) && !FACV.ack) return;
   if(FACV.saved && FACV.saved.detalle && FACV.saved.detalle.read_id===r.read_id && !FACV.cambiando) return;
-  const c=facCmp(r); if(c.no_identificados.length || Object.keys(FACV.picks).length) return;
+  if(facComparando()) return;
+  const c=facCmp(r); if(c.no_identificados.length || (Object.keys(FACV.picks).length && !FACV.recomparar)) return;
   facGuardar(r, c);
 }
+// «Comparando…» stays up at least FAC_COMP_MS, so the receptor sees the reception being checked against the invoice
+const FAC_COMP_MS=1600;
+function facComparando(){
+  if(!FACV.compStart) FACV.compStart=Date.now();
+  const left=FAC_COMP_MS-(Date.now()-FACV.compStart); if(left<=0) return false;
+  clearTimeout(FACV._compT); FACV._compT=setTimeout(()=>{ if(FACV) facBoxRender(); }, left+30);
+  return true;
+}
+function facLoaderHtml(t, sub){ return `<div class="fac-load"><div class="spin"></div><div>${t}${sub?`<small>${sub}</small>`:''}</div></div>`; }
 function facDetalle(r, c){
-  return { read_id:r.read_id, origen:FACV.elegida?'lista':'sesion', reference:r.reference||null, supplier:r.supplier||null, printed_supplier:r.printed_supplier||null,
+  const sv=FACV.recomparar && FACV.saved && FACV.saved.detalle;
+  return { read_id:r.read_id, origen:sv?sv.origen:FACV.elegida?'lista':'sesion', recomparada:sv?true:undefined, reference:r.reference||null, supplier:r.supplier||null, printed_supplier:r.printed_supplier||null,
     invoice_date:r.invoice_date||null, totals_ok:r.totals_ok==null?null:r.totals_ok, warnings:(r.warnings||[]).length?r.warnings:undefined, avisos_aceptados:facAvisos(r)||undefined,
     filas:(r.rows||[]).length, piezas:c.piezas, conteo:c.conteo, limpia:c.limpia, lineas:c.lineas, no_solicitados:c.no_solicitados,
     picks:Object.keys(FACV.picks).length?FACV.picks:undefined };
@@ -3906,7 +4018,7 @@ async function facGuardarDetalle(detalle){
     detalle:Object.assign({ uid:newUid() }, detalle), receptor:S.receptor||INI.receptor||null, device_id:DEVICE_ID, ts:serverNow().toISOString() };
   OUTBOX.push(ev); saveOutbox();
   if(S.session && S.session.id===ev.session_id) addEvents([ev]);
-  Object.assign(V, { saved:{ detalle:ev.detalle, ts:ev.ts, receptor:ev.receptor }, cambiando:false, elegida:null, picks:{}, ack:false, manual:false, saving:false });
+  Object.assign(V, { saved:{ detalle:ev.detalle, ts:ev.ts, receptor:ev.receptor }, cambiando:false, elegida:null, picks:{}, ack:false, manual:false, saving:false, recomparar:null, compStart:0 });
   if(V===FACV) facBoxRender();
   flushOutbox();
   try{ await facReporte(I, ev.detalle); }catch(e){ toast(isNetErr(e)?'La revisión se guardó; el CSV se actualiza al volver a abrir con internet':'No se pudo actualizar el CSV ('+e.message+')', 4500); }
@@ -3942,18 +4054,23 @@ async function facReporte(I, d){
   if(RV && RV.info.reporte===I.reporte) RV.csv=out;
 }
 
+// The invoice check, in what the receptor does next: Regresar (not in the OC) and Reportar (billed but not received / above the
+// OC) as big separate blocks, then what needs a manual look (live test 2026-11-18: the small grey box hid them).
 function facResultadoHtml(d){
   const u='pz', it=(a, fn)=>a.map(x=>`<div class="fac-item">${fn(x)}</div>`).join('');
   const lin=d.lineas||[], dm=lin.filter(x=>x.de_mas>0), nf=lin.filter(x=>x.no_fisico>0), rv=lin.filter(x=>x.revisar), ns=d.no_solicitados||[];
+  const act=(t, sub, body, cls)=>`<div class="fac-act ${cls||''}"><h3>${t}</h3>${sub?`<div class="fac-act-sub">${sub}</div>`:''}${body||''}</div>`;
   let h=`<div class="muted" style="margin-bottom:8px">${d.reference?'Folio <b>'+escapeHtml(d.reference)+'</b> · ':''}${escapeHtml(d.supplier||d.printed_supplier||'')}${d.invoice_date?' · '+fechaLarga(d.invoice_date):''} · ${d.filas||0} renglones · ${fmtQty((d.piezas||{}).facturadas||0,'Pz')} pz facturadas</div>`;
   if(d.totals_ok===false || (d.warnings||[]).length) h+=`<div class="note">Se revisó aunque ${d.totals_ok===false?'los totales de la factura no cuadraron':'la lectura tuvo avisos'}.</div>`;
-  if(d.limpia) return h+`<div class="warn-box ok">La factura cobra solo lo pedido y recibido.</div>`;
-  h+=`<div class="note">No se paga lo marcado: solo lo pedido <b>y</b> recibido.</div>`;
-  if(ns.length) h+=`<div class="fac-sec">Producto no solicitado en OC · ${ns.length}</div>`+it(ns, x=>`<span>${escapeHtml(x.producto)}</span><b>${x.piezas!=null?fmtQty(x.piezas,'Pz')+' '+u:'¿?'}</b>`);
-  if(dm.length) h+=`<div class="fac-sec">Piezas de más (arriba de la OC) · ${dm.length}</div>`+it(dm, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">factura ${fmtQty(x.facturado,'Pz')} · pedido ${fmtQty(x.pedido,'Pz')}</small></span><b>${fmtQty(x.de_mas,'Pz')} ${u}</b>`);
-  if(nf.length) h+=`<div class="fac-sec">Cobradas, no en físico · ${nf.length}</div>`+it(nf, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">factura ${fmtQty(x.facturado,'Pz')} · recibido ${fmtQty(x.recibido,'Pz')}</small></span><b>${fmtQty(x.no_fisico,'Pz')} ${u}</b>`);
-  if(rv.length) h+=`<div class="fac-sec">Cantidad por revisar · ${rv.length}</div>`+it(rv, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">${x.revisar==='kg'?'Se pide en kg: compara a mano':'La cantidad de la factura no se leyó bien'}${x.facturado!=null?' · factura '+fmtQty(x.facturado,x.kgpz):''} · recibido ${fmtQty(x.recibido,x.kgpz)} ${unitOf(x.kgpz)}</small></span><b>revisar</b>`);
-  return h;
+  if(d.limpia) return h+act('La factura está bien', 'Cobra solo lo pedido y recibido. No hay nada que regresar ni reportar.', '', 'ok');
+  if(ns.length) h+=act(`Regresar · ${ns.length}`, 'Vienen en la factura pero no en la OC: no se reciben ni se pagan.',
+    it(ns, x=>`<span>${escapeHtml(x.producto)}</span><b>${x.piezas!=null?fmtQty(x.piezas,'Pz')+' '+u:'¿?'}</b>`));
+  if(nf.length) h+=act(`Reportar: cobradas que no llegaron · ${nf.length}`, 'La factura cobra piezas que no recibimos en físico. Que el proveedor las quite de la factura.',
+    it(nf, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">factura ${fmtQty(x.facturado,'Pz')} · recibido ${fmtQty(x.recibido,'Pz')}</small></span><b>${fmtQty(x.no_fisico,'Pz')} ${u}</b>`));
+  if(dm.length) h+=act(`Reportar: más de lo pedido · ${dm.length}`, 'La factura cobra más piezas de las que pide la OC.',
+    it(dm, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">factura ${fmtQty(x.facturado,'Pz')} · pedido ${fmtQty(x.pedido,'Pz')}</small></span><b>${fmtQty(x.de_mas,'Pz')} ${u}</b>`));
+  if(rv.length) h+=`<div class="fac-sec">Revisar a mano · ${rv.length}</div>`+it(rv, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">${x.revisar==='kg'?'Se pide en kg: compara a mano':'La cantidad de la factura no se leyó bien'}${x.facturado!=null?' · factura '+fmtQty(x.facturado,x.kgpz):''} · recibido ${fmtQty(x.recibido,x.kgpz)} ${unitOf(x.kgpz)}</small></span><b>revisar</b>`);
+  return h+`<div class="note" style="margin-top:8px">Solo se paga lo pedido <b>y</b> recibido. ¿El proveedor trajo algo que faltaba? Usa «Corregir lo recibido» en el producto.</div>`;
 }
 function facBoxInner(){
   const I=FACV.info, sid=I.session_id, f=FAC[sid], J=facJs(sid);
@@ -3965,7 +4082,7 @@ function facBoxInner(){
     const quien=`<div class="muted" style="margin-top:6px">Revisada ${localDateStr(new Date(S0.ts))!==localDateStr()?fechaLarga(localDateStr(new Date(S0.ts)))+' ':''}${localHM(new Date(S0.ts))}${S0.receptor?' · '+escapeHtml(S0.receptor):''}</div>`;
     const nueva=done && done.read_id!==d.read_id && (d.manual || d.origen!=='lista') ? `<div class="warn-box">Hay una lectura más nueva de la factura.<button class="btn btn-secondary btn-block" onclick="facCambiar()">Comparar con la nueva</button></div>`:'';
     if(d.manual) return h+`<div class="info-card"><b>Sin revisión de factura</b><div>${escapeHtml(d.motivo||'')}</div>${quien}</div>${nueva}<button class="link-btn" onclick="facCambiar()">Revisar con la factura</button>`;
-    return h+`<div class="info-card">${facResultadoHtml(d)}${quien}${d.read_id?facFotoLink(d.read_id):''}</div>${nueva}<button class="link-btn" onclick="facCambiar()">Cambiar factura</button>`;
+    return h+`<div>${facResultadoHtml(d)}${quien}${d.read_id?facFotoLink(d.read_id):''}</div>${nueva}<button class="link-btn" onclick="facCambiar()">Cambiar factura</button>`;
   }
   if(FACV.manual) return h+facManualHtml();
   if(['fotos','subiendo','pendiente','error'].includes(st) || f.preparando) return h+facStripHtml(sid, true)+(st==='error'?`<button class="link-btn" onclick="facManual()">Comparar a mano</button>`:'');
@@ -3973,9 +4090,9 @@ function facBoxInner(){
   if(r){
     if(facAvisos(r) && !FACV.ack) return h+`<div class="warn-box"><b>¿Falta una página de la factura?</b>
       ${r.totals_ok===false?'<div>Los totales de la factura no cuadran con los renglones leídos.</div>':''}${(r.warnings||[]).map(w=>`<div>· ${escapeHtml(w)}</div>`).join('')}
-      <div class="fac-btns">${facVigente(sid)?`<button class="btn btn-secondary" onclick="facPick(${J},true)">Tomar todas las páginas</button>`:''}<button class="btn btn-secondary" onclick="FACV.ack=true;facBoxRender()">Está completa: comparar</button></div></div>`;
+      <div class="fac-btns">${facVigente(sid)?`<button class="btn btn-secondary" onclick="facPick(${J},true)">Tomar todas las páginas</button>`:''}<button class="btn btn-secondary" onclick="FACV.ack=true;FACV.compStart=0;facBoxRender()">Está completa: comparar</button></div></div>`;
     const c=facCmp(r);
-    if(!c.no_identificados.length && !Object.keys(FACV.picks).length) return h+'<div class="muted">Guardando la revisión…</div>';
+    if(!c.no_identificados.length && (!Object.keys(FACV.picks).length || FACV.recomparar)) return h+facLoaderHtml('Comparando la recepción contra la factura…', 'Producto por producto: lo pedido, lo recibido y lo cobrado.');
     const opts=(n)=>{ const sug=n.sugeridas, rest=(FACV.lines||[]).filter(l=>!sug.includes(l.sku_key)), name=k=>(FACV.lines.find(l=>l.sku_key===k)||{}).producto||k, cur=FACV.picks[n.sourceRow]||'';
       const o=(k,t)=>`<option value="${escapeHtml(k)}" ${cur===k?'selected':''}>${escapeHtml(t)}</option>`;
       return `<select class="text-input" onchange="facPickLinea(${n.sourceRow},this.value)"><option value="">Elige el producto de la orden…</option>
@@ -3987,13 +4104,14 @@ function facBoxInner(){
       +pend.map(n=>`<div class="info-card"><b>${escapeHtml(n.descripcion||'Renglón '+n.sourceRow)}</b><div class="muted">${n.codigos.length?'Código '+escapeHtml(n.codigos.join(', '))+' · ':''}${n.piezas!=null?fmtQty(n.piezas,'Pz')+' pz':'cantidad sin leer'}${n.ambiguo?' · coincide con varios productos':''}</div>${opts(n)}</div>`).join('')
       +`<button class="btn btn-warn btn-block" style="margin-bottom:12px" ${faltan||FACV.saving?'disabled':''} onclick="facGuardarPicks()">${faltan?`Faltan ${faltan} por elegir`:'Guardar revisión de la factura'}</button>`;
   }
-  if(st==='leyendo') return h+facStripHtml(sid, true);
-  if(st==='fallo'){
+  if(st==='leyendo' && !FACV.recomparar) return h+facLoaderHtml('Leyendo la factura…', 'Unos 15 segundos. Después se compara contra la recepción.');
+  if(st==='fallo' && !FACV.recomparar){
     const fallas=(f.reads||[]).filter(x=>x.status==='failed').length;
     return h+facStripHtml(sid, true)+(fallas>=2?`<button class="link-btn" onclick="facManual()">Comparar a mano</button>`:'');
   }
   // No read for this session: one scanned in Invoice Reader, or photos, or by hand
-  if(FACV.lista===null){ facCargarLista(); return h+'<div class="muted">Buscando facturas del proveedor…</div>'; }
+  if(FACV.lista===null){ facCargarLista(); return h+(FACV.recomparar?facLoaderHtml('Comparando la recepción contra la factura…', 'Con lo que corregiste.'):'<div class="muted">Buscando facturas del proveedor…</div>'); }
+  if(FACV.recomparar){ FACV.recomparar=null; FACV.picks={}; } // that read is gone: pick the invoice again
   const prov=I.proveedor||areaName(I.area), mine=FACV.lista.filter(x=>x.status==='done' && (facMismoProveedor(prov, x.supplier) || facMismoProveedor(prov, x.printed_supplier)));
   const otras=FACV.lista.filter(x=>x.status==='done' && !mine.includes(x));
   const opt=x=>`<div class="fac-opt"><button class="res-item" onclick="facElegir(${facJs(x.read_id)})"><div style="flex:1"><div class="res-name">${escapeHtml(facNombre(x))}</div>
@@ -4044,10 +4162,10 @@ async function facVerFoto(id){
       +'<div class="muted" style="margin-top:6px">Toca una foto para abrirla en grande.</div>',
     buttons:[{ label:'Cerrar', value:null }] });
 }
-function facElegir(id){ const r=(FACV.lista||[]).find(x=>x.read_id===id); if(!r) return; FACV.elegida=r; FACV.picks={}; FACV.ack=false; facBoxRender(); }
+function facElegir(id){ const r=(FACV.lista||[]).find(x=>x.read_id===id); if(!r) return; FACV.elegida=r; FACV.picks={}; FACV.ack=false; FACV.recomparar=null; FACV.compStart=0; facBoxRender(); }
 function facPickLinea(row, v){ if(v) FACV.picks[row]=v; else delete FACV.picks[row]; facBoxRender(); }
 function facGuardarPicks(){ const r=facLectura(); if(!r) return; const c=facCmp(r); if(c.no_identificados.length) return; facGuardar(r, c); }
-function facCambiar(){ FACV.cambiando=true; FACV.elegida=null; FACV.picks={}; FACV.ack=false; FACV.lista=null; FACV.manual=false; facBoxRender(); }
+function facCambiar(){ FACV.cambiando=true; FACV.elegida=null; FACV.picks={}; FACV.ack=false; FACV.lista=null; FACV.manual=false; FACV.recomparar=null; FACV.compStart=0; facBoxRender(); }
 function facManual(){ FACV.manual=true; FACV.motivo=''; facBoxRender(); }
 const FAC_MOTIVOS=['No trajo factura','La factura no se puede leer','Otro'];
 function facManualHtml(){
