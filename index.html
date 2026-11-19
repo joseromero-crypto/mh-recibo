@@ -316,6 +316,7 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .pv-week b{text-align:right;font-variant-numeric:tabular-nums}
 .pv-week-sub{font-size:12px;color:var(--c-muted);margin:0 0 8px 64px}
 .pv-prod summary{list-style:none;cursor:pointer}
+.pv-sub{font-weight:500;font-size:12px}
 .pv-prod summary::-webkit-details-marker{display:none}
 .pv-hist{font-size:13px;border-top:1px solid var(--c-line);padding-top:6px;margin-top:6px}
 /* Admin → Calendario: one bar per reception, teal = Abarrotes, ink = Carnes (outlined = still open / sin cerrar) */
@@ -4537,8 +4538,8 @@ function admCodigosCsv(){
 /* ── Proveedores: supplier insights for comercial (view only). Closed pd-* receptions whose session fecha falls in the
    range; latest close per session (a later reabrir / borrar hides it, as listCerradas). Lines come from
    cerrar.lineas_todas; closes saved before it existed read their report CSV (PD_REPORT_COLS); if that can't be read the
-   reception still counts (recepciones, puntualidad) but is «sin detalle». Fill rate = Σ min(recibido, pedido) ÷ Σ pedido
-   over order lines (pz and kg summed as they come). Excedente in modo botones is a flag without a quantity. ── */
+   reception still counts (recepciones, puntualidad) but is «sin detalle». KPIs: see pvKpis. «Cobrado y no entregado» reads
+   the latest 'factura' event per session. Excedente in modo botones is a flag without a quantity. ── */
 const PV={ data:null, key:'', csv:new Map(), recs:[], prods:[] };
 const PV_MOTIVO_INV={ 'fecha corta':'fecha_corta', 'dañada':'danada' };
 function pvDefaults(){ if(!ADM.pvHasta){ const t=todayStr(); ADM.pvHasta=t; ADM.pvDesde=ymdAdd(t,-27); } if(ADM.pvHub==null) ADM.pvHub=''; }
@@ -4570,11 +4571,21 @@ async function pvLoad(){
     if(!PV.csv.has(r.info.reporte)){ try{ PV.csv.set(r.info.reporte, pvLinesFromCsv(await sbFetch(r.info.reporte))); }catch(e){ if(isNetErr(e)) throw e; PV.csv.set(r.info.reporte, null); } }
     r.lines=PV.csv.get(r.info.reporte); if(r.lines) r.fuente='reporte';
   }));
+  // Invoice checks (latest 'factura' per session; a manual one compared nothing) → sku_key → pieces billed, not received
+  const fevs=await pgSelectAll('rec_events', `tipo=eq.factura&area=like.pd-*&fecha=gte.${ADM.pvDesde}&fecha=lte.${ADM.pvHasta}`
+    +`${ADM.pvHub?`&hub=eq.${encodeURIComponent(ADM.pvHub)}`:''}&select=session_id,detalle&order=id.asc`);
+  const fac=new Map(); for(const e of fevs) fac.set(e.session_id, e.detalle||{});
+  for(const r of recs){ const d=fac.get(r.info.session_id);
+    if(d && !d.manual && Array.isArray(d.lineas)) r.fac=new Map(d.lineas.filter(x=>x.no_fisico>0).map(x=>[x.sku_key, Number(x.no_fisico)])); }
   recs.sort((a,b)=>b.info.fecha.localeCompare(a.info.fecha) || Date.parse(b.info.ts)-Date.parse(a.info.ts));
   PV.key=key; PV.data=recs; return recs;
 }
-function pvNew(){ return { recs:0, sinDet:0, hubs:new Set(), lineas:0, completas:0, ped:0, ok:0, excL:0, excFlag:0, excQ:{}, rech:{}, rechL:0, faltL:0, faltQ:{}, pnsL:0, antes:0, aTiempo:0, tarde:0, diasTarde:0, sinFecha:0 }; }
-function pvAddQ(o,k,v){ o[k]=round2((o[k]||0)+(Number(v)||0)); }
+// One aggregate (all suppliers, one supplier, one week, one reception or one product). «Producto» = one order line of one
+// reception; piezas and kilos are kept apart (pz = Pz lines, kg = Kg lines). Rates are over what was ordered, so
+// fill rate + rechazos + faltante add up to 100 %.
+function pvNew(){ return { recs:0, sinDet:0, hubs:new Set(), prods:0, completas:0, pz:pvU(), kg:pvU(), fcL:0, danL:0, faltL:0, excL:0, pnsL:0,
+  cobL:0, cobPz:0, facRecs:0, antes:0, aTiempo:0, tarde:0, diasTarde:0, sinFecha:0 }; }
+function pvU(){ return { ped:0, ok:0, fc:0, dan:0, falt:0, exc:0 }; }
 // Days between the order's delivery date and the reception (closest of the ticked OCs): <0 early, 0 on time, >0 late
 function pvDias(info){
   let best=null; for(const f of (info.fechas_entrega||[]).filter(Boolean)){ const d=daysBetween(f, info.fecha); if(best==null || Math.abs(d)<Math.abs(best)) best=d; }
@@ -4584,37 +4595,61 @@ function pvAddRec(a, r){
   a.recs++; a.hubs.add(r.info.hub);
   const d=pvDias(r.info);
   if(d==null) a.sinFecha++; else if(d<0) a.antes++; else if(d===0) a.aTiempo++; else { a.tarde++; a.diasTarde+=d; }
+  if(r.fac) a.facRecs++;
   if(!r.lines){ a.sinDet++; return; }
-  for(const l of r.lines) pvAddLine(a, l);
+  for(const l of r.lines) pvAddLine(a, l, r.fac&&r.fac.get(l.sku_key));
 }
-function pvAddLine(a, l){
+// cob: pieces the invoice charges that weren't received (factura event, no_fisico)
+function pvAddLine(a, l, cob){
+  if(cob>0){ a.cobL++; a.cobPz=round2(a.cobPz+cob); }
   if(l.no_solicitado){ a.pnsL++; return; }
-  const P=Number(l.pedido)||0;
-  a.lineas++; a.ped+=P; a.ok+=Math.min(Number(l.recibido)||0, P);
+  const u=l.kgpz==='Kg'?a.kg:a.pz, P=Number(l.pedido)||0, n=v=>Number(v)||0;
+  a.prods++; u.ped=round2(u.ped+P); u.ok=round2(u.ok+Math.min(n(l.recibido), P));
   if(!l.faltante && !l.rechazadas) a.completas++;
-  if(l.excedente){ a.excL++; if(typeof l.excedente==='number') pvAddQ(a.excQ, l.kgpz, l.excedente); else a.excFlag++; }
-  if(l.rechazadas){ const m=l.motivo||'otro', x=a.rech[m]||(a.rech[m]={ l:0, q:{} }); x.l++; a.rechL++; pvAddQ(x.q, l.kgpz, l.rechazadas); }
-  if(l.faltante){ a.faltL++; pvAddQ(a.faltQ, l.kgpz, l.faltante); }
+  if(l.excedente){ a.excL++; if(typeof l.excedente==='number') u.exc=round2(u.exc+l.excedente); }
+  if(l.rechazadas){ if(l.motivo==='danada'){ a.danL++; u.dan=round2(u.dan+n(l.rechazadas)); } else { a.fcL++; u.fc=round2(u.fc+n(l.rechazadas)); } }
+  if(l.faltante){ a.faltL++; u.falt=round2(u.falt+n(l.faltante)); }
 }
-const pvFr=a=>a.ped>0 ? a.ok/a.ped : null;
-const pvPct=(n,d)=>d ? (Math.round(n*1000/d)/10)+'%' : '—';
-function pvFrTxt(a){ const f=pvFr(a); return f==null?'—':(Math.round(f*1000)/10)+'%'; }
-function pvQ(o){ const p=[]; if(o.Pz) p.push(fmtQty(o.Pz,'Pz')+' pz'); if(o.Kg) p.push(fmtQty(o.Kg,'Kg')+' kg'); return p.join(' + ')||'0'; }
+const pvR=(n,d)=>d>0 ? n/d : null;
+const pvPctTxt=f=>f==null?'—':(Math.round(f*1000)/10)+'%';
+const pvPct=(n,d)=>pvPctTxt(pvR(n,d));
+// Main number: fill rate por pieza; a supplier (or product) with only Kg lines falls back to kilos
+const pvMain=a=>a.pz.ped>0 ? pvR(a.pz.ok, a.pz.ped) : pvR(a.kg.ok, a.kg.ped);
+const pvFrTxt=a=>pvPctTxt(pvMain(a));
 const pvWeek=ymd=>ymdAdd(ymd, -ymdDow(ymd));
-const PV_RECH=[['fecha_corta','Fecha corta'],['danada','Dañada']];
-function pvRechL(a, m){ return a.rech[m]?a.rech[m].l:0; }
-// Chips for one supplier / product: only what happened
+const pvPl=(n, s, p)=>`${n} ${n===1?s:(p||s+'s')}`;
+// The six KPIs (+ the fill rate in kilos when there are Kg lines)
+function pvKpis(a){
+  const kgOnly=!a.pz.ped && a.kg.ped>0, frs=kgOnly?a.kg:a.pz, uTxt=kgOnly?'kg':'pz';
+  const kpi=(n, l, sub, teal)=>`<div class="stat"><div class="stat-n"${teal?' style="color:var(--c-teal-dark)"':''}>${n}</div><div class="stat-l">${l}${sub?`<br><span class="pv-sub">${sub}</span>`:''}</div></div>`;
+  let h=`<div class="stat-grid">`
+    +kpi(pvPct(frs.ok, frs.ped), `fill rate por ${kgOnly?'kilo':'pieza'}`, `${fmtQty(frs.ok, kgOnly?'Kg':'Pz')} de ${fmtQty(frs.ped, kgOnly?'Kg':'Pz')} ${uTxt} pedidas`, true)
+    +kpi(pvPct(a.completas, a.prods), 'fill rate por producto', `${a.completas} de ${pvPl(a.prods,'producto')} completos`, true)
+    +kpi(pvPct(frs.fc, frs.ped), `rechazo fecha corta por ${kgOnly?'kilo':'pieza'}`, `${fmtQty(frs.fc, kgOnly?'Kg':'Pz')} ${uTxt} rechazadas`)
+    +kpi(pvPct(a.fcL, a.prods), 'rechazo fecha corta por producto', `${a.fcL} de ${pvPl(a.prods,'producto')}`)
+    +kpi(a.pnsL, 'producto no solicitado', 'incidentes: no venía en la OC')
+    +kpi(a.excL, 'exceso sobre la OC', 'incidentes: llegó más de lo pedido')
+    +`<div class="stat" style="grid-column:1 / -1"><div class="stat-n">${a.facRecs?a.cobL:'—'}</div><div class="stat-l">cobrado y no entregado<br><span class="pv-sub">${a.facRecs
+      ?`incidentes: en la factura, no en físico${a.cobPz?` · ${fmtQty(a.cobPz,'Pz')} pz`:''} · ${pvPl(a.facRecs,'recepción','recepciones')} de ${a.recs} con factura revisada`
+      :'ninguna recepción tiene la factura revisada'}</span></div></div></div>`;
+  if(a.pz.ped && a.kg.ped) h+=`<div class="muted" style="font-size:12px;margin:-4px 0 8px">Productos por kilo, aparte: fill rate ${pvPct(a.kg.ok, a.kg.ped)} (${fmtQty(a.kg.ok,'Kg')} de ${fmtQty(a.kg.ped,'Kg')} kg) · fecha corta ${pvPct(a.kg.fc, a.kg.ped)}</div>`;
+  return h;
+}
+// Chips for a row: only what happened, counted in productos (prod: one product, counted in times)
 function pvChips(a, prod){
   const c=[];
-  if(a.excL) c.push(prod?`Excedente ${a.excL}`:`Excedente ${a.excL} de ${a.lineas} línea${a.lineas===1?'':'s'}`);
-  for(const [m,n] of PV_RECH) if(pvRechL(a,m)) c.push(`${n} ${a.rech[m].l}`);
-  for(const m of Object.keys(a.rech)) if(!PV_RECH.some(x=>x[0]===m)) c.push(`Rechazo ${a.rech[m].l}`);
-  if(a.faltL) c.push(`Faltante ${a.faltL}`);
-  if(a.pnsL) c.push(`No solicitados ${a.pnsL}`);
-  if(a.tarde) c.push(`Tarde ${a.tarde} de ${a.recs}`);
+  if(prod){ const v=(t,n)=>n&&c.push(n===1?t:`${t} (${n} veces)`);
+    v('Fecha corta',a.fcL); v('Dañadas',a.danL); v('Faltante',a.faltL); v('No solicitado',a.pnsL); v('Exceso',a.excL); v('Cobrado sin entregar',a.cobL);
+    return c.map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join(' '); }
+  if(a.fcL) c.push(`${pvPl(a.fcL,'producto')} con fecha corta`);
+  if(a.danL) c.push(`${pvPl(a.danL,'producto')} con dañadas`);
+  if(a.faltL) c.push(`${pvPl(a.faltL,'producto')} con faltante`);
+  if(a.pnsL) c.push(`${a.pnsL} no solicitado${a.pnsL===1?'':'s'}`);
+  if(a.excL) c.push(`${a.excL} con exceso`);
+  if(a.cobL) c.push(`${a.cobL} cobrado${a.cobL===1?'':'s'} sin entregar`);
   return c.map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join(' ');
 }
-function pvBar(a){ const f=pvFr(a); return `<div class="pv-bar"><i style="width:${f==null?0:Math.min(100,f*100).toFixed(1)}%"></i></div>`; }
+function pvBar(a){ const f=pvMain(a); return `<div class="pv-bar"><i style="width:${f==null?0:Math.min(100,f*100).toFixed(1)}%"></i></div>`; }
 function pvByProv(recs){
   const m=new Map();
   for(const r of recs){ if(!m.has(r.prov)) m.set(r.prov, pvNew()); pvAddRec(m.get(r.prov), r); }
@@ -4625,21 +4660,24 @@ function pvProducts(recs){
   const m=new Map();
   for(const r of recs){ if(!r.lines) continue;
     for(const l of r.lines){
-      const k=r.prov+'|'+l.sku_key;
-      let p=m.get(k); if(!p){ p=Object.assign(pvNew(), { prov:r.prov, sku:l.sku_key, producto:l.producto, kgpz:l.kgpz, veces:0, hist:[] }); m.set(k, p); }
-      p.veces++; pvAddLine(p, l); p.hist.push({ r, l });
+      const k=r.prov+'|'+l.sku_key, cob=r.fac&&r.fac.get(l.sku_key);
+      let p=m.get(k); if(!p){ p=Object.assign(pvNew(), { prov:r.prov, sku:l.sku_key, producto:l.producto, kgpz:l.kgpz, hist:[] }); m.set(k, p); }
+      pvAddLine(p, l, cob); p.hist.push({ r, l, cob });
     }
   }
   return [...m.values()];
 }
-const pvIssues=p=>p.excL+p.rechL+p.faltL+p.pnsL;
-function pvLineTxt(l){
-  const q=v=>fmtQty(v,l.kgpz), u=unitOf(l.kgpz);
-  if(l.no_solicitado) return 'No solicitado'+(typeof l.excedente==='number'?` · ${q(l.excedente)} ${u} devueltas`:'')+' (se rechazó)';
-  const p=[`Pedido ${q(l.pedido)} ${u}`, `Recibido ${q(l.recibido)}`];
-  if(l.excedente) p.push(typeof l.excedente==='number'?`Excedente ${q(l.excedente)} (devuelto)`:'Llegó excedente (rechazado)');
-  if(l.rechazadas) p.push(`Rechazadas ${q(l.rechazadas)} (${PD_MOTIVO[l.motivo]||l.motivo||'sin motivo'})`);
-  if(l.faltante) p.push(`Faltan ${q(l.faltante)}`);
+const pvIssues=p=>p.fcL+p.danL+p.faltL+p.pnsL+p.excL+p.cobL;
+function pvLineTxt(l, cob){
+  const q=v=>fmtQty(v,l.kgpz), u=unitOf(l.kgpz), p=[];
+  if(l.no_solicitado) p.push('No venía en la OC (se regresó)');
+  else {
+    p.push(`Pedido ${q(l.pedido)} ${u}`, `recibido ${q(l.recibido)}`);
+    if(l.rechazadas) p.push(`${q(l.rechazadas)} rechazadas por ${PD_MOTIVO[l.motivo]||l.motivo||'fecha corta'}`);
+    if(l.faltante) p.push(`faltaron ${q(l.faltante)}`);
+    if(l.excedente) p.push(typeof l.excedente==='number'?`${q(l.excedente)} de más (se regresaron)`:'llegó de más (se regresó)');
+  }
+  if(cob>0) p.push(`la factura cobra ${fmtQty(cob,'Pz')} pz que no llegaron`);
   return p.join(' · ');
 }
 function pvFecha(k, v){
@@ -4673,82 +4711,76 @@ async function admProveedores(){
   if(ADM.pvSel && byProv.has(ADM.pvSel)) return pvDetalle(el, filtros, recs.filter(r=>r.prov===ADM.pvSel), byProv.get(ADM.pvSel));
   ADM.pvSel=null;
   const tot=pvNew(); recs.forEach(r=>pvAddRec(tot, r));
-  let h=filtros+`<div class="muted" style="font-size:13px">Recepciones de proveedor directo cerradas, por fecha de la recepción. Fill rate = lo recibido (sin pasar de lo pedido) ÷ lo pedido.</div>`;
+  let h=filtros;
   if(!recs.length){ el.innerHTML=h+'<div class="empty-hint" style="margin-top:12px">Sin recepciones de proveedor cerradas en este periodo.</div>'; return; }
-  h+=`<div class="stat-grid">
-    <div class="stat"><div class="stat-n" style="color:var(--c-teal-dark)">${pvFrTxt(tot)}</div><div class="stat-l">fill rate</div></div>
-    <div class="stat"><div class="stat-n">${tot.recs}</div><div class="stat-l">recepciones · ${byProv.size} proveedor${byProv.size===1?'':'es'}</div></div>
-    <div class="stat"><div class="stat-n">${pvPct(tot.excL, tot.lineas)}</div><div class="stat-l">líneas con excedente</div></div>
-    <div class="stat"><div class="stat-n">${pvPct(tot.aTiempo, tot.recs-tot.sinFecha)}</div><div class="stat-l">entregas el día programado</div></div></div>`;
-  if(tot.sinDet) h+=`<div class="warn-box">${tot.sinDet} recepción(es) sin detalle por producto (no se pudo leer su reporte): cuentan en recepciones y puntualidad, no en fill rate.</div>`;
+  h+=`<div class="muted" style="font-size:13px">${pvPl(tot.recs,'recepción','recepciones')} · ${pvPl(byProv.size,'proveedor','proveedores')} · ${pvPl(tot.prods,'producto')} pedidos</div>`+pvKpis(tot);
+  if(tot.sinDet) h+=`<div class="warn-box">${pvPl(tot.sinDet,'recepción','recepciones')} sin detalle por producto (no se pudo leer su reporte): no cuentan en los porcentajes.</div>`;
   h+=`<div class="row2" style="margin-bottom:6px"><button class="btn btn-secondary" onclick="pvCsv('prov')">CSV por proveedor</button><button class="btn btn-secondary" onclick="pvCsv('prod')">CSV por producto</button></div>`;
-  const orden=[...byProv.entries()].map(([p,a],i)=>({ p, a, i:PV.provs.indexOf(p) })).sort((x,y)=>(pvFr(x.a)??2)-(pvFr(y.a)??2) || y.a.recs-x.a.recs || x.p.localeCompare(y.p));
+  const orden=[...byProv.entries()].map(([p,a])=>({ p, a, i:PV.provs.indexOf(p) })).sort((x,y)=>(pvMain(x.a)??2)-(pvMain(y.a)??2) || y.a.recs-x.a.recs || x.p.localeCompare(y.p));
   h+=`<div class="section-title">Proveedores · peor fill rate primero</div>`+orden.map(({p,a,i})=>`<div class="adm-row pv-row" role="button" tabindex="0" onclick="pvVer(${i})" onkeydown="if(event.key==='Enter')pvVer(${i})">
       <div class="pv-head"><b>${escapeHtml(p)}</b><span class="pv-fr">${pvFrTxt(a)}</span></div>${pvBar(a)}
-      <div class="muted" style="font-size:12px">${a.recs} recepci${a.recs===1?'ón':'ones'} · ${a.lineas} líneas · ${escapeHtml([...a.hubs].map(hubName).join(', '))}${a.sinDet?` · ${a.sinDet} sin detalle`:''}</div>
-      <div class="pv-chips">${pvChips(a)||'<span class="tag green">Sin diferencias</span>'}</div></div>`).join('');
+      <div class="muted" style="font-size:12px">${pvPl(a.recs,'recepción','recepciones')} · ${pvPct(a.completas, a.prods)} de productos completos · ${escapeHtml([...a.hubs].map(hubName).join(', '))}</div>
+      <div class="pv-chips">${pvChips(a)||'<span class="tag green">Sin incidentes</span>'}</div></div>`).join('');
   el.innerHTML=h;
 }
 function pvDetalle(el, filtros, recs, a){
   const prov=ADM.pvSel, prods=pvProducts(recs);
-  prods.sort((x,y)=>(pvFr(x)??2)-(pvFr(y)??2) || pvIssues(y)-pvIssues(x) || x.producto.localeCompare(y.producto));
+  prods.sort((x,y)=>(pvMain(x)??2)-(pvMain(y)??2) || pvIssues(y)-pvIssues(x) || x.producto.localeCompare(y.producto));
   PV.recs=recs; PV.prods=prods;
   const conFecha=a.recs-a.sinFecha;
   let h=`<button class="link-btn" style="margin:0 0 4px;padding-left:0" onclick="pvVolver()">← Todos los proveedores</button>${filtros}
-    <h2>${escapeHtml(prov)}</h2><div class="muted" style="font-size:13px">${fechaLarga(ADM.pvDesde)} – ${fechaLarga(ADM.pvHasta)} · ${escapeHtml([...a.hubs].map(hubName).join(', '))}</div>
-    <div class="stat-grid">
-    <div class="stat"><div class="stat-n" style="color:var(--c-teal-dark)">${pvFrTxt(a)}</div><div class="stat-l">fill rate · ${a.lineas} líneas</div></div>
-    <div class="stat"><div class="stat-n">${a.recs}</div><div class="stat-l">recepciones${a.sinDet?` · ${a.sinDet} sin detalle`:''}</div></div>
-    <div class="stat"><div class="stat-n">${pvPct(a.completas, a.lineas)}</div><div class="stat-l">líneas completas</div></div>
-    <div class="stat"><div class="stat-n">${pvPct(a.excL, a.lineas)}</div><div class="stat-l">líneas con excedente · ${a.excL} de ${a.lineas}${Object.keys(a.excQ).length?` · ${pvQ(a.excQ)} de más`:''}</div></div>
-    ${PV_RECH.map(([m,n])=>`<div class="stat"><div class="stat-n">${pvRechL(a,m)}</div><div class="stat-l">líneas con rechazo: ${n.toLowerCase()}${pvRechL(a,m)?' · '+pvQ(a.rech[m].q):''}</div></div>`).join('')}
-    <div class="stat"><div class="stat-n">${a.faltL}</div><div class="stat-l">líneas con faltante${a.faltL?' · '+pvQ(a.faltQ):''}</div></div>
-    <div class="stat"><div class="stat-n">${a.pnsL}</div><div class="stat-l">productos no solicitados</div></div>
-    <div class="stat" style="grid-column:1 / -1"><div class="stat-n">${pvPct(a.aTiempo, conFecha)}</div><div class="stat-l">el día programado (${a.aTiempo} de ${conFecha}) · ${a.antes} antes · ${a.tarde} tarde${a.tarde?` (promedio ${Math.round(a.diasTarde*10/a.tarde)/10} día${a.diasTarde===a.tarde?'':'s'})`:''}</div></div></div>`
-    +(a.excFlag?`<div class="muted" style="font-size:12px">${a.excFlag} línea${a.excFlag===1?'':'s'} con excedente sin cantidad: en las recepciones con botones el excedente se marca, no se cuenta.</div>`:'');
+    <h2>${escapeHtml(prov)}</h2><div class="muted" style="font-size:13px">${fechaLarga(ADM.pvDesde)} – ${fechaLarga(ADM.pvHasta)} · ${pvPl(a.recs,'recepción','recepciones')} · ${escapeHtml([...a.hubs].map(hubName).join(', '))}</div>`
+    +pvKpis(a)
+    +(conFecha?`<div class="muted" style="font-size:12px;margin:-4px 0 8px">Puntualidad: ${a.aTiempo} de ${conFecha} el día programado · ${a.antes} antes · ${a.tarde} tarde${a.tarde?` (promedio ${Math.round(a.diasTarde*10/a.tarde)/10} día${a.diasTarde===a.tarde?'':'s'})`:''}</div>`:'')
+    +(a.sinDet?`<div class="warn-box">${pvPl(a.sinDet,'recepción','recepciones')} sin detalle por producto: no cuentan en los porcentajes.</div>`:'');
   // Weekly trend: every week of the range, Monday first
   const wk=new Map(); recs.forEach(r=>{ const w=pvWeek(r.info.fecha); if(!wk.has(w)) wk.set(w, pvNew()); pvAddRec(wk.get(w), r); });
-  h+=`<div class="section-title">Por semana (fill rate)</div>`;
+  h+=`<div class="section-title">Fill rate por semana</div>`;
   for(let w=pvWeek(ADM.pvHasta); w>=pvWeek(ADM.pvDesde); w=ymdAdd(w,-7)){
     const x=wk.get(w);
     h+=`<div class="pv-week"><span>${fechaLarga(w).replace(/ de (\w{3})\w*/,' $1')}</span>${x?pvBar(x):'<div class="pv-bar"></div>'}<b>${x?pvFrTxt(x):''}</b></div>
-      <div class="pv-week-sub">${x?`${x.recs} recepci${x.recs===1?'ón':'ones'}${x.excL?` · excedente ${x.excL}`:''}${x.rechL?` · rechazo ${x.rechL}`:''}${x.faltL?` · faltante ${x.faltL}`:''}${x.tarde?` · ${x.tarde} tarde`:''}`:'sin entregas'}</div>`;
+      <div class="pv-week-sub">${x?pvPl(x.recs,'recepción','recepciones'):'sin entregas'}</div>`;
   }
   h+=`<div class="section-title">Recepciones · ${recs.length}</div>`+recs.map((r,i)=>{ const x=pvNew(); pvAddRec(x, r); const d=pvDias(r.info);
     return `<div class="adm-row"><div class="pv-head"><b>${fechaLarga(r.info.fecha)} · ${escapeHtml(hubName(r.info.hub))}</b><span class="pv-fr">${pvFrTxt(x)}</span></div>
-      <div class="muted" style="font-size:12px">${r.info.num_oc&&r.info.num_oc.length?'OC '+r.info.num_oc.map(escapeHtml).join(', ')+' · ':''}${d==null?'sin fecha programada':d===0?'el día programado':d<0?`${-d} día${d===-1?'':'s'} antes`:`${d} día${d===1?'':'s'} tarde`}${r.info.modo==='botones'?' · botones':''}${!r.lines?' · sin detalle':r.fuente==='reporte'?' · leído del reporte':''}</div>
-      <div class="pv-chips">${pvChips(Object.assign(x,{tarde:0}))}</div>
+      <div class="muted" style="font-size:12px">${r.info.num_oc&&r.info.num_oc.length?'OC '+r.info.num_oc.map(escapeHtml).join(', ')+' · ':''}${d==null?'sin fecha programada':d===0?'el día programado':d<0?`${-d} día${d===-1?'':'s'} antes`:`${d} día${d===1?'':'s'} tarde`}${!r.lines?' · sin detalle':''}${r.fac?'':' · factura sin revisar'}</div>
+      <div class="pv-chips">${pvChips(x)}</div>
       <div class="btns"><button class="btn btn-secondary" onclick="openRecepcion(PV.recs[${i}].info,'admin')">Ver</button></div></div>`; }).join('');
   h+=`<div class="section-title">Productos · ${prods.length} · peor fill rate primero</div>
     <button class="btn btn-secondary btn-block" style="margin-bottom:8px" onclick="pvCsv('prod', ${PV.provs.indexOf(prov)})">CSV de productos de ${escapeHtml(prov)}</button>`
-    +prods.map(p=>`<details class="adm-row pv-prod"><summary><div class="pv-head"><b>${nameHtml(p.producto)}</b><span class="pv-fr">${p.lineas?pvFrTxt(p):'—'}</span></div>
-      <div class="muted" style="font-size:12px">${p.lineas?`Pedido ${p.lineas} ve${p.lineas===1?'z':'ces'} · ${pvQ({[p.kgpz]:p.ped})} pedidas · ${pvQ({[p.kgpz]:p.ok})} recibidas`:'No estaba en la orden'}</div>
+    +prods.map(p=>{ const u=p.kgpz==='Kg'?p.kg:p.pz, un=unitOf(p.kgpz);
+      return `<details class="adm-row pv-prod"><summary><div class="pv-head"><b>${nameHtml(p.producto)}</b><span class="pv-fr">${p.prods?pvFrTxt(p):'—'}</span></div>
+      <div class="muted" style="font-size:12px">${p.prods?`${p.prods===1?'1 recepción':p.prods+' recepciones'} · pedido ${fmtQty(u.ped,p.kgpz)} ${un} · recibido ${fmtQty(u.ok,p.kgpz)}`:'No venía en la OC'}</div>
       <div class="pv-chips">${pvChips(p, true)}</div></summary>
-      ${p.hist.map(({r,l})=>`<div class="pv-hist"><b>${fechaLarga(r.info.fecha)} · ${escapeHtml(hubName(r.info.hub))}</b> — ${escapeHtml(pvLineTxt(l))}</div>`).join('')}</details>`).join('');
+      ${p.hist.map(({r,l,cob})=>`<div class="pv-hist"><b>${fechaLarga(r.info.fecha)} · ${escapeHtml(hubName(r.info.hub))}</b> — ${escapeHtml(pvLineTxt(l, cob))}</div>`).join('')}</details>`; }).join('');
   el.innerHTML=h;
 }
 function pvCsv(kind, provIdx){
   const recs=PV.data||[], rango=`${ADM.pvDesde}_${ADM.pvHasta}`, hub=ADM.pvHub?hubName(ADM.pvHub):'Todos los hubs';
-  const n=v=>String(round2(v)), pct=(a,b)=>b?String(Math.round(a*1000/b)/10):'', q=(o,k)=>o[k]?n(o[k]):'';
+  const n=v=>v?String(round2(v)):'0', pct=(a,b)=>b?String(Math.round(a*1000/b)/10):'';
   let cols, rows, name;
   if(kind==='prov'){
-    cols=['Proveedor','Hubs','Desde','Hasta','Recepciones','Recepciones sin detalle','Líneas pedidas','Pedido','Recibido (hasta lo pedido)','Fill rate %','Líneas completas %',
-      'Líneas con excedente','Líneas con excedente %','Excedente contado pz','Excedente contado kg','Excedente sin cantidad (líneas)',
-      'Rechazo fecha corta (líneas)','Rechazo fecha corta pz','Rechazo fecha corta kg','Rechazo dañada (líneas)','Rechazo dañada pz','Rechazo dañada kg',
-      'Faltante (líneas)','Faltante pz','Faltante kg','No solicitados (líneas)','Entregas el día programado','Entregas antes','Entregas tarde','Días tarde promedio'];
-    rows=[...pvByProv(recs).entries()].sort((x,y)=>x[0].localeCompare(y[0])).map(([p,a])=>{ const R=m=>a.rech[m]||{ l:0, q:{} };
-      return [p, [...a.hubs].map(hubName).join(', '), ADM.pvDesde, ADM.pvHasta, a.recs, a.sinDet, a.lineas, n(a.ped), n(a.ok), a.ped?pct(a.ok,a.ped):'', pct(a.completas,a.lineas),
-        a.excL, pct(a.excL,a.lineas), q(a.excQ,'Pz'), q(a.excQ,'Kg'), a.excFlag||'',
-        R('fecha_corta').l, q(R('fecha_corta').q,'Pz'), q(R('fecha_corta').q,'Kg'), R('danada').l, q(R('danada').q,'Pz'), q(R('danada').q,'Kg'),
-        a.faltL, q(a.faltQ,'Pz'), q(a.faltQ,'Kg'), a.pnsL, a.aTiempo, a.antes, a.tarde, a.tarde?String(Math.round(a.diasTarde*10/a.tarde)/10):'']; });
+    cols=['Proveedor','Hubs','Desde','Hasta','Recepciones','Productos pedidos',
+      'Piezas pedidas','Piezas recibidas','Fill rate por pieza %','Productos completos','Fill rate por producto %',
+      'Piezas rechazadas fecha corta','Rechazo fecha corta por pieza %','Productos con fecha corta','Rechazo fecha corta por producto %',
+      'Incidentes producto no solicitado','Incidentes exceso sobre la OC','Incidentes cobrado y no entregado','Piezas cobradas y no entregadas','Recepciones con factura revisada',
+      'Piezas rechazadas dañadas','Piezas faltantes','Kg pedidos','Kg recibidos','Fill rate por kilo %','Kg rechazados fecha corta',
+      'Entregas el día programado','Entregas antes','Entregas tarde','Recepciones sin detalle'];
+    rows=[...pvByProv(recs).entries()].sort((x,y)=>x[0].localeCompare(y[0])).map(([p,a])=>[p, [...a.hubs].map(hubName).join(', '), ADM.pvDesde, ADM.pvHasta, a.recs, a.prods,
+      n(a.pz.ped), n(a.pz.ok), pct(a.pz.ok,a.pz.ped), a.completas, pct(a.completas,a.prods),
+      n(a.pz.fc), pct(a.pz.fc,a.pz.ped), a.fcL, pct(a.fcL,a.prods),
+      a.pnsL, a.excL, a.facRecs?a.cobL:'', a.facRecs?n(a.cobPz):'', a.facRecs,
+      n(a.pz.dan), n(a.pz.falt), n(a.kg.ped), n(a.kg.ok), pct(a.kg.ok,a.kg.ped), n(a.kg.fc),
+      a.aTiempo, a.antes, a.tarde, a.sinDet]);
     name=`proveedores_${fileSafe(hub)}_${rango}.csv`;
   } else {
     const prov=provIdx==null?null:PV.provs[provIdx];
-    cols=['Proveedor','Código','Producto','Und','Veces pedido','Pedido','Recibido (hasta lo pedido)','Fill rate %','Veces completo','Veces con excedente','Excedente contado',
-      'Veces con rechazo fecha corta','Rechazadas fecha corta','Veces con rechazo dañada','Rechazadas dañada','Veces con faltante','Faltante','Veces no solicitado','Hubs','Desde','Hasta'];
-    rows=pvProducts(prov?recs.filter(r=>r.prov===prov):recs).sort((x,y)=>x.prov.localeCompare(y.prov) || x.producto.localeCompare(y.producto)).map(p=>{ const R=m=>p.rech[m]||{ l:0, q:{} };
-      return [p.prov, p.sku.startsWith('name:')?'':p.sku, p.producto, p.kgpz, p.lineas, n(p.ped), n(p.ok), p.ped?pct(p.ok,p.ped):'', p.completas, p.excL, q(p.excQ,p.kgpz),
-        R('fecha_corta').l, q(R('fecha_corta').q,p.kgpz), R('danada').l, q(R('danada').q,p.kgpz), p.faltL, q(p.faltQ,p.kgpz), p.pnsL,
+    cols=['Proveedor','Código','Producto','Und','Recepciones','Pedido','Recibido','Fill rate %','Veces completo',
+      'Veces con fecha corta','Rechazadas fecha corta','Veces con dañadas','Rechazadas dañadas','Veces con faltante','Faltante',
+      'Veces no solicitado','Veces con exceso sobre la OC','Veces cobrado y no entregado','Piezas cobradas y no entregadas','Hubs','Desde','Hasta'];
+    rows=pvProducts(prov?recs.filter(r=>r.prov===prov):recs).sort((x,y)=>x.prov.localeCompare(y.prov) || x.producto.localeCompare(y.producto)).map(p=>{ const u=p.kgpz==='Kg'?p.kg:p.pz;
+      return [p.prov, p.sku.startsWith('name:')?'':p.sku, p.producto, p.kgpz, p.prods, n(u.ped), n(u.ok), pct(u.ok,u.ped), p.completas,
+        p.fcL, n(u.fc), p.danL, n(u.dan), p.faltL, n(u.falt), p.pnsL, p.excL, p.cobL, n(p.cobPz),
         [...new Set(p.hist.map(x=>hubName(x.r.info.hub)))].join(', '), ADM.pvDesde, ADM.pvHasta]; });
     name=`productos-proveedor_${fileSafe(prov||hub)}_${rango}.csv`;
   }

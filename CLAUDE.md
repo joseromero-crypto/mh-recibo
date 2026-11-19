@@ -138,10 +138,15 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   for separated excess (it would cost the receptor a step in both modes). Admin → **Proveedores** (`admProveedores`, view
   only, state `ADM.pvDesde/pvHasta/pvHub/pvSel`, data `PV`): closed `pd-*` sessions by session fecha (latest cerrar; reabrir/
   borrar hide it); closes without `lineas_todas` read their report CSV (`pvLinesFromCsv`, cached in `PV.csv`), else «sin
-  detalle» (counted in recepciones/puntualidad only). Fill rate = Σ min(recibido, pedido) ÷ Σ pedido over order lines (pz
-  and kg summed as they come); puntualidad = session fecha vs the closest `fechas_entrega` (antes / el día / tarde).
-  Supplier list (worst fill rate first) → detail (`pvDetalle`: KPIs, weekly trend Monday-first, receptions, products with
-  per-reception history) and CSVs `pvCsv('prov'|'prod'[, provIdx])`.
+  detalle» (counted in recepciones/puntualidad only). UI says «producto», never «línea» (one order line of one reception).
+  KPIs (`pvKpis`, 2026-11-18, Jose): fill rate por pieza (Σ min(recibido, pedido) ÷ Σ pedido, Pz lines only; Kg lines get
+  their own muted line; a Kg-only supplier shows kilos), fill rate por producto (products with no faltante/rechazo ÷
+  ordered), rechazo fecha corta por pieza and por producto (÷ pedido, so fill rate + rechazo + faltante = 100 %), and
+  incident counts: producto no solicitado, exceso sobre la OC, cobrado y no entregado (latest `factura` event per session,
+  `lineas[].no_fisico>0`; shown with how many receptions had the invoice checked). Puntualidad = session fecha vs the
+  closest `fechas_entrega`, one muted line in the detail only. Supplier list (worst fill rate first) → detail
+  (`pvDetalle`: KPIs, weekly trend Monday-first, receptions, products with per-reception history) and CSVs
+  `pvCsv('prov'|'prod'[, provIdx])` with the same KPI columns first.
 
 ## Factura del proveedor (facturaProveedor-plan.md — built 2026-11-17)
 - Flags per supplier reception what the invoice charges that we shouldn't pay (we pay only what was ordered AND received,
