@@ -1917,7 +1917,7 @@ function openRecibir(data, opts={}){
   showScreen('screen-recibir');
   renderRecibir(); focusScan();
   loadSorting(S.hub).then(()=>{ buildCatalog(); renderRecibir(); });
-  S.pdOtras=[]; S.pdBusy=false; S.pdTab='scan'; S.pdEdit=null; S.pdForm=null; S.pdFoco=null; const pq=document.getElementById('pd-q'); if(pq) pq.value='';
+  S.pdOtras=[]; S.pdBusy=false; S.pdTab='scan'; S.pdEdit=null; S.pdForm=null; S.pdFoco=null; S.pdCod=null; const pq=document.getElementById('pd-q'); if(pq) pq.value='';
   syncServerEvents().then(()=>{ if(opts.revisar && revisarItems().length) openRevisar(); });
   pdRecibirLive();
   if(isPd()) facInit(S.session.id, S.hub);
@@ -2568,7 +2568,7 @@ function closeSheet(){
 function openSinCodigo(mal){
   S.codigoMal=mal||null;
   openSheet(mal?'Código incorrecto en sistema':'Buscar producto sin código', (mal?`<div class="note" style="margin-bottom:10px">El código <b>${escapeHtml(mal.codigo)}</b>${mal.sistema?` aparece en el sistema como <b>${escapeHtml(mal.sistema.producto)}</b>`:' no está en el sistema'}. Busca por nombre el producto que tienes en la mano: se cuenta como ese y el código se reporta a comercial.</div>`:'')+`<input id="sc-input" class="text-input" placeholder="Escribe parte del nombre (ej. almen 100)" autocomplete="off" autocorrect="off" spellcheck="false">
-    <div id="sc-results" style="margin-top:10px"><div class="muted">Los productos del envío aparecen primero.</div></div>`);
+    <div id="sc-results" style="margin-top:10px"><div class="muted">Los productos ${isPd()?'de la orden':'del envío'} aparecen primero.</div></div>`);
   const i=document.getElementById('sc-input');
   let t=null; i.addEventListener('input', ()=>{ clearTimeout(t); t=setTimeout(()=>renderSearch(i.value), 120); });
   setTimeout(()=>i.focus(), 60);
@@ -2587,7 +2587,7 @@ function searchProducts(q){
 function renderSearch(q){
   const el=document.getElementById('sc-results'); if(!el) return;
   _searchHits=searchProducts(q);
-  if(!String(q).trim()){ el.innerHTML='<div class="muted">Los productos del envío aparecen primero.</div>'; return; }
+  if(!String(q).trim()){ el.innerHTML=`<div class="muted">Los productos ${isPd()?'de la orden':'del envío'} aparecen primero.</div>`; return; }
   if(!_searchHits.length){ el.innerHTML='<div class="muted">Sin resultados. Prueba con menos letras o otra palabra.</div>'; return; }
   // Still blind: never a quantity here
   el.innerHTML=_searchHits.map((h,i)=>{
@@ -2604,6 +2604,7 @@ async function pickSearch(i){
   // Wrong barcode in the system: count the product in hand; the scan keeps what was scanned vs what the system has
   const det=(mal && codeKey(mal.codigo)!==codeKey(h.p.barcode||'')) ? { codigo:mal.codigo, codigo_incorrecto:{ escaneado:mal.codigo,
     codigo_sistema:h.p.barcode||'', sistema_dice:mal.sistema?mal.sistema.producto:null, sistema_dice_codigo:mal.sistema?(mal.sistema.barcode||null):null } } : {};
+  if(pdBotones()){ pdBPick(h, mal, det); return; }
   const m=mal?'codigo_incorrecto':'manual';
   if(h.env) openCard({ ...h.p, enEnvio:true }, m, det);
   else if(S.envio.sinArchivo) openCard(sinArchivoProduct(h.p), m, det);
@@ -2710,7 +2711,7 @@ function openResumen(){
   if(S.closedInfo){ openRecepcion(S.closedInfo,'inicio'); return; }
   if(S.envio.sinArchivo){ toast('Sube el archivo del envío antes de cerrar la recepción', 3500); return; }
   S.current=null; S.corrigiendo=null; closeSheet();
-  S.pdRech=null; S.pdCambiando=null; S.pdFoco=null;
+  S.pdRech=null; S.pdCambiando=null; S.pdFoco=null; S.pdCod=null;
   if(isPd()){ pdFreezeOrder(); if(FAC[S.session.id]) facRefresh(S.session.id); } else
   S.resumenOrder=new Map(summaryRows().filter(isDelta).sort((a,b)=>(isAcked(a)-isAcked(b)) || Math.abs(b.dif)-Math.abs(a.dif)).map((r,i)=>[r.sku,i]));
   document.getElementById('resumen-title').textContent=`${hubName(S.hub)} · ${areaName(S.area)}`;
@@ -2910,10 +2911,12 @@ function pdBLineHtml(r){
       <div class="ritem-meta">${meta}</div></div>${r.pend?'':`<span class="estado ${PD_ESTADO_CLS[r.estado]||'bad'}">${escapeHtml(r.estado)}</span>`}</div>`;
   if(!r.pns) h+=`<div class="pdb-ped"><span>Pedido</span><b>${q(P)}</b><span>${u}</span>${t?`<span class="temp-chip" style="margin-left:auto">${escapeHtml(t)}</span>`:''}</div>`
     +(r.cad && (r.pend || S.pdEdit===r.sku || S.pdFoco===r.sku)?`<div class="pdb-cad"><small>Caducidad mínima</small><b>${dmy(r.cad)}</b></div>`:'');
+  const codMal=!S.closedInfo && S.pdFoco===r.sku && S.pdCod && S.pdCod.sku===r.sku && !S.pdCod.ci
+    ? `<button class="link-btn" style="margin-top:4px" onclick="pdBCodMal()">¿No es este producto? Código incorrecto en sistema · buscar por nombre</button>` : '';
   if(r.cambio && r.pend) h+=`<div class="ritem-meta" style="color:var(--c-ink);font-weight:700;margin-top:4px">La orden cambió la cantidad pedida: vuelve a revisar este producto.</div>`;
   if(r.pns && S.pdFoco===r.sku && !S.closedInfo){
     h+=`<div class="pdb-pns"><b>No viene en la orden</b>No se recibe: regrésalo al camión.</div>
-      <div class="pcard-actions" style="grid-template-columns:1fr 2fr;margin-top:8px"><button class="btn btn-secondary" onclick="pdBQuitarPns('${sk}')">Me equivoqué</button><button class="btn btn-primary" onclick="pdBSiguiente()">Siguiente</button></div>`;
+      <div class="pcard-actions" style="grid-template-columns:1fr 2fr;margin-top:8px"><button class="btn btn-secondary" onclick="pdBQuitarPns('${sk}')">Me equivoqué</button><button class="btn btn-primary" onclick="pdBSiguiente()">Siguiente</button></div>${codMal}`;
   } else if(r.pns){
     h+=`<div class="pdb-res"><span>${pdBResTxt(r)}</span>${S.closedInfo?'':`<button class="corr-btn" onclick="pdBQuitarPns('${sk}')">Me equivoqué</button>`}</div>`;
   } else if(editing && f){
@@ -2935,10 +2938,10 @@ function pdBLineHtml(r){
       <div class="pdb-btns3"><button class="btn btn-secondary" onclick="pdBTap('${sk}','faltante')">Llegaron menos</button><button class="btn btn-secondary" onclick="pdBTap('${sk}','excedente')">Excedente</button><button class="btn btn-secondary" onclick="pdBTap('${sk}','rechazo')">Rechazo</button></div>`
       : `<div class="pdb-btns"><button class="btn btn-primary" onclick="pdBTap('${sk}','completo')">Completo</button><button class="btn btn-secondary" onclick="pdBTap('${sk}','faltante')">Faltante</button>
       <button class="btn btn-secondary" onclick="pdBTap('${sk}','excedente')">Excedente</button><button class="btn btn-secondary" onclick="pdBTap('${sk}','rechazo')">Rechazo</button></div>`)
-      +(r.pend?'':`<button class="link-btn" style="margin-top:0" onclick="pdBCancel()">Dejar como estaba</button>`);
+      +(r.pend?'':`<button class="link-btn" style="margin-top:0" onclick="pdBCancel()">Dejar como estaba</button>`)+codMal;
   } else {
     const who=r.ack&&r.ack.receptor&&r.ack.receptor!==S.receptor?` · ${escapeHtml(r.ack.receptor)}`:'';
-    h+=`<div class="pdb-res"><span>${pdBResTxt(r)}${who}</span>${S.closedInfo?'':`<button class="corr-btn" onclick="pdBCambiar('${sk}')">Cambiar</button>`}</div>`;
+    h+=`<div class="pdb-res"><span>${pdBResTxt(r)}${who}</span>${S.closedInfo?'':`<button class="corr-btn" onclick="pdBCambiar('${sk}')">Cambiar</button>`}</div>`+codMal;
   }
   return h+'</div>';
 }
@@ -2959,9 +2962,10 @@ function pdBTap(sku, kind){
 }
 function pdMarcar(sku, marca, extra){
   const l=S.lines.get(sku); if(!l) return;
-  recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:l.producto, cantidad:extra.recibido, metodo:'boton',
-    detalle:Object.assign({ marca, pedido:l.esperado, kgpz:l.kgpz }, extra) }));
-  S.pdEdit=null; S.pdForm=null; S.pdFoco=null; pdBRerender(); if(screenActive('screen-recibir')) focusScan();
+  const ci=S.pdCod && S.pdCod.sku===sku && S.pdCod.ci;
+  recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:l.producto, cantidad:extra.recibido, metodo:ci?'codigo_incorrecto':'boton',
+    detalle:Object.assign({ marca, pedido:l.esperado, kgpz:l.kgpz }, extra, ci||{}) }));
+  S.pdEdit=null; S.pdForm=null; S.pdFoco=null; S.pdCod=null; pdBRerender(); if(screenActive('screen-recibir')) focusScan();
 }
 function pdBGuardar(sku){
   const f=S.pdForm, l=S.lines.get(sku), i=document.getElementById('pdb-n'), err=document.getElementById('pdb-err'); if(!f || !l || !i) return;
@@ -2983,14 +2987,14 @@ function pdBTodas(sku){ const l=S.lines.get(sku), i=document.getElementById('pdb
 function pdBMotivo(k){ if(!S.pdForm) return; S.pdForm.motivo=k; pdBKeepInput(pdBRerender); }
 function pdBCancel(){ S.pdForm=null; S.pdEdit=null; pdBRerender(); }
 function pdBCambiar(sku){ S.pdEdit=sku; S.pdForm=null; pdBRerender(); }
-function pdBSiguiente(){ S.pdFoco=null; pdBRerender(); focusScan(); }
+function pdBSiguiente(){ S.pdFoco=null; S.pdCod=null; pdBRerender(); focusScan(); }
 function pdBQuitarPns(sku){
   const e=pdMarcas().get(sku); if(!e) return;
   if(S.pdFoco===sku) S.pdFoco=null;
   recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:e.producto, metodo:'boton', detalle:{ marca:'quitado', kgpz:e.detalle.kgpz||'Pz' } }));
   pdBRerender();
 }
-function pdBTab(t){ S.pdTab=t; S.pdForm=null; S.pdEdit=null; if(t!=='scan') S.pdFoco=null; pdBListRender(); if(t==='scan') focusScan(); }
+function pdBTab(t){ S.pdTab=t; S.pdForm=null; S.pdEdit=null; if(t!=='scan'){ S.pdFoco=null; S.pdCod=null; } pdBListRender(); if(t==='scan') focusScan(); }
 // Recibir: scan-first by default (many products share presentations, so the receptor confirms what they hold, not a
 // row picked from a list). «Pendientes» / «Todos» open the order as a list with a search, for products without a code.
 function pdBListRender(){
@@ -3002,7 +3006,8 @@ function pdBListRender(){
     const foco=S.pdFoco && all.find(r=>r.sku===S.pdFoco);
     let h=foco ? pdBLineHtml(foco)
       : !pend.length ? `<div class="warn-box ok">Revisaste todos los productos de la orden. Toca «Terminar revisión física».</div>`
-      : `<div class="pdb-hint">Escanea un producto para ver lo pedido y confirmarlo.<div class="ritem-meta" style="margin-top:6px;font-weight:600">¿No tiene código? Búscalo en Pendientes.</div></div>`;
+      : `<div class="pdb-hint">Escanea un producto para ver lo pedido y confirmarlo.</div>`;
+    if(!S.closedInfo) h+=`<button class="btn btn-secondary btn-block" style="margin-bottom:12px" onclick="openSinCodigo()">Buscar por nombre (sin código o no escanea)</button>`;
     const ult=lines.filter(r=>!r.pend && r.ack && r.sku!==S.pdFoco).sort((a,b)=>String(b.ack.ts).localeCompare(String(a.ack.ts))).slice(0,3);
     if(ult.length) h+=`<div class="section-title">Últimos revisados</div>`+ult.map(pdBLineHtml).join('');
     const pnsO=pns.filter(r=>r.sku!==S.pdFoco);
@@ -3021,7 +3026,7 @@ function pdBListRender(){
 // A scan finds the line in the order; a product not in it is flagged «No solicitado» (it goes back, never counted)
 function pdBScan(r, code){
   if(r && r.line){
-    vibrate(true); S.pdFoco=r.line.sku_key; S.pdEdit=null; S.pdForm=null; S.pdTab='scan'; document.getElementById('pd-q').value='';
+    vibrate(true); S.pdFoco=r.line.sku_key; S.pdCod={ sku:r.line.sku_key, codigo:code, sistema:r.line }; S.pdEdit=null; S.pdForm=null; S.pdTab='scan'; document.getElementById('pd-q').value='';
     pdBListRender();
     const el=document.querySelector('.pdb-row.foco'); if(el) el.scrollIntoView({ block:'nearest', behavior:'smooth' });
     return;
@@ -3031,10 +3036,32 @@ function pdBScan(r, code){
     const p=r.product, e=pdMarcas().get(p.sku_key);
     if(!(e && e.detalle.marca==='no_solicitado'))
       recordEvent(makeEvent('confirmacion', { sku_key:p.sku_key, producto:p.producto, metodo:'boton', detalle:{ marca:'no_solicitado', codigo:code, kgpz:p.kgpz||'Pz' } }));
-    S.pdFoco=p.sku_key; S.pdEdit=null; S.pdForm=null; S.pdTab='scan'; renderRecibir(); return;
+    S.pdFoco=p.sku_key; S.pdCod={ sku:p.sku_key, codigo:code, sistema:p, pns:true }; S.pdEdit=null; S.pdForm=null; S.pdTab='scan'; renderRecibir(); return;
   }
-  toast('Código no reconocido: búscalo por nombre en Pendientes', 4000);
-  S.pdTab='pend'; S.pdFoco=null; pdBListRender();
+  // Unknown code: straight to the name search; the pick is reported as a wrong code (Admin → Códigos)
+  S.pdFoco=null; S.pdCod=null; S.pdTab='scan'; pdBListRender();
+  openSinCodigo({ codigo:code, sistema:null });
+}
+// «Código incorrecto en sistema» from the line a scan opened (in the order, or flagged no solicitado)
+function pdBCodMal(){
+  const c=S.pdCod; if(!c) return;
+  openSinCodigo({ codigo:c.codigo, sistema:c.sistema, pnsSku:c.pns?c.sku:null });
+}
+// Pick from the name search (Sin código / Código incorrecto): opens that line like a scan; a product outside the
+// order is flagged no solicitado. A wrong code travels with the answer (detalle.codigo_incorrecto → Admin → Códigos).
+function pdBPick(h, mal, det){
+  const sku=h.p.sku_key, ci=det && det.codigo_incorrecto ? { codigo:det.codigo, codigo_incorrecto:det.codigo_incorrecto } : null;
+  if(mal && mal.pnsSku && mal.pnsSku!==sku) pdBQuitarPns(mal.pnsSku);
+  if(!h.env){
+    const e=pdMarcas().get(sku);
+    if(!(e && e.detalle.marca==='no_solicitado'))
+      recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:h.p.producto, metodo:ci?'codigo_incorrecto':'manual',
+        detalle:Object.assign({ marca:'no_solicitado', kgpz:h.p.kgpz||'Pz' }, ci||(mal?{ codigo:mal.codigo }:{})) }));
+    S.pdCod=null;
+  } else S.pdCod=ci ? { sku, ci } : null;
+  vibrate(true); S.pdFoco=sku; S.pdEdit=null; S.pdForm=null; S.pdTab='scan'; document.getElementById('pd-q').value='';
+  renderRecibir();
+  const el=document.querySelector('.pdb-row.foco'); if(el) el.scrollIntoView({ block:'nearest', behavior:'smooth' });
 }
 function pdBRenderResumen(){
   const el=document.getElementById('resumen-body');
@@ -3216,7 +3243,7 @@ async function pdCargarSesion(info){
     const env=JSON.parse(await sbFetch(info.envio)); env._path=info.envio;
     S.hub=info.hub; S.area=info.area; S.receptor=INI.receptor||info.receptor;
     S.session={ id:info.session_id, fecha:info.fecha }; setEnvio(env);
-    S.events=[]; S.eventUids=new Set(); S.lastId=0; S.resumenOrder=new Map(); S.current=null; S.corrigiendo=null; S.pdEdit=S.pdForm=S.pdFoco=null;
+    S.events=[]; S.eventUids=new Set(); S.lastId=0; S.resumenOrder=new Map(); S.current=null; S.corrigiendo=null; S.pdEdit=S.pdForm=S.pdFoco=S.pdCod=null;
     addEvents(OUTBOX.filter(e=>e.session_id===info.session_id));
   }
   // A full read that throws: a correction must never rebuild the report from half the events
@@ -4510,7 +4537,7 @@ async function admReabrir(i){
 let _admCod=[];
 async function admCodigos(){
   const dias=ADM.codDias||7, desde=localDateStr(new Date(serverNow().getTime()-dias*86400000));
-  const evs=await pgSelectAll('rec_events', `tipo=eq.scan&fecha=gte.${desde}&detalle->codigo_incorrecto=not.is.null&select=hub,area,fecha,producto,receptor,ts,detalle&order=id.desc`);
+  const evs=await pgSelectAll('rec_events', `tipo=in.(scan,confirmacion)&fecha=gte.${desde}&detalle->codigo_incorrecto=not.is.null&select=hub,area,fecha,producto,receptor,ts,detalle&order=id.desc`);
   const by=new Map();
   for(const e of evs){
     if(e.hub==='test-hub' && !IS_LOCAL) continue;

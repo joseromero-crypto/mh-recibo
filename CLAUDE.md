@@ -124,7 +124,11 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - **Live test fixes (Danone at MH Contry, 2026-11-18)** — modo botones: Recibir keeps Completo / Faltante / Excedente / Rechazo; Resumen («Por revisar», lines never scanned) shows **No llegó** (= faltante 0) + Completo
   big, then Llegaron menos / Excedente / Rechazo; Caducidad mínima is a big `.pdb-cad` row; no input autofocus (pdb-n, pd-q,
   pd-rech-n: the receptor taps the field). A scan not in the order focuses a «No viene en la orden» card with «Siguiente»
-  (`pdBSiguiente`). Buttons: «Terminar revisión física» (Recibir) and «Cerrar y comparar contra factura» (Resumen).
+  (`pdBSiguiente`). **Buscar por nombre** (2026-11-20): scan tab button opens the Sin código sheet; a scanned line (in the order
+  or flagged no solicitado) shows «¿No es este producto? Código incorrecto en sistema» (`S.pdCod`, `pdBCodMal`); an unknown code
+  opens that search directly. `pickSearch` → `pdBPick`: order line → focused like a scan; outside the order → no solicitado
+  (a wrong pns flag is removed). The wrong code rides on the next marca of that line (`detalle.codigo_incorrecto`, metodo
+  `codigo_incorrecto`); Admin → Códigos reads `tipo=in.(scan,confirmacion)`. Buttons: «Terminar revisión física» (Recibir) and «Cerrar y comparar contra factura» (Resumen).
   Closed PD view: tabs **Llegó** (default, Recibido > 0) / Completo / Con diferencia / Faltante / Todos; «Terminar e ir al menú
   principal» at the bottom. **Corregir lo recibido** (`rvCorr*`, modo botones, ≤24 h from the session id, not from Admin):
   `pdCargarSesion` reloads the session, a new marca with `detalle.post_cierre`, the report rewritten at the same path and a
