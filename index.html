@@ -4266,9 +4266,9 @@ function facBoxInner(){
         ${o('no_oc','No está en la OC')}</select>`; };
     const pend=facComparar({ lines:FACV.lines, todas:I.lineas_todas||[], rows:r.rows||[], picks:{} }).no_identificados;
     const faltan=c.no_identificados.length;
-    return h+`<div class="note">${pend.length===1?'Un renglón':pend.length+' renglones'} de la factura no se pudieron identificar. Elige a qué producto de la orden corresponde cada uno.</div>`
+    return h+`<div class="note">${pend.length===1?'Un renglón de la factura no se pudo identificar. Elige a qué producto de la orden corresponde.':pend.length+' renglones de la factura no se pudieron identificar. Elige a qué producto de la orden corresponde cada uno.'}</div>`
       +pend.map(n=>`<div class="info-card"><b>${escapeHtml(n.descripcion||'Renglón '+n.sourceRow)}</b><div class="muted">${n.codigos.length?'Código '+escapeHtml(n.codigos.join(', '))+' · ':''}${n.piezas!=null?fmtQty(n.piezas,'Pz')+' pz':'cantidad sin leer'}${n.ambiguo?' · coincide con varios productos':''}</div>${opts(n)}</div>`).join('')
-      +`<button class="btn btn-warn btn-block" style="margin-bottom:12px" ${faltan||FACV.saving?'disabled':''} onclick="facGuardarPicks()">${faltan?`Faltan ${faltan} por elegir`:'Guardar revisión de la factura'}</button>`;
+      +`<button class="btn btn-warn btn-block" style="margin-bottom:12px" ${faltan||FACV.saving?'disabled':''} onclick="facGuardarPicks()">${faltan?(faltan===1?'Falta 1 por elegir':`Faltan ${faltan} por elegir`):'Guardar revisión de la factura'}</button>`;
   }
   if(st==='leyendo' && !FACV.recomparar) return h+facLoaderHtml('Leyendo la factura…', 'Unos 15 segundos. Después se compara contra la recepción.');
   if(st==='fallo' && !FACV.recomparar){
