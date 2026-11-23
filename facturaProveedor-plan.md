@@ -58,6 +58,30 @@ candidates[{sku, name, score, barcodes[], supplierSku}], notes[], matchKeys[]` (
 - Only within 24 h of the session start (its id ends with the epoch ms; `facVigente`). After that the strip says to
   pick the invoice at the close.
 
+## 3b. Factura primero (2026-11-23, Jose — replaces §3 for receptions started from today)
+
+The invoice is read and compared against the OC **at the very beginning**, before anything physical; the physical check is
+then made against what matched, so nobody looks for products that aren't even billed. Fill rate and faltante still count
+against the OC.
+
+- Empezar recepción → Recibir opens on «Primero: la factura» (the §4 box: Invoice Reader list or photos, page warnings,
+  picks for unidentified rows). Saved as `factura` with `fase:'inicio'` (no no_fisico yet). The result lists: Regresar si
+  llegan (billed, not on the OC), Cobra más de lo pedido, No vienen en la factura, Se revisan contra la OC (Kg, unread
+  quantity) → **Empezar revisión física**. «Cambiar factura» stays available on Recibir.
+- Per OC line the physical target is `min(facturado, pedido)`; Kg or unread quantity → pedido. Completo / Faltante /
+  Excedente / Rechazo answer against that target.
+- OC line **not billed** → faltante with no question («No llegó» is no longer asked for it). If it arrives anyway, a scan
+  opens it against the OC: **received and reported** («Llegó sin facturar: que lo agreguen a la factura»).
+- Billed and **not in the OC** → listed on Recibir; a scan of one says «Viene en la factura pero no en la OC: regrésalo».
+- Billed lines that didn't arrive are still confirmed in Resumen («No llegó»): they are charged.
+- Resumen «Antes de que se vaya el camión» adds **Corregir la factura**: cobra n que no llegaron / rechazadas / de más,
+  llegaron sin facturar, no está en la OC.
+- The close computes the final review from the start's comparison + what was received (`facCierre`, same numbers as §5)
+  and writes it with the report — the closed view shows it at once. «Corregir lo recibido» re-compares as before.
+- **Empezar sin factura** (No trajo factura / No se puede leer / Otro): the physical check runs against the OC as before
+  and the invoice is picked at the close (§4).
+- New in every comparison: `sin_facturar` (OC lines received but not billed) → «Reportar: llegaron sin facturar».
+
 ## 4. At close and after (closed view, `#fac-box` under the head, `facBoxLoad` / `facBoxInner`)
 
 Shown on every closed `pd-*` reception that has `lineas_todas` (Inicio after closing, Recepciones, Admin). Order of checks:

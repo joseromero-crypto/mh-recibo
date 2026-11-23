@@ -181,6 +181,20 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   on explicit tipos, so it's ignored there. `facReporte` rewrites the report CSV with «Folio factura», «Facturado»,
   «Revisión factura» + rows Estado «Facturado sin pedir» (skipped by `openRecepcion` and `pvLinesFromCsv`).
 
+- **Factura primero (2026-11-23, Jose; facturaProveedor-plan §3b)** — new pd receptions (`envío.factura_primero`, set by
+  `pdEmpezar`, carried by re-reads) open Recibir on the invoice step (`pdFacPaso`: scan row hidden, scans refused) with the
+  same box as the closed view (`FACV.inicio`, element `#fac-ini`, `facIniEnsure`): pick the Invoice Reader scan or take
+  photos → compared against the OC only → event `factura` with `detalle.fase:'inicio'` (`facInicio`: no no_fisico, no
+  report) → result + «Empezar revisión física» (`S.facOk`; reopening goes straight to scanning). The physical check then
+  looks for `facObjetivo`: min(facturado, OC); Kg / unread quantity → OC; not billed → `autoNofac` row = faltante with no
+  question (a scan opens its buttons: received + reported, `sinFac`). Marcas store `objetivo` (+ `nofac`) and hold only
+  while it's unchanged. Faltante stays vs the OC (fill rate); `faltFis` = billed but missing. Billed products not in the OC
+  are listed on Recibir and a scan of one (`pdFacNs`, by `no_solicitados[].codigos`) is flagged `facturado_sin_pedir` →
+  «regrésalo». Camión card «Corregir la factura». `pdCerrar` writes the final `factura` (`pdFacFinal` → `facCierre`,
+  `desde_inicio:true`) and the report's invoice columns (`facReporteCsv`) in one upload; `facBoxLoad` ignores `fase:'inicio'`.
+  An order re-read that changes lines re-compares the same read (`recomparar`). «Empezar sin factura» (manual inicio) = the
+  old check against the OC and the invoice picked at the close. `sin_facturar` (received, not billed) is in every comparison.
+
 ## Modo prueba (2026-11-18)
 - `?demo={semilla}` runs the whole app unchanged on fake data; Admin → **Modo prueba** opens it in a new tab (no PIN
   inside a test tab). Nothing reaches production: `demoFetch` (top of the script) replaces `window.fetch` and answers

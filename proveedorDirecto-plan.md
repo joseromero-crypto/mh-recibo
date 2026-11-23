@@ -225,6 +225,10 @@ Answers = `confirmacion` with `detalle.marca` (completo|faltante|excedente|recha
 to answer, the differences (editable) and «Antes de que se vaya el camión» with «Copiar lista para el sistema» (Código,
 Producto, Recibido for Retool). Report: Excedente column = «Sí» for the flag; `cerrar.modo='botones'`.
 
+**Factura primero (2026-11-23):** receptions started from today compare the invoice with the OC before the physical
+check; Completo means what the invoice bills (never above Pedido) and OC lines not billed are faltante without asking.
+See `facturaProveedor-plan.md` §3b.
+
 ### 6.7 Supplier insights (2026-11-13)
 `cerrar.lineas_todas` keeps every order line, so fill rate comes from `rec_events` alone (older closes: the report CSV).
 Admin → Proveedores, per supplier with hub + date filters: recepciones, fill rate, líneas completas, % líneas con excedente

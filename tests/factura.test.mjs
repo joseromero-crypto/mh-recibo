@@ -10,7 +10,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const html = readFileSync(join(root, 'index.html'), 'utf8');
 const block = html.slice(html.indexOf('/* FACTURA-PURE:BEGIN'), html.indexOf('/* FACTURA-PURE:END */'));
 assert.ok(block.length > 100, 'FACTURA-PURE block not found');
-const { facNormCode, facComparar, facMismoProveedor, facLigadas } = new Function(block + '\nreturn { facNormCode, facComparar, facMismoProveedor, facLigadas };')();
+const { facNormCode, facComparar, facMismoProveedor, facLigadas, facInicio, facObjetivo, facCierre } =
+  new Function(block + '\nreturn { facNormCode, facComparar, facMismoProveedor, facLigadas, facInicio, facObjetivo, facCierre };')();
 
 let n = 0;
 const test = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -101,7 +102,9 @@ test('synthetic: every case', () => {
   const d = by['7500000000028'];
   assert.deepEqual([d.facturado, d.de_mas, d.no_fisico, d.filas.join()], [6, 0, 0, '7,8']);
   assert.ok(!by['name:mantequilla'], 'missing and not billed: not a flag');
-  assert.deepEqual(r.conteo, { no_solicitado: 1, de_mas: 1, no_fisico: 1, por_revisar: 2, no_identificado: 2 });
+  // received but not billed: the ambiguous pair (row 6 unresolved) and the crema (row 3 unresolved)
+  assert.deepEqual(r.sin_facturar.map(x => x.sku_key), ['7500000000059', '7500000000066', '7500000000073']);
+  assert.deepEqual(r.conteo, { no_solicitado: 1, de_mas: 1, no_fisico: 1, por_revisar: 2, no_identificado: 2, sin_facturar: 3 });
   assert.deepEqual(r.flagged.map(x => x.sku_key), ['7500000000011', '7500000000035', '7500000000042']);
   assert.equal(r.piezas.de_mas, 2); assert.equal(r.piezas.no_fisico, 4);
   assert.equal(r.piezas.facturadas, 12 + 6 + 3 + 12 + 4 + 2, 'pieces only: the Kg row and the unread quantity are out');
@@ -130,6 +133,36 @@ test('reads already linked to another reception', () => {
   const E = (session_id, detalle) => ({ session_id, detalle });
   const evs = [E('a', { read_id: 'r1' }), E('b', { read_id: 'r2' }), E('b', { read_id: 'r3' }), E('c', { read_id: 'r4' }), E('c', { manual: true, motivo: 'x' }), E('me', { read_id: 'r5' })];
   assert.deepEqual([...facLigadas(evs, 'me')].sort(), ['r1', 'r3'], "b moved to r3 (r2 free), c went manual (r4 free), my own r5 stays visible");
+});
+
+// Factura primero (2026-11-23): the invoice is compared with the OC first; the physical check looks for facObjetivo.
+test('factura primero: start → targets → close', () => {
+  const oc = [L('A1', 'Leche', 10), L('B2', 'Queso', 6), L('C3', 'Crema', 4), L('D4', 'Jamón', 2, { kgpz: 'Kg' }), L('E5', 'Yoghurt', 5)];
+  const inv = [R(1, ['A1'], 8), R(2, ['B2'], 9), R(3, ['D4'], 2), R(4, ['Z9'], 3, { productName: 'Mango' })];
+  const c = facComparar({ lines: oc, todas: [], rows: inv });   // nothing received yet
+  const ini = facInicio(c);
+  assert.ok(ini.lineas.every(x => !('no_fisico' in x) && !('recibido' in x)), 'no no_fisico at the start');
+  assert.equal(ini.conteo.no_fisico, undefined); assert.equal(ini.piezas.no_fisico, undefined);
+  assert.deepEqual(ini.no_solicitados.map(x => [x.producto, x.codigos.join()]), [['Mango', 'Z9']]);
+  assert.ok(!ini.limpia);
+  const by = new Map(ini.lineas.map(x => [x.sku_key, x]));
+  assert.deepEqual(facObjetivo(by.get('A1'), 10), { obj: 8, fac: 8, de_mas: 0 }, 'billed less: look for 8');
+  assert.deepEqual(facObjetivo(by.get('B2'), 6), { obj: 6, fac: 9, de_mas: 3 }, 'billed more: never above the OC');
+  assert.deepEqual(facObjetivo(by.get('D4'), 2), { obj: 2, revisar: 'kg', fac: 2 }, 'Kg: against the OC');
+  assert.deepEqual(facObjetivo(undefined, 4), { obj: 0, nofac: true }, 'not billed: nothing to look for');
+  // Close: A1 got 7 of 8 billed, B2 6, crema not billed but 4 arrived, jamón 1.9 kg, yoghurt not billed nor received
+  const todas = [T('A1', 10, 7), T('B2', 6, 6), T('C3', 4, 4), T('D4', 2, 1.9, 'Kg'), T('E5', 5, 0)];
+  const f = facCierre(ini, todas), fb = new Map(f.lineas.map(x => [x.sku_key, x]));
+  assert.deepEqual([fb.get('A1').no_fisico, fb.get('A1').de_mas], [1, 0]);
+  assert.deepEqual([fb.get('B2').no_fisico, fb.get('B2').de_mas], [0, 3]);
+  assert.equal(fb.get('D4').revisar, 'kg'); assert.equal(fb.get('D4').no_fisico, undefined);
+  assert.deepEqual(f.sin_facturar, [{ sku_key: 'C3', producto: 'C3', kgpz: 'Pz', recibido: 4 }]);
+  assert.deepEqual(f.conteo, { no_solicitado: 1, de_mas: 1, no_fisico: 1, por_revisar: 1, no_identificado: 0, sin_facturar: 1 });
+  assert.deepEqual([f.piezas.no_fisico, f.piezas.de_mas], [1, 3]);
+  assert.ok(!f.limpia);
+  // Same numbers as comparing at the close the old way
+  const old = facComparar({ lines: oc, todas, rows: inv });
+  assert.deepEqual(f.lineas, old.lineas); assert.deepEqual(f.conteo, old.conteo); assert.deepEqual(f.piezas, old.piezas);
 });
 
 console.log(`${n} tests passed`);
