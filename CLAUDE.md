@@ -160,6 +160,15 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   (`pvDetalle`: KPIs, weekly trend Monday-first, receptions, products with per-reception history) and CSVs
   `pvCsv('prov'|'prod'[, provIdx])` with the same KPI columns first.
 
+- **FDR · Formato de devolución (2026-11-23, comercial's form)** — printable return form for supplier receptions only
+  (CH never returns: merma MNA). `fdrAbrir` builds it from the closed report (`RV.rows`): rejected pieces (Fecha corta with
+  «Caducidad mínima aceptada», Producto dañado), Excedente (pieces; modo botones has no count → Cantidad blank to write by
+  hand) and No solicitado. Facturado sin pedir never arrived → not on it. SKU Proveedor = the OC line's `sku_marca` read from
+  the envío snapshot (`info.envio`); folio from the report's «Folio factura». Letterhead `FDR_EMPRESA` + `FDR_LOGO` (inline
+  PNG taken from the form), 15 rows minimum like the paper, signatures Calii (receptores printed) / Proveedor. Opens by itself
+  after `pdCerrar` (`openRecepcion(…, {fdr:true})`) when something goes back; «Formato de devolución · n» in
+  `pdRecepcionHead` reprints it. Overlay `#fdr`; «Imprimir» adds `body.fdr-print` so `@media print` shows only the sheet.
+
 ## Factura del proveedor (facturaProveedor-plan.md — built 2026-11-17)
 - Flags per supplier reception what the invoice charges that we shouldn't pay (we pay only what was ordered AND received,
   in pieces): no solicitado en OC, piezas de más, cobradas no en físico, cantidad por revisar (unsure piezas or Kg line).

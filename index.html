@@ -370,6 +370,38 @@ textarea.text-input{min-height:110px;font-size:15px;font-weight:500}
 .camera-btn{width:48px;height:48px;border-radius:50%;background:rgba(14,26,25,.6);color:white;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
 .camera-hint{position:absolute;bottom:32px;left:0;right:0;text-align:center;color:white;font-size:14px;padding:0 24px;z-index:2}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+/* FDR · formato de devolución: a sheet of paper (always white), alone on the printout */
+.fdr-wrap{position:fixed;inset:0;z-index:400;background:var(--c-surface);overflow:auto;padding:12px 16px 40px}
+.fdr-bar{display:flex;gap:8px;max-width:816px;margin:0 auto 12px}
+.fdr-bar .btn{flex:1}
+.fdr-page{background:#fff;color:#111;max-width:816px;margin:0 auto;padding:44px 52px;border-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,.12);font:13px/1.45 var(--font);font-weight:400}
+.fdr-top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:22px}
+.fdr-emp{color:var(--c-teal);font-weight:700;font-size:17px}
+.fdr-dir{color:#555;font-size:12px}
+.fdr-logo{width:150px;height:auto}
+.fdr-page p{margin:0 0 12px}
+.fdr-u{display:inline-block;min-width:180px;border-bottom:1px solid #111;font-weight:700;padding:0 4px}
+.fdr-ref{font-size:12px;color:#333}
+.fdr-t{width:100%;border-collapse:collapse;margin:6px 0 18px;font-size:12px}
+.fdr-t th,.fdr-t td{border:1px solid #111;padding:5px 6px;vertical-align:top;text-align:left;word-break:break-word}
+.fdr-t th{font-weight:700;text-align:center;vertical-align:middle}
+.fdr-t td{height:30px}
+.fdr-t tr{page-break-inside:avoid}
+.fdr-t .n{white-space:nowrap}
+.fdr-firmas{display:grid;grid-template-columns:1fr 1fr;gap:48px;margin-top:54px;text-align:center;font-size:12px;page-break-inside:avoid}
+.fdr-linea{border-top:1px solid #111;margin:0 12px 4px}
+.fdr-nombre{margin-top:6px;color:#555}
+@media (max-width:600px){ .fdr-page{padding:20px 12px;font-size:12px} .fdr-t{font-size:9.5px} .fdr-t th,.fdr-t td{padding:3px} .fdr-logo{width:90px} .fdr-u{min-width:90px} .fdr-firmas{gap:20px} }
+@media print{
+  @page{size:letter;margin:12mm 14mm}
+  body.fdr-print{background:#fff;min-height:0}
+  body.fdr-print > *:not(#fdr){display:none!important}
+  body.fdr-print #fdr{position:static;padding:0;background:#fff;overflow:visible}
+  body.fdr-print .fdr-bar{display:none}
+  body.fdr-print .fdr-page{box-shadow:none;padding:0;max-width:none;border-radius:0;font-size:12.5px}
+  body.fdr-print .fdr-t{font-size:11.5px}
+  body.fdr-print .fdr-t th,body.fdr-print .fdr-t td{padding:5px 6px}
+}
 </style>
 </head>
 <body>
@@ -3457,7 +3489,7 @@ async function pdCerrar(){
     recordEvent(ev); S.closedInfo=closedState(); await flushAndWait();
     S.closing=false;
     toast(OUTBOX.length?'Recepción cerrada — se termina de subir al reconectar':'✓ Recepción cerrada', 3500);
-    openRecepcion(Object.assign({ ts:ev.ts, fecha:S.session.fecha, hub:S.hub, area:S.area, session_id:S.session.id, receptor:S.receptor }, ev.detalle), 'inicio');
+    openRecepcion(Object.assign({ ts:ev.ts, fecha:S.session.fecha, hub:S.hub, area:S.area, session_id:S.session.id, receptor:S.receptor }, ev.detalle), 'inicio', { fdr:true });
   }catch(e){
     S.closing=false; renderResumen();
     toast(isNetErr(e)?'Sin conexión: no se pudo cerrar. Intenta de nuevo con internet.':'No se pudo cerrar ('+e.message+')', 4500);
@@ -3879,6 +3911,7 @@ async function openRecepcion(info, from, opts={}){
   FACV=null;
   renderRecepcion();
   if(pdRep && !info.parcial && info.lineas_todas) facBoxLoad(info, opts);
+  if(opts.fdr && pdRep && !info.parcial && fdrItems(rows).length) fdrAbrir(); // just closed: the return form is ready to print
   if(PENDING_UPLOAD && from==='inicio' && info.hub===INI.hub && info.area===INI.area)
     document.getElementById('recep-body').insertAdjacentHTML('afterbegin', `<button class="btn btn-primary btn-block" style="margin-bottom:12px" onclick="resumePendingUpload()">Ahora carga el archivo nuevo (${escapeHtml(PENDING_UPLOAD.file.name)})</button>`);
 }
@@ -3976,8 +4009,59 @@ function pdRecepcionHead(I){
   return `<h2>${escapeHtml(I.proveedor||areaName(I.area))} · ${fechaLarga(I.fecha)}</h2>
     <div class="info-card">${I.num_oc&&I.num_oc.length?'OC '+escapeHtml(I.num_oc.join(', '))+'<br>':''}Cerrada ${localDateStr(new Date(I.ts))!==I.fecha?'el '+fechaLarga(localDateStr(new Date(I.ts)))+' ':''}a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}<br>
       ${I.lineas||0} productos en la orden · ${I.diferencias?`<b style="color:var(--orange)">${I.diferencias} con diferencia</b>`:'sin diferencias'}${dev?` · ${dev} con devolución`:''}${fal?` · ${fal} con faltante`:''}${I.no_solicitados?` · ${I.no_solicitados} no solicitado(s)`:''}</div>
-    <div class="note">Registra en el sistema el <b>Recibido</b> de cada producto: es lo que se factura. Lo devuelto y lo que no llegó ya está descontado.</div>`;
+    <div class="note">Registra en el sistema el <b>Recibido</b> de cada producto: es lo que se factura. Lo devuelto y lo que no llegó ya está descontado.</div>
+    ${(n=>n?`<button class="btn btn-secondary btn-block" style="margin-bottom:12px" onclick="fdrAbrir()">Formato de devolución · ${n} producto${n===1?'':'s'}</button>`:'')(fdrItems(RV.rows).length)}`;
 }
+/* ── FDR · Formato de devolución (comercial's form, 2026-11-23): what goes back on the supplier's truck, on Calii's
+   letterhead, signed by the receptor and the driver. Built from the closed report (RV.rows), so it opens by itself
+   after Cerrar and prints again from Recepciones. Lines: rejected pieces (fecha corta / dañada), excess over the OC and
+   products not in the OC. Modo botones flags excess (and no solicitados) without a count: Cantidad stays blank to write
+   by hand. SKU Proveedor = the OC line's sku_marca (envío snapshot). Facturado sin pedir never arrived: not here. ── */
+const FDR_EMPRESA=['Calii-Market, SAPI de CV', 'Av. Lázaro Cárdenas 1007-502', 'Residencial Santa Bárbara 1er sec 66266', 'San Pedro Garza García N.L. México'];
+const FDR_LOGO='data:image/png;base64,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';
+const FDR_FILAS=15; // the form's rows; blank ones are for anything added by hand
+function fdrItems(rows){
+  const out=[];
+  for(const r of rows){
+    const q=v=>`${fmtQty(v,r.kgpz)} ${unitOf(r.kgpz)}`;
+    if(r.rech>0){ const fc=/corta/i.test(r.motivo);
+      out.push({ r, cant:q(r.rech), motivo:fc?'Fecha corta':/dañ/i.test(r.motivo)?'Producto dañado':(r.motivo||'Calidad'), obs:fc&&r.cad?`Caducidad mínima aceptada: ${r.cad}`:'' }); }
+    if(r.pns) out.push({ r, cant:r.exc>0?q(r.exc):'', motivo:'No solicitado', obs:'No está en la orden de compra' });
+    else if(r.exc>0||r.excFlag) out.push({ r, cant:r.exc>0?q(r.exc):'', motivo:'Excedente', obs:`Más de lo pedido (pedido: ${q(r.env)})` });
+  }
+  return out;
+}
+function fdrFecha(ymd){ const [y,m,d]=String(ymd).split('-').map(Number); return m?`${d} de ${MESES[m-1]} de ${y}`:String(ymd||''); }
+async function fdrAbrir(){
+  if(!RV || !RV.pd) return;
+  const I=RV.info, items=fdrItems(RV.rows);
+  if(!items.length){ toast('Nada que devolver en esta recepción'); return; }
+  const skuDe=new Map();
+  if(I.envio) try{ const env=JSON.parse(await sbFetch(I.envio)); for(const l of env.lines||[]) if(l.sku_marca) skuDe.set(l.sku_key, l.sku_marca); }catch(_){} // offline: the column stays blank
+  let folio=''; try{ const p=Papa.parse(stripBOM(RV.csv), { header:true, skipEmptyLines:true }); for(const r of p.data||[]){ folio=pickCol(r,'Folio factura')||''; if(folio) break; } }catch(_){}
+  const e=escapeHtml, u=(v, w)=>`<span class="fdr-u"${w?` style="min-width:${w}px"`:''}>${e(v)}</span>`;
+  const fila=x=>`<tr><td>${x?e(skuDe.get(rvSkuOf(x.r))||''):''}</td><td>${x?e(x.r.producto):''}</td><td>${x?e(x.r.barcode||''):''}</td><td class="n">${x?e(x.cant):''}</td><td>${x?e(x.motivo):''}</td><td>${x?e(x.obs):''}</td></tr>`;
+  const filas=items.map(fila).join('')+Array.from({ length:Math.max(0, FDR_FILAS-items.length) }, ()=>fila(null)).join('');
+  const hoy=localDateStr(I.ts?new Date(I.ts):serverNow());
+  const ref=[folio?`Factura: <b>${e(folio)}</b>`:'Factura: '+u('', 120), I.num_oc&&I.num_oc.length?`Orden de compra: <b>${e(I.num_oc.join(', '))}</b>`:'', `Entrega: <b>${e(fdrFecha(I.fecha))}</b>`].filter(Boolean).join(' &nbsp;·&nbsp; ');
+  fdrCerrar();
+  document.body.insertAdjacentHTML('beforeend', `<div id="fdr" class="fdr-wrap" role="dialog" aria-label="Formato de devolución">
+    <div class="fdr-bar"><button class="btn btn-secondary" onclick="fdrCerrar()">Cerrar</button><button class="btn btn-primary" onclick="fdrImprimir()">Imprimir</button></div>
+    <div class="fdr-page">
+      <div class="fdr-top"><div><div class="fdr-emp">${e(FDR_EMPRESA[0])}</div><div class="fdr-dir">${FDR_EMPRESA.slice(1).map(e).join('<br>')}</div></div><img class="fdr-logo" src="${FDR_LOGO}" alt="Calii"></div>
+      <p>Estimado proveedor ${u(I.proveedor||areaName(I.area), 200)},</p>
+      <p>Por medio de la presente, con fecha de ${u(fdrFecha(hoy), 140)}, le notificamos que los siguientes productos no han sido aceptados por nuestro departamento de Calidad por los motivos mencionados abajo. Les pedimos llevar a cabo un cambio o devolución física del producto para proceder con el pago de la factura indicada.</p>
+      <p class="fdr-ref">${ref}</p>
+      <table class="fdr-t"><thead><tr><th style="width:11%">SKU Proveedor</th><th>Descripción del Producto</th><th style="width:16%">Código de barras</th><th style="width:10%">Cantidad</th><th style="width:15%">Motivo de rechazo</th><th style="width:17%">Observación</th></tr></thead>
+        <tbody>${filas}</tbody></table>
+      <p>Departamento de Calidad y Recibo, Calii-Market MH/CH ${u(hubName(I.hub), 180)}</p>
+      <div class="fdr-firmas"><div><div class="fdr-linea"></div>Calii<br>(Nombre y firma)<div class="fdr-nombre">${e((I.receptores||[I.receptor]).filter(Boolean).join(', '))}</div></div>
+        <div><div class="fdr-linea"></div>Proveedor<br>(Nombre y firma)</div></div>
+    </div></div>`);
+}
+function fdrImprimir(){ document.body.classList.add('fdr-print'); window.print(); }
+function fdrCerrar(){ const el=document.getElementById('fdr'); if(el) el.remove(); document.body.classList.remove('fdr-print'); }
+window.addEventListener('afterprint', ()=>document.body.classList.remove('fdr-print'));
 function descargarReporte(){
   const blob=new Blob(['﻿'+RV.csv], { type:'text/csv;charset=utf-8' });
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=RV.info.reporte.split('/').pop();
