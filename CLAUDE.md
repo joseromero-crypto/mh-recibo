@@ -161,9 +161,12 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   `pvCsv('prov'|'prod'[, provIdx])` with the same KPI columns first.
 
 - **FDR · Formato de devolución (2026-11-23, comercial's form)** — printable return form for supplier receptions only
-  (CH never returns: merma MNA). `fdrAbrir` builds it from the closed report (`RV.rows`): rejected pieces (Fecha corta with
-  «Caducidad mínima aceptada», Producto dañado), Excedente (pieces; modo botones has no count → Cantidad blank to write by
-  hand) and No solicitado. Facturado sin pedir never arrived → not on it. SKU Proveedor = the OC line's `sku_marca` read from
+  (CH never returns: merma MNA). `fdrAbrir` builds it from the closed report (`RV.rows`) + the latest `factura` event
+  (`fdrPrep` → `RV.fdrFac`). **Only what the invoice charges** (Jose): rejected pieces (Fecha corta with «Caducidad mínima
+  aceptada», Producto dañado) of billed lines; Excedente only when billed above the OC, Cantidad = min(excess, `de_mas`); a
+  scanned No solicitado only when the invoice bills it (`fdrNs`). Anything else scanned = driver's mistake, no form. No review
+  yet → rejections only + an on-screen note; a review saved later updates the button (`fdrBtn`). Facturado sin pedir that
+  never arrived → not on it. SKU Proveedor = the OC line's `sku_marca` read from
   the envío snapshot (`info.envio`); folio from the report's «Folio factura». Letterhead `FDR_EMPRESA` + `FDR_LOGO` (inline
   PNG taken from the form), 15 rows minimum like the paper, signatures Calii (receptores printed) / Proveedor. Opens by itself
   after `pdCerrar` (`openRecepcion(…, {fdr:true})`) when something goes back; «Formato de devolución · n» in
