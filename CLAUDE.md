@@ -64,7 +64,15 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   public by design (no login), so the bridge is locked down instead: `proveedor/appsscript.json` limits it to
   `spreadsheets.readonly` (tabs read through the Sheets API advanced service, `libro_`; SpreadsheetApp needs edit rights)
   and it returns **no phone numbers** (names only; no «Llamar» links). Code change → Jose pastes it and deploys a New
-  version of the same deployment (URL stays). Live read ~8 s fresh, ~2 s cached (30 s). Localhost reads
+  version of the same deployment (URL stays). Live read ~8 s fresh, ~2 s cached (30 s).
+  **Saved copy (2026-11-23):** a 1-minute timer in the same script (`refrescarTodo`, 05:00–22:59 Mty; set up with
+  `instalarTimer`) builds every hub at once (master read once, reference files cached 30 min) and writes
+  `rec_pd_snapshot` (one row per hub: data, hash, leido, revisado = server time, ms) through `rec_pd_snapshot_put`, which
+  needs `SB_SECRET` (kept in the private table `rec_pd_secret`, never in git; `sql/pd-snapshot.sql`). Unchanged hubs only
+  get `revisado` moved. `pdFetch` reads the copy first (`pdSnapshot`): `fresh` reads (Empezar, Cerrar) accept it ≤ 2.5 min
+  old, lists ≤ 10 min; older, missing or unreachable → the script live. `live:true` skips it: «Volver a leer la orden» in
+  Inicio and Recibir and «Agregar a esta recepción» (compras may have just fixed the sheet). Demo answers the copy from
+  the fake bridge. Localhost reads
   `fixtures/proveedor_mh-contry.json` (gitignored); `?pdlive=1` uses the live URL. test-hub borrows mh-contry.
 - Each supplier is an internal área `pd-{provSlug}` (§6.0): same folders, sessions, closing, deleting. `areaName()`
   shows the supplier name (`PD_NAMES`); never show `pd-…` to a receptor.

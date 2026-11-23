@@ -24,6 +24,11 @@
  *   4. Deploy → New deployment → type "Web app" → Execute as: Me · Who has access: Anyone → Deploy.
  *      Copy the /exec URL. (Every code change: Deploy → Manage deployments → edit → Version: New version,
  *      so the URL stays the same.)
+ *   5. Saved copy (2026-11-23): run sql/pd-snapshot.sql in Supabase, paste the secret it prints into Script properties
+ *      as SB_SECRET, then run `instalarTimer` once (asks for «Connect to an external service» and «Run when you're not
+ *      present»). From then on `refrescarTodo` writes every hub to rec_pd_snapshot every minute (05:00–22:59), and the
+ *      app reads that row in a fraction of a second; this web app stays as its fallback. `quitarTimer` turns it off.
+ *      Executions → refrescarTodo shows each run's time; rec_pd_snapshot.ms holds the latest one.
  *
  * Call:  GET {exec}?token=…&hub=mh-contry[&proveedor=LALA][&fresh=1]
  *   → { leido, ordenes:[{num_oc, proveedor, fecha_entrega, comercial, comprador, lineas:[…]}], contactos,
@@ -120,14 +125,14 @@ function leerHub_(hub, fresh) {
   cachePut_(cache, key, data);
   return data;
 }
-function cachePut_(cache, key, obj) {
+function cachePut_(cache, key, obj, seg) {
   try {
     const b64 = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(JSON.stringify(obj), 'application/json')).getBytes());
     const size = 90000, parts = {};
     let n = 0;
     for (let i = 0; i < b64.length; i += size) parts[key + '_' + (n++)] = b64.slice(i, i + size);
     parts[key] = String(n);
-    cache.putAll(parts, CACHE_SEG);
+    cache.putAll(parts, seg || CACHE_SEG);
   } catch (e) { /* cache is a nicety */ }
 }
 function cacheGet_(cache, key) {
@@ -142,10 +147,78 @@ function cacheGet_(cache, key) {
   } catch (e) { return null; }
 }
 
+/* ── Saved copy for the app (sql/pd-snapshot.sql): refrescarTodo runs every minute from a timer ──
+ * Reads the master once and each city's reference file at most every REF_MIN minutes, builds every hub, and sends
+ * Supabase only what changed (hash of the answer without `leido`); unchanged hubs just get revisado = now, which is what
+ * the app checks before trusting the copy. Outside HORAS it does nothing (the app then reads this script live). */
+const SB_URL = 'https://uuqqtksxlgkztenojufm.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1cXF0a3N4bGdrenRlbm9qdWZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxODc0NDIsImV4cCI6MjA5Mzc2MzQ0Mn0.Ifj0QKO4oTcIz3IgSD3fMWwdQz_QG_561d4sQAgWG2U'; // public anon key (same as the app)
+const TIMER_MIN = 1;          // Apps Script's shortest timer
+const HORAS = [5, 23];        // Monterrey hours it runs: from 05:00 to 22:59
+const REF_MIN = 30;           // Encargados / Inv {city} change rarely: re-read every 30 min
+
+function refrescarTodo() {
+  const h = Number(Utilities.formatDate(new Date(), TZ, 'H'));
+  if (h < HORAS[0] || h > HORAS[1] - 1) return;
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(1000)) return;                 // the previous run is still going
+  try {
+    const t0 = Date.now();
+    const secret = PropertiesService.getScriptProperties().getProperty('SB_SECRET');
+    if (!secret) throw new Error('Falta SB_SECRET en Script properties');
+    const ctx = { master: libro_(MASTER, [TABS.catalogo, TABS.proveedores, TABS.ordenes]), refs: {} };
+    const cache = CacheService.getScriptCache();
+    Object.keys(CIUDADES).forEach(c => {
+      let r = cacheGet_(cache, 'ref_' + c);
+      if (!r) { r = referencia_(c); cachePut_(cache, 'ref_' + c, r, REF_MIN * 60); }
+      ctx.refs[c] = r;
+    });
+    const props = PropertiesService.getScriptProperties();
+    const datos = {}, filas = [];
+    Object.keys(HUBS).forEach(slug => {
+      const d = parsearHub_(slug, ctx);
+      cachePut_(cache, 'pd_' + slug, d);           // the live doGet gets it too
+      const sinLeido = Object.assign({}, d); delete sinLeido.leido;
+      const hash = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(sinLeido), Utilities.Charset.UTF_8));
+      datos[slug] = { data: d, hash: hash };
+      const fila = { hub: slug, hash: hash };
+      if (props.getProperty('hash_' + slug) !== hash) fila.data = d;
+      filas.push(fila);
+    });
+    // A heartbeat whose row is missing or holds another hash comes back in `faltan`: send that hub in full now.
+    const faltan = snapshotPut_(secret, filas, Date.now() - t0);
+    if (faltan.length) snapshotPut_(secret, faltan.map(s => ({ hub: s, hash: datos[s].hash, data: datos[s].data })), Date.now() - t0);
+    filas.forEach(f => { if (f.data) props.setProperty('hash_' + f.hub, datos[f.hub].hash); });
+  } finally {
+    lock.releaseLock();
+  }
+}
+function snapshotPut_(secret, filas, ms) {
+  const r = UrlFetchApp.fetch(SB_URL + '/rest/v1/rpc/rec_pd_snapshot_put', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY },
+    payload: JSON.stringify({ p_secret: secret, p_rows: filas, p_ms: ms }),
+  });
+  if (r.getResponseCode() >= 300) throw new Error('rec_pd_snapshot_put → ' + r.getResponseCode() + ' ' + r.getContentText());
+  return JSON.parse(r.getContentText() || '[]') || [];
+}
+// Run once (and again after changing TIMER_MIN): replaces the timer. A full first run follows right away.
+function instalarTimer() {
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'refrescarTodo').forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('refrescarTodo').timeBased().everyMinutes(TIMER_MIN).create();
+  const props = PropertiesService.getScriptProperties();
+  Object.keys(HUBS).forEach(s => props.deleteProperty('hash_' + s));   // send everything once
+  refrescarTodo();
+}
+function quitarTimer() {
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'refrescarTodo').forEach(t => ScriptApp.deleteTrigger(t));
+}
+
 /* ── Parsing ── */
-function parsearHub_(slug) {
+// ctx (optional, from refrescarTodo): { master, refs: { city → referencia_() } } so one run reads each file once.
+function parsearHub_(slug, ctx) {
   const cfg = HUBS[slug];
-  const master = libro_(MASTER, [TABS.catalogo, TABS.proveedores, TABS.ordenes]);
+  const master = (ctx && ctx.master) || libro_(MASTER, [TABS.catalogo, TABS.proveedores, TABS.ordenes]);
   const tz = TZ;
   const hoy = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
   const desde = addDays_(hoy, -VENTANA_DIAS), hasta = addDays_(hoy, VENTANA_DIAS);
@@ -180,39 +253,9 @@ function parsearHub_(slug) {
   } catch (e) { avisos.push(String(e.message || e)); }
 
   // Reference hub file for the city: Encargados (Comercial; phones are never read) + Inv {city} (Temp).
-  const comercialDe = {}, tempDe = {};
-  const ref = CIUDADES[cfg.ciudad];
-  if (ref) {
-    const rs = libro_(ref.file, [TABS.encargados, ref.inv, TABS.nuevos]);
-    const rtz = TZ;
-    try {
-      const enc = tabla_(rs, TABS.encargados, ['proveedor', 'comercial']);
-      enc.rows.forEach(r => {
-        const prov = txt_(r.v[enc.col.proveedor]), com = txt_(r.v[enc.col.comercial]);
-        if (prov && com) comercialDe[provKey_(prov)] = com;
-      });
-    } catch (e) { avisos.push(String(e.message || e)); }
-    try {
-      const inv = tabla_(rs, ref.inv, ['producto', 'temp']);
-      inv.rows.forEach(r => {
-        const t = temp_(r.v[inv.col.temp], rtz);
-        if (!t) return;
-        if (inv.col.cod_de_barras != null) { const c = codigo_(r.d[inv.col.cod_de_barras]); if (c) tempDe[c] = t; }
-        tempDe['n:' + provKey_(r.v[inv.col.producto])] = t;
-      });
-    } catch (e) { avisos.push(String(e.message || e)); }
-    try {   // new products may not be in Inv yet
-      const pn = tabla_(rs, TABS.nuevos, ['proveedor', 'producto']);
-      const tcol = Object.keys(pn.col).filter(k => /^temp/.test(k))[0];
-      if (tcol) pn.rows.forEach(r => {
-        const c = pn.col.codigo_de_barras != null ? codigo_(r.d[pn.col.codigo_de_barras]) : '';
-        const t = temp_(r.v[pn.col[tcol]], rtz);
-        if (c && t && !tempDe[c]) tempDe[c] = t;
-      });
-    } catch (e) { avisos.push(String(e.message || e)); }
-  } else {
-    avisos.push('Sin archivo de referencia para ' + cfg.ciudad + ': sin comercial ni temperatura');
-  }
+  const ref = (ctx && ctx.refs && ctx.refs[cfg.ciudad]) || referencia_(cfg.ciudad);
+  const comercialDe = ref.comercialDe, tempDe = ref.tempDe;
+  ref.avisos.forEach(a => avisos.push(a));
 
   // Order lines: «Base datos Compras», this hub's rows.
   const oc = tabla_(master, TABS.ordenes, ['hub', 'proveedor', 'item', 'pedido', 'fecha']);
@@ -276,6 +319,45 @@ function parsearHub_(slug) {
 
   return { leido: new Date().toISOString(), ordenes: ordenes, contactos: contactos,
            proveedores: proveedores, catalogo: catalogo, avisos: avisos };
+}
+
+/* Reference hub file of a city → { comercialDe, tempDe, avisos }: Encargados (supplier → Comercial; phones are never
+ * read), Inv {city} and Productos Nuevos (Temp). */
+function referencia_(ciudad) {
+  const comercialDe = {}, tempDe = {}, avisos = [];
+  const ref = CIUDADES[ciudad];
+  if (ref) {
+    const rs = libro_(ref.file, [TABS.encargados, ref.inv, TABS.nuevos]);
+    const rtz = TZ;
+    try {
+      const enc = tabla_(rs, TABS.encargados, ['proveedor', 'comercial']);
+      enc.rows.forEach(r => {
+        const prov = txt_(r.v[enc.col.proveedor]), com = txt_(r.v[enc.col.comercial]);
+        if (prov && com) comercialDe[provKey_(prov)] = com;
+      });
+    } catch (e) { avisos.push(String(e.message || e)); }
+    try {
+      const inv = tabla_(rs, ref.inv, ['producto', 'temp']);
+      inv.rows.forEach(r => {
+        const t = temp_(r.v[inv.col.temp], rtz);
+        if (!t) return;
+        if (inv.col.cod_de_barras != null) { const c = codigo_(r.d[inv.col.cod_de_barras]); if (c) tempDe[c] = t; }
+        tempDe['n:' + provKey_(r.v[inv.col.producto])] = t;
+      });
+    } catch (e) { avisos.push(String(e.message || e)); }
+    try {   // new products may not be in Inv yet
+      const pn = tabla_(rs, TABS.nuevos, ['proveedor', 'producto']);
+      const tcol = Object.keys(pn.col).filter(k => /^temp/.test(k))[0];
+      if (tcol) pn.rows.forEach(r => {
+        const c = pn.col.codigo_de_barras != null ? codigo_(r.d[pn.col.codigo_de_barras]) : '';
+        const t = temp_(r.v[pn.col[tcol]], rtz);
+        if (c && t && !tempDe[c]) tempDe[c] = t;
+      });
+    } catch (e) { avisos.push(String(e.message || e)); }
+  } else {
+    avisos.push('Sin archivo de referencia para ' + ciudad + ': sin comercial ni temperatura');
+  }
+  return { comercialDe: comercialDe, tempDe: tempDe, avisos: avisos };
 }
 
 /* Reads a tab; finds the header row (first of the top 6 rows that holds every `need` header) and maps columns by

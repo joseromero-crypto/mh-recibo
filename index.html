@@ -540,6 +540,7 @@ async function demoFetch(input, init={}){
     if(method==='HEAD') return DEMO.realFetch(input, init); // syncClock: the server's Date header
     const [path, qs='']=url.slice((SB_URL+'/rest/v1/').length).split('?');
     if(path==='picks'){ await DEMO.ready; return demoRes(demoPgSelect(DEMO.data.picks, qs.replace(/(^|&)hub=[^&]*/,''))); } // any hub gets the fake assembly
+    if(path==='rec_pd_snapshot'){ await DEMO.ready; return demoRes([{ revisado:serverNow().toISOString(), data:demoOrdenes(new URLSearchParams()) }]); } // the saved copy = the fake bridge
     const T=DEMO.st.tables[path];
     if(!T) return demoRes({ message:'modo prueba: tabla no disponible' }, 403);
     if(method==='GET') return demoRes(demoPgSelect(T, qs));
@@ -1273,11 +1274,32 @@ function pdFechaLabel(ymd){
 }
 function sameName(a,b){ return normName(a)===normName(b); }
 
-// GET the bridge (or the fixture). `prov` narrows to one supplier; `fresh` skips the script's 30 s cache.
-async function pdFetch(slug, { prov=null, fresh=false }={}){
+// Saved copy (sql/pd-snapshot.sql): the Apps Script timer rewrites rec_pd_snapshot every minute (05:00–22:59), so a
+// read takes a fraction of a second instead of ~8 s. `revisado` (server clock) = last run that confirmed it. A copy
+// older than maxMs, missing or unreachable → null, and the caller reads the script live.
+const PD_SNAP_FRESH_MS=150000;   // `fresh` reads (Empezar, Cerrar): ≤ 2.5 min, about two timer runs
+const PD_SNAP_MAX_MS=600000;     // lists (Inicio, Recibir extras): ≤ 10 min
+async function pdSnapshot(hub, maxMs){
+  const ctl=new AbortController(), to=setTimeout(()=>ctl.abort(), 6000);
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/rec_pd_snapshot?hub=eq.${encodeURIComponent(hub)}&select=revisado,data`,
+      { headers:{ apikey:SB_KEY, Authorization:`Bearer ${SB_KEY}` }, signal:ctl.signal, cache:'no-store' });
+    if(!r.ok) return null;
+    const row=(await r.json())[0];
+    if(!row || !row.data || !(serverNow()-new Date(row.revisado)<=maxMs)) return null;
+    return Object.assign(row.data, { leido:row.revisado, copia:true });
+  }catch(_){ return null; }
+  finally{ clearTimeout(to); }
+}
+// GET the orders: the saved copy when it's recent enough, else the bridge (or the fixture on localhost). `prov` narrows
+// to one supplier; `fresh` = must reflect the sheet now (copy ≤ PD_SNAP_FRESH_MS, or the script without its 30 s cache);
+// `live` skips the copy («Volver a leer la orden»: the receptor asks because compras may have just fixed it).
+async function pdFetch(slug, { prov=null, fresh=false, live=false }={}){
   const hub=PD_HUB[slug]||slug;
-  let d;
-  if(PD_FIXTURE){
+  let d=null;
+  if(!PD_FIXTURE && !live) d=await pdSnapshot(hub, fresh ? PD_SNAP_FRESH_MS : PD_SNAP_MAX_MS);
+  if(d){ if(!prov) delete d.catalogo; }
+  else if(PD_FIXTURE){
     const r=await fetch(`fixtures/proveedor_${hub}.json`, { cache:'no-store' });
     if(!r.ok) throw new Error(r.status===404 ? `No hay fixture para ${hub}` : String(r.status));
     d=await r.json();
@@ -1291,9 +1313,10 @@ async function pdFetch(slug, { prov=null, fresh=false }={}){
     if(d && d.error) throw new Error(d.error==='token' ? 'Token de órdenes inválido' : d.error);
   }
   d.ordenes=d.ordenes||[]; d.contactos=d.contactos||{}; d.proveedores=d.proveedores||[];
-  if(prov){ // the fixture holds every supplier; the script already narrowed it
+  if(prov){ // the fixture and the saved copy hold every supplier; the script already narrowed it
     d.ordenes=d.ordenes.filter(o=>sameName(o.proveedor, prov));
     d.catalogo=(d.catalogo||[]).filter(c=>sameName(c.proveedor, prov));
+    if(d.copia){ const c={}; for(const n in d.contactos) if(sameName(n, prov)) c[n]=d.contactos[n]; d.contactos=c; }
   }
   d.ordenes.forEach(o=>pdArea(o.proveedor));
   return d;
@@ -1326,12 +1349,12 @@ function addDaysStr(ymd, n){ const d=new Date(ymd+'T12:00:00Z'); d.setUTCDate(d.
 // INI.pd: undefined = loading · { error } · { data, abiertas, recibidas }
 // INI.prov: chosen supplier name · INI.ocSel: Set of pdKey · INI.otro: search text (null = closed)
 let _pdTok=0;
-async function pdLoad({ prov=null, fresh=false }={}){
+async function pdLoad({ prov=null, fresh=false, live=false }={}){
   const tok=++_pdTok, slug=INI.hub;
   if(!prov){ INI.pd=undefined; renderInicio(); }
   else if(INI.pd && INI.pd.data){ INI.pd.releyendo=true; renderInicio(); }
   try{
-    const [data, ses]=await Promise.all([ pdFetch(slug, { prov, fresh }), pdSesiones(slug).catch(()=>({ abiertas:new Map(), recibidas:new Map(), offline:true })) ]);
+    const [data, ses]=await Promise.all([ pdFetch(slug, { prov, fresh, live }), pdSesiones(slug).catch(()=>({ abiertas:new Map(), recibidas:new Map(), offline:true })) ]);
     if(tok!==_pdTok || slug!==INI.hub) return;
     if(prov && INI.pd && INI.pd.data){ // merge the supplier's fresh lines into the full answer
       const full=INI.pd.data;
@@ -1368,7 +1391,7 @@ function pdPickProv(name){
 function pdPickProvIdx(i){ pdPickProv(INI._provList[i]); }
 function pdCambiarProv(){ INI.prov=null; INI.area=null; INI.active=undefined; INI.ocSel=null; renderInicio(); }
 function pdToggleOc(k){ if(INI.ocSel.has(k)) INI.ocSel.delete(k); else INI.ocSel.add(k); renderInicio(); }
-function pdReleer(){ if(INI.prov) pdLoad({ prov:INI.prov, fresh:true }); else pdLoad({ fresh:true }); }
+function pdReleer(){ if(INI.prov) pdLoad({ prov:INI.prov, fresh:true, live:true }); else pdLoad({ fresh:true, live:true }); } // asked by the receptor: skip the saved copy
 function pdOtro(v){ INI.otro=v; renderInicio(); const el=document.getElementById('pd-otro'); if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
 
 // Contacts (plan §3.3): Comercial from Encargados + Comprador from the order. Phones only become tel: links.
@@ -1558,9 +1581,9 @@ function pdOtrasDe(d, ses){
 // «Volver a leer la orden»: same OCs, fresh from the sheet. A change writes a new snapshot in the same session
 // (reemplazo, orden_releida) and every line is recomputed; the counts never move (they are physical).
 // Reads the same OCs fresh (plus extraKey) → { data, cambio, d, ses } or { gone:true, d, ses } when they left the sheet
-async function pdLeerOrden(extraKey){
+async function pdLeerOrden(extraKey, { live=false }={}){
   const sid=S.session.id, prov=S.envio.orden.proveedor, slug=S.hub, area=S.area;
-  const [d, ses]=await Promise.all([ pdFetch(slug, { prov, fresh:true }), pdSesiones(slug).catch(()=>null) ]);
+  const [d, ses]=await Promise.all([ pdFetch(slug, { prov, fresh:true, live }), pdSesiones(slug).catch(()=>null) ]);
   if(!S.session || S.session.id!==sid) return null;
   S.pdLeido=d.leido;
   const keys=new Set(S.envio.orden.ocs.map(o=>o.key)); if(extraKey) keys.add(extraKey);
@@ -1589,7 +1612,7 @@ async function pdReleerRecepcion(extraKey){
   const sid=S.session.id;
   S.pdBusy=true; renderRecibir();
   try{
-    const r=await pdLeerOrden(extraKey); if(!r) return;
+    const r=await pdLeerOrden(extraKey, { live:true }); if(!r) return;
     if(r.gone){ pdOtrasDe(r.d, r.ses); toast('La orden ya no aparece en el archivo de compras. Se conserva la copia actual.', 5000); return; }
     if(!r.cambio){ pdOtrasDe(r.d, r.ses); toast('La orden no cambió'); return; }
     await pdAplicarOrden(r);
