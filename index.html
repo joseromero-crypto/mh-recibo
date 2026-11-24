@@ -1724,13 +1724,14 @@ async function onEnvioFile(input){
 }
 // §5.2 — verified on both fixtures (Abarrotes 105 lines / Carnes 132 lines, 26 Kg)
 function parseEnvio(text){
-  const out={ errors:[], warnings:[], lines:[], catalogo:[], stats:null, newestEnvio:null };
+  const out={ errors:[], warnings:[], lines:[], catalogo:[], sinSalida:[], stats:null, newestEnvio:null };
   const p=Papa.parse(stripBOM(String(text||'')), { header:true, dynamicTyping:false, skipEmptyLines:true });
   const fields=(p.meta && p.meta.fields)||[];
   const col=name=>fields.find(f=>normHeader(stripBOM(f))===normHeader(name));
   const C={ producto:col('Producto'), barcode:col('Código de barras'), kgpz:col('Kg/Pz'), envio:col('Envío (kg o pz)'),
             temp:col('Temp'), categoria:col('Categoría'), act:col('Actualización envío'), por:col('Envío registrado por'),
-            reqConf:col('Requiere confirmar'), vida:col('Vida anaquel usuarios (min. días)') };
+            reqConf:col('Requiere confirmar'), vida:col('Vida anaquel usuarios (min. días)'),
+            unid:col('Envío (nro. de unidades)'), peso:col('Envío (peso neto o piezas por unidad)') };
   const missing=[['Producto',C.producto],['Código de barras',C.barcode],['Kg/Pz',C.kgpz],['Envío (kg o pz)',C.envio]].filter(x=>!x[1]).map(x=>x[0]);
   if(missing.length){
     out.errors.push(`Al archivo le falta${missing.length>1?'n las columnas':' la columna'} ${missing.map(m=>`«${m}»`).join(', ')}. ¿Es la exportación de Envío del sistema?`);
@@ -1745,6 +1746,8 @@ function parseEnvio(text){
     if(isNaN(esperado)){ badNums++; return; }
     const sku_key=skuKeyOf(barcode, producto);
     const vd=C.vida?parseInt(String(r[C.vida]||'').trim(),10):NaN, vida_dias=vd>=0?vd:null;
+    // Units captured without peso neto: Retool leaves the salida blank, so the line looks not sent. Advisory only, never counted.
+    if(C.unid && C.peso && !(esperado>0) && parseNum(r[C.unid])>0 && !String(r[C.peso]||'').trim()) out.sinSalida.push(producto);
     if(!(esperado>0)){ out.catalogo.push([producto, barcode, kgpz, vida_dias]); return; }
     if(bySku.has(sku_key)){ // same product on two lines — counted together (never seen in real files)
       const l=bySku.get(sku_key); l.esperado=round2(l.esperado+esperado); dupes++; return;
@@ -1756,7 +1759,7 @@ function parseEnvio(text){
     bySku.set(sku_key, line); out.lines.push(line);
   });
   if(!out.lines.length){
-    out.errors.push('El archivo no trae ningún producto con «Envío (kg o pz)» mayor a 0. ¿Es el envío de este hub?');
+    out.errors.push('El archivo no trae ningún producto con «Envío (kg o pz)» mayor a 0. '+(out.sinSalida.length?`${out.sinSalida.length} producto(s) tienen unidades pero les falta «Peso neto o piezas por unidad»: avisa a CH para que lo llene y descarga el archivo otra vez.`:'¿Es el envío de este hub?'));
     return out;
   }
   if(badNums) out.errors.push(`${badNums} renglón(es) tienen un número de envío que no se puede leer. Descarga el archivo otra vez.`);
@@ -1770,11 +1773,23 @@ function parseEnvio(text){
     const age=daysBetween(localDateStr(new Date(newest)), todayStr());
     if(age>2) out.warnings.push({ id:'viejo', html:`<b>El envío del archivo se registró el ${fechaLarga(localDateStr(new Date(newest)))}</b> (hace ${age} días). ¿Es el envío correcto?` });
   }
+  if(out.sinSalida.length){ const n=out.sinSalida.length;
+    out.warnings.push({ id:'sin_salida', btn:'Continuar sin corregir', done:'Continuar sin corregir',
+      html:`<b>Salida mal registrada en CH: ${n} producto${n>1?'s':''} sin «Peso neto o piezas por unidad».</b> CH capturó las unidades, pero la salida quedó vacía y aquí ${n>1?'van a salir':'va a salir'} como no enviado${n>1?'s':''}:
+      <ul style="margin:8px 0 8px 18px">${out.sinSalida.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul>Avisa a CH para que lo llene y descarga el archivo otra vez.
+      <button class="btn btn-secondary btn-block" style="background:var(--c-white)" onclick="copiarSinSalida()">Copiar mensaje para CH</button>` }); }
   if(dupes) out.warnings.push({ id:'dupes', html:`${dupes} producto(s) aparecen en más de un renglón; se van a recibir juntos.` });
   out.lines.forEach(l=>delete l._reqConf);
   out.stats={ lineas:out.lines.length, kg:out.lines.filter(l=>l.kgpz==='Kg').length,
               sinCodigo:out.lines.filter(l=>!l.barcode).length, catalogo:out.catalogo.length, renglones:(p.data||[]).length };
   return out;
+}
+async function copiarSinSalida(){
+  const L=SUBIR&&SUBIR.parsed.sinSalida; if(!L||!L.length) return;
+  const txt=`${hubName(INI.hub)} · ${areaName(INI.area)}: la salida está mal registrada. Estos productos tienen unidades pero les falta «Peso neto o piezas por unidad», por eso la salida quedó vacía:\n${L.map(x=>'• '+x).join('\n')}\nPor favor llénenlo y avisen para descargar el envío otra vez.`;
+  try{ await navigator.clipboard.writeText(txt); }
+  catch(_){ const t=document.createElement('textarea'); t.value=txt; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  toast('✓ Mensaje copiado');
 }
 function renderSubir(){
   const el=document.getElementById('subir-result'); if(!SUBIR){ el.innerHTML=''; return; }
@@ -1791,8 +1806,8 @@ function renderSubir(){
     </div>`;
   for(const w of P.warnings){
     const ok=SUBIR.acks.has(w.id);
-    h+=`<div class="warn-box ${ok?'ok':''}">${w.html}${ok?'<div style="margin-top:6px;font-weight:700">✓ Confirmado</div>'
-      :`<button class="btn btn-warn btn-block" onclick="SUBIR.acks.add('${w.id}');renderSubir()">Sí, es el archivo correcto</button>`}</div>`;
+    h+=`<div class="warn-box ${ok?'ok':''}">${w.html}${ok?'<div style="margin-top:6px;font-weight:700">✓ '+(w.done||'Confirmado')+'</div>'
+      :`<button class="btn btn-warn btn-block" onclick="SUBIR.acks.add('${w.id}');renderSubir()">${w.btn||'Sí, es el archivo correcto'}</button>`}</div>`;
   }
   if(SUBIR.error) h+=`<div class="err-box">${escapeHtml(SUBIR.error)}</div>`;
   const ready=P.warnings.every(w=>SUBIR.acks.has(w.id)) && !SUBIR.busy;
@@ -5577,7 +5592,9 @@ function demoGenerar(){
       Object.assign(r,{ 'Producto':l.producto, 'Código de barras':l.sinCodigo?'':l.code, 'Temp':l.temp||'Ambiente', 'Vida anaquel usuarios (min. días)':String(l.vida||14),
         'Categoría':'Prueba', 'Kg/Pz':l.kgpz||'Pz', 'Envío (kg o pz)':String(envio), 'Actualización envío':ayer+'T19:30:00.000-06:00',
         'Envío registrado por':'prueba@calii', 'Requiere confirmar':'true', '¿Discrepancia envío?':'false', '¿Discrepancia compra?':'false' }); return r; };
-    const csv=Papa.unparse({ fields:DEMO_HEAD, data:[...L.map(l=>row(l,l.esperado)), ...cat.map(c=>row(c,0))].map(r=>DEMO_HEAD.map(h=>r[h])) });
+    const sinPeso=row(cat[1],''); sinPeso['Envío (nro. de unidades)']='3';
+    items.push(it(cat[1],{ llego:3, tipo:'no_envio', nota:'CH capturó unidades sin peso neto' })); espera.push(`${cat[1].producto}: al cargar el envío avisa «Salida mal registrada en CH»; si sigues, sale como no enviado`);
+    const csv=Papa.unparse({ fields:DEMO_HEAD, data:[...L.map(l=>row(l,l.esperado)), ...cat.map((c,i)=>i===1?sinPeso:row(c,0))].map(r=>DEMO_HEAD.map(h=>r[h])) });
     const picks=L.map((l,i)=>({ id:i+1, sku_key:l.sinCodigo?'norm:'+normName(l.producto):l.code, cantidad:i===1?l.esperado+1:l.esperado, ronda:1, order_date:ayer, unidad:'pz' }));
     ent.ab={ key:'ab', titulo:'CH · Abarrotes', area:'abarrotes', csv, archivo:`envio_prueba_abarrotes_${hoy}.csv`, items, espera, picks,
       como:'Inicio → <b>CH Guadalupe</b> → cualquier hub → <b>Abarrotes</b> → en «Cargar envío» usa <b>Archivos → Cargar en la app</b>.' };

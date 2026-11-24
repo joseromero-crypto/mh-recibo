@@ -279,6 +279,10 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   **active envío = newest `.json` in the folder**. "Empezar sin archivo" writes a placeholder JSON
   (`sinArchivo:true`, no lines, catalog copied from the previous file); the real upload reuses its session and
   opens "Revisar ahora" (`revisarItems()`: scans with `detalle.esperado===null`).
+- Upload warning `sin_salida` (2026-11-24, San Nicolás): units in «Envío (nro. de unidades)» but «Envío (peso neto o piezas por
+  unidad)» and «Envío (kg o pz)» blank = Retool never computed the salida. Lists the products (no quantities, blind count) and
+  copies a message for CH (`copiarSinSalida`). Message only: the line stays out of the envío, nothing is filled in. «Continuar
+  sin corregir» lets the upload go on.
 - Session reuse (§6.7): sin-archivo reception → always reused; open reception with scans → modal "Reemplazar y
   conservar" (same `session_id`, `reemplazo` event) or "Primero cerrar" (→ Resumen); open + no scans + same day →
   silent replace; otherwise new session + `abrir`.
