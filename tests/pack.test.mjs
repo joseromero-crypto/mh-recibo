@@ -10,8 +10,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const html = readFileSync(join(root, 'index.html'), 'utf8');
 const block = html.slice(html.indexOf('/* FACTURA-PURE:BEGIN'), html.indexOf('/* FACTURA-PURE:END */'));
 assert.ok(block.length > 100, 'FACTURA-PURE block not found');
-const { packOf, packN, packPedido, packDePiezas, facComparar, facInicio, facObjetivo, facCierre } =
-  new Function(block + '\nreturn { packOf, packN, packPedido, packDePiezas, facComparar, facInicio, facObjetivo, facCierre };')();
+const { packOf, packN, packPedido, packDePiezas, packEnDe, facComparar, facInicio, facObjetivo, facCierre } =
+  new Function(block + '\nreturn { packOf, packN, packPedido, packDePiezas, packEnDe, facComparar, facInicio, facObjetivo, facCierre };')();
 
 let n = 0;
 const test = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -44,11 +44,20 @@ test('packPedido: not a multiple of N = paquetes, no question', () => {
   assert.deepEqual(packPedido(8, 0), { P: 8, n: 0, en: null, pregunta: false, falta: false });       // single item: as before
 });
 
-test('packPedido: a multiple of N asks once; the answer sets P in paquetes', () => {
+test('packPedido: a multiple of N needs an answer; it sets P in paquetes', () => {
   assert.deepEqual(packPedido(36, 12), { P: null, n: 12, en: null, pregunta: true, falta: true });
   assert.equal(packPedido(36, 12, 'piezas').P, 3);
   assert.equal(packPedido(36, 12, 'paquetes').P, 36);
   assert.equal(packPedido(72, 12, 'piezas').P, 6);
+});
+
+test('packEnDe: the invoice or what arrived settles an ambiguous OC number, never a question about the order', () => {
+  assert.deepEqual(packEnDe(3, 36, 12), { en: 'piezas', exacto: true });     // Arca: billed / arrived 3 paquetes
+  assert.deepEqual(packEnDe(36, 36, 12), { en: 'paquetes', exacto: true });
+  assert.deepEqual(packEnDe(2, 36, 12), { en: 'piezas', exacto: false });    // short against 3
+  assert.deepEqual(packEnDe(4, 36, 12), { en: 'piezas', exacto: false });    // one over 3, far from 36
+  assert.deepEqual(packEnDe(30, 36, 12), { en: 'paquetes', exacto: false });
+  assert.equal(packEnDe(0, 36, 12), null);
 });
 
 test('packDePiezas: whole paquetes only', () => {
@@ -118,9 +127,10 @@ if (['arca-2026-11-20-envio.json', 'arca-2026-11-20-events.json'].every(f => exi
     assert.equal(old.no_fisico, 33, 'what the app said that day');
     const N = packN(l.producto, l.kgpz);
     assert.equal(N, 12);
-    const pk = packPedido(l.esperado, N);
-    assert.ok(pk.falta, '36 on a 12-pack asks paquetes or piezas');
-    const P = packPedido(l.esperado, N, 'piezas').P;                     // «3 paquetes (36 piezas)»
+    assert.ok(packPedido(l.esperado, N).falta, '36 on a 12-pack is ambiguous on its own');
+    // The invoice (CAJAS 3 / PIEZAS 36 → 3 paquetes) settles it: no question to the receptor
+    assert.deepEqual(packEnDe(3, l.esperado, N), { en: 'piezas', exacto: true });
+    const P = packPedido(l.esperado, N, 'piezas').P;
     assert.equal(P, 3);
     // Invoice Reader's rebuilt record: CAJAS 3 / PIEZAS 36 → piezas 3, piezasSueltas 36
     const rows = [row(1, l, 3, { packKind: 'pack', packSize: 12, retoolUnit: 'paquete', piezasSueltas: 36 })];

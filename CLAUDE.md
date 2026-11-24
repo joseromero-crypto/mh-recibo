@@ -220,14 +220,17 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   Invoice Reader's lean/match.ts: keep the regexes identical): `pack` = «(12-pack)», «4 Pack» → `packN` = N; `contenido`
   («caja 18pz», «6pz», «8 sobres») and Kg → 0, shown as before. On a pack line (modo botones) every quantity is paquetes:
   `pkTxt`/`pkH`/`pkPlano` («3 paquetes» + muted `.pk-nota` «= 36 piezas», `--c-muted`). `packPedido(esperado, N, en)`: not a
-  multiple of N → paquetes (Alpura 61 on a 4-pack, no question); a multiple → the first answer of that line (Completo /
-  Faltante / Excedente / Rechazo / No llegó) asks once (`S.pdPackQ`, `pdBPack`): «3 paquetes (36 piezas)» | «36 paquetes (432
-  piezas)». The answer rides on the marca: `pedido` stays the OC's number (validity), `pack_n`, `pedido_en` ('piezas'|
-  'paquetes'), `pedido_ret`, `pack_pregunta`; a marca without it on such a line is asked again. `pdPackInfo(l)` → P in
-  paquetes (used by `pdBRows`, `pdObjOf`/`pdObjDe`); unanswered lines (autoNofac) borrow this reception's other answer
-  (`pdPackHeredado`, `pack_dudoso`). Faltante/Rechazo forms: switch Paquetes (default) | Piezas (`S.pdForm.pz`); piezas must
+  multiple of N → paquetes (Alpura 61 on a 4-pack). A multiple is settled without asking about the order (the receptor
+  didn't place it, Jose): first the invoice compared at the start (`pdPackFactura` → `packEnDe`: billed paquetes nearer oc/N
+  → piezas, nearer oc → paquetes; Arca billed 3 on 36 → piezas), else the line shows «¿Qué llegó?» instead of the buttons:
+  «3 paquetes (36 piezas)» | «36 paquetes (432 piezas)» (= Completo, `pdBLlego`) | «Otra cantidad» (count with the switch →
+  `packEnDe` → Completo / Faltante / Excedente) | «No llegó» in Resumen. The decision rides on the marca: `pedido` stays the
+  OC's number (validity), `pack_n`, `pedido_en` ('piezas'|'paquetes'), `pedido_ret`, `pack_pregunta` (the number was
+  ambiguous), `pack_fuente` ('factura'|'llego'|'conteo'|'supuesto'), `pack_dudoso` (not an exact match). `pdPackInfo(l)` → P
+  in paquetes (used by `pdBRows`, `pdObjOf`/`pdObjDe`); a line nobody settles (autoNofac) borrows this reception's other
+  answer, else piezas (`pdPackHeredado`, `pack_dudoso`). Faltante/Rechazo forms: switch Paquetes (default) | Piezas (`S.pdForm.pz`); piezas must
   be whole paquetes (`packDePiezas`), stored converted + `capturado_pz`. `lineas_todas` adds pack_n, pedido_en, pedido_oc
-  (OC number when written in piezas), pack_pregunta → Admin → Proveedores can list «orden en piezas para producto en paquete».
+  (OC number when written in piezas), pack_pregunta, pack_fuente → Admin → Proveedores can list «orden en piezas para producto en paquete».
   Report: Und «Paquete», columns «Paquete de», «Pedido en OC» (read by `openRecepcion`, `pvLinesFromCsv`). Invoice: Invoice
   Reader's rows carry `packKind/packSize/retoolUnit/piezasSueltas` and `piezas` in Retool units; `facComparar` adds
   `pack_n`/`piezas_sueltas` per line and marks a newer-shape row without `retoolUnit:'paquete'` on a pack line «por revisar»
@@ -246,8 +249,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - `demoGenerar` (near BOOT) builds five deliveries from the seed + Masterview (products sold in every city): CH Abarrotes
   (CSV + picks: menos/más/no llegó/fecha corta/dañada/sin código/no en envío/código desconocido), CH Carnes (Kg within and out
   of tolerance), «Lácteos Prueba» (1 OC + invoice: de más, no llegó, rechazos, no solicitado, renglón sin identificar, Kg),
-  «Abarrotes Prueba» (2 OCs, one late, shared product) and «Refrescos Prueba» (paquetes: 12-pack OC 36 in piezas, 4-pack 61,
-  a 12-pack short in piezas, «caja 18pz», single cans). Same seed = same data on any device.
+  «Abarrotes Prueba» (2 OCs, one late, shared product) and «Refrescos Prueba» (paquetes: 12-pack OC 36 settled by the invoice, 4-pack
+  61, a 12-pack short in piezas, a 6-pack off the invoice that asks «¿Qué llegó?», «caja 18pz», single cans). Same seed = same data on any device.
 - Panel (`PRUEBA` tab on the left edge, `demoRender`): Qué llegó (Escanear → `processScan` like the scanner + a chip with the
   quantity), what the app should flag, Archivos (envío CSV into `#envio-file`, invoice image into `facAddFiles`), printable
   list with Code 128 barcodes (`demoC128`, checked with BarcodeDetector), Ajustes (reiniciar / otra semilla / salir).

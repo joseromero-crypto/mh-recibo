@@ -279,6 +279,7 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .pk-nota,.pdb-ped .pk-nota{font-size:12px;font-weight:500;color:var(--c-muted);white-space:nowrap}
 .pdb-packq{margin-top:10px;padding:12px 14px;background:var(--c-white);border-left:4px solid var(--c-ink);border-radius:var(--r-md)}
 .pdb-packq .btn-main{min-height:64px;flex-direction:column;line-height:1.15;border:1.5px solid var(--c-ink)}
+.pdb-packq .btn{border:1.5px solid var(--c-line)}
 .pdb-packq .btn small{display:block;font-size:13px;font-weight:500;color:var(--c-muted);margin-top:2px}
 .pk-switch{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0 8px;max-width:260px}
 .pk-switch .choice{min-height:36px;padding:0 10px;text-align:center;font-size:14px;background:var(--c-white)}
@@ -1987,7 +1988,7 @@ function openRecibir(data, opts={}){
   showScreen('screen-recibir');
   renderRecibir(); focusScan();
   loadSorting(S.hub).then(()=>{ buildCatalog(); renderRecibir(); });
-  S.pdOtras=[]; S.pdBusy=false; S.pdTab='scan'; S.pdEdit=null; S.pdForm=null; S.pdFoco=null; S.pdCod=null; S.pdPackQ=null; S.pdPackAns=new Map(); const pq=document.getElementById('pd-q'); if(pq) pq.value='';
+  S.pdOtras=[]; S.pdBusy=false; S.pdTab='scan'; S.pdEdit=null; S.pdForm=null; S.pdFoco=null; S.pdCod=null; S.pdPackAns=new Map(); const pq=document.getElementById('pd-q'); if(pq) pq.value='';
   syncServerEvents().then(()=>{ if(opts.revisar && revisarItems().length) openRevisar(); });
   pdRecibirLive();
   if(isPd()) facInit(S.session.id, S.hub);
@@ -2959,7 +2960,7 @@ function pdBRows(){
     // OC number is a multiple of N, while it's known whether that number was paquetes or piezas)
     const valid=!!(d && PD_MARCA[d.marca] && round2(Number(d.pedido))===round2(l.esperado) && !pk.falta && round2(d.objetivo!=null?Number(d.objetivo):P)===round2(T));
     const r={ sku:l.sku_key, producto:l.producto, barcode:l.barcode, kgpz:l.kgpz, pedido:P, cad:l.caducidad_min||'', temp:l.temp||'', rowIndex:l.rowIndex,
-      pack:pk.n, pedidoOc:l.esperado, pedidoEn:pk.en, packPregunta:pk.pregunta, packFalta:pk.falta,
+      pack:pk.n, pedidoOc:l.esperado, pedidoEn:pk.en, packPregunta:pk.pregunta, packFalta:pk.falta, packFuente:pk.fuente, packDudoso:pk.falta || (pk.pregunta && !pk.exacto) || undefined,
       pns:false, rec:0, count:0, exc:0, excFlag:false, gap:0, rech:0, motivo:'', falt:0, ack:valid?e:null, marca:valid?d.marca:null,
       cambio:!!(d && PD_MARCA[d.marca] && !valid && !pk.falta), pend:!valid, dif:false, estado:'Por revisar',
       facPrimero:!!fm, obj:T, fac:o.fac, deMas:o.de_mas||0, nofac:!!o.nofac, revisarFac:o.revisar||null, faltFis:0, sinFac:false, autoNofac:false };
@@ -2977,7 +2978,7 @@ function pdBRows(){
     } else if(o.nofac){
       // Not on the invoice: nothing to look for, faltante with no question. If it shows up, a scan opens it (received + reported).
       // A pack line never answered: paquetes vs piezas comes from this reception's other answers (packDudoso when guessed)
-      Object.assign(r, { pend:false, marca:'nofac', autoNofac:true, falt:P, gap:P, dif:true, estado:'Faltante', cambio:false, packDudoso:pk.falta||undefined });
+      Object.assign(r, { pend:false, marca:'nofac', autoNofac:true, falt:P, gap:P, dif:true, estado:'Faltante', cambio:false });
     }
     rows.push(r);
   }
@@ -3000,22 +3001,30 @@ function pdFacMapa(){ const e=pdFacIni(), d=e&&e.detalle; return d && !d.manual 
 function pdObjOf(l, fm){ const P=pdPackInfo(l).P; return fm ? facObjetivo(fm.get(l.sku_key), P) : { obj:P }; }
 // What Completo means for a line right now (a line off the invoice that showed up is checked against the OC)
 function pdObjDe(sku){ const l=S.lines.get(sku); if(!l) return 0; const o=pdObjOf(l, pdFacMapa()); return o.nofac?pdPackInfo(l).P:o.obj; }
-/* ── Paquetes (2026-11-23, Jose; packOf / packPedido in FACTURA-PURE). On an N-pack line every quantity is in paquetes,
-   what Retool counts, with the piezas as a small note. The OC's Pedido may be paquetes or piezas: a multiple of N asks
-   once, on the line's first answer («3 paquetes (36 piezas)» / «36 paquetes (432 piezas)»). The answer rides on the marca
-   (detalle.pedido_en + pack_n + pedido_ret, pack_pregunta when asked) and holds while the OC number is the same.
+/* ── Paquetes (2026-11-23, Jose; packOf / packPedido / packEnDe in FACTURA-PURE). On an N-pack line every quantity is in
+   paquetes, what Retool counts, with the piezas as a small note. The OC's Pedido may be paquetes or piezas, and a multiple
+   of N can't tell. The receptor didn't place the order, so they're never asked about it (Jose): the invoice decides
+   (pack_fuente 'factura': billed 3 on an OC of 36 → piezas), else what arrived (the line shows «¿Qué llegó?»: «3 paquetes» |
+   «36 paquetes» | «Otra cantidad» → 'llego' / 'conteo'), else this reception's other answers or piezas ('supuesto').
+   The answer rides on the marca (pedido_en, pack_n, pedido_ret, pack_pregunta = the OC number was ambiguous, pack_fuente,
+   pack_dudoso when it wasn't an exact match) and holds while the OC number is the same.
    pedido_en 'piezas' = an order written in piezas for a product sold in paquetes: logged for Admin → Proveedores. ── */
 function pdPackAnswer(l){
-  const m=S.pdPackAns && S.pdPackAns.get(l.sku_key); if(m && round2(m.oc)===round2(l.esperado)) return m.en;
-  let en=null; for(const e of S.events) if(e.tipo==='confirmacion' && e.sku_key===l.sku_key && e.detalle && e.detalle.pedido_en && round2(Number(e.detalle.pedido))===round2(l.esperado)) en=e.detalle.pedido_en;
-  return en;
+  const m=S.pdPackAns && S.pdPackAns.get(l.sku_key); if(m && round2(m.oc)===round2(l.esperado)) return m;
+  let a=null; for(const e of S.events) if(e.tipo==='confirmacion' && e.sku_key===l.sku_key && e.detalle && e.detalle.pedido_en && round2(Number(e.detalle.pedido))===round2(l.esperado))
+    a={ en:e.detalle.pedido_en, fuente:e.detalle.pack_fuente||null, exacto:!e.detalle.pack_dudoso };
+  return a;
 }
-// The answer given on this reception's other asked lines (same supplier, same comercial): the guess for a line nobody answers
+// The answer given on this reception's other ambiguous lines (same supplier, same comercial)
 function pdPackHeredado(){ let en=null; for(const e of S.events) if(e.tipo==='confirmacion' && e.detalle && e.detalle.pack_pregunta && e.detalle.pedido_en) en=e.detalle.pedido_en; return en; }
-// packPedido for an envío line; while unanswered, P is the guess (other answers, else the OC number as paquetes)
+// What the invoice compared at the start (factura primero) says: billed paquetes near oc/N or near oc
+function pdPackFactura(l, n){ const fm=pdFacMapa(), x=fm && fm.get(l.sku_key); return x && !x.revisar && x.facturado>0 ? packEnDe(x.facturado, l.esperado, n) : null; }
+// packPedido for an envío line + fuente / exacto. falta = nothing decided yet: P is then a guess (other answers, else piezas)
 function pdPackInfo(l){
-  const n=packN(l.producto, l.kgpz), i=packPedido(l.esperado, n, n?pdPackAnswer(l):null);
-  if(i.falta){ const g=packPedido(l.esperado, n, pdPackHeredado()||'paquetes'); i.P=g.P; i.en=g.en; }
+  const n=packN(l.producto, l.kgpz), ans=n?pdPackAnswer(l):null, i=packPedido(l.esperado, n, ans&&ans.en);
+  i.fuente=ans?ans.fuente:null; i.exacto=ans?ans.exacto!==false:true;
+  if(i.falta){ const fx=pdPackFactura(l, n); if(fx) Object.assign(i, packPedido(l.esperado, n, fx.en), { fuente:'factura', exacto:fx.exacto }); }
+  if(i.falta){ const g=packPedido(l.esperado, n, pdPackHeredado()||'piezas'); i.P=g.P; i.en=g.en; }
   return i;
 }
 // Quantity text: «3 paquetes» on a pack line, «12 pz» / «1.50 kg» elsewhere. r: a row or line with kgpz and pack (N)
@@ -3092,7 +3101,7 @@ function pdBLineHtml(r){
   const sk=pdBEsc(r.sku), q=v=>fmtQty(v,r.kgpz), u=unitOf(r.kgpz), t=tempLabel(r.temp), P=r.pns?0:r.obj;
   // Pack line: «3 paquetes» big, «= 36 piezas» muted; before the paquetes/piezas answer, the OC's own number
   const pb=(v, lbl)=>r.pack ? `<b>${q(v)}</b><span>${pkU(v,r)}</span>${pkNota(v,r)}` : `<b>${q(v)}</b><span>${lbl||u}</span>`;
-  const ocRaw=`<b>${q(r.pedidoOc)}</b><span>en la OC · ¿paquetes o piezas?</span>`;
+  const ocRaw=''; // undecided pack line: no number shown, the «¿Qué llegó?» block below says it all
   const meta=[r.kgpz, r.pack?`paquete de ${r.pack}`:'', r.barcode?'':'sin código'].filter(Boolean).join(' · ');
   const editing=!r.pns && !S.closedInfo && (r.pend || S.pdEdit===r.sku), f=S.pdForm&&S.pdForm.sku===r.sku?S.pdForm:null;
   let h=`<div class="pdb-row ${r.pend?'':r.dif?'dif':'done'} ${S.pdFoco===r.sku?'foco':''}" data-sku="${escapeHtml(r.sku)}">
@@ -3102,12 +3111,12 @@ function pdBLineHtml(r){
   if(!r.pns && r.facPrimero){
     // Factura primero: the target is what the invoice bills (never above the OC); the OC's number stays beside it
     const rf=r.packFalta && (r.pend || S.pdEdit===r.sku);
-    h+=(r.nofac?`<div class="pdb-ped"><span>OC</span>${rf?ocRaw:pb(r.pedido, u+' · no viene en la factura')}${r.pack&&!rf?'<span>· no viene en la factura</span>':''}${tc}</div>`
-      :`<div class="pdb-ped"><span>Factura</span>${pb(P)}${rf?`<span>· OC ${q(r.pedidoOc)} (¿paquetes o piezas?)</span>`:r.pedido!==P?`<span>· OC ${pkTxt(r.pedido,r)}</span>`:''}${tc}</div>`)
+    h+=(r.nofac?`<div class="pdb-ped">${rf?'':'<span>OC</span>'}${rf?ocRaw:pb(r.pedido, u+' · no viene en la factura')}${r.pack&&!rf?'<span>· no viene en la factura</span>':''}${tc}</div>`
+      :`<div class="pdb-ped">${rf?ocRaw:'<span>Factura</span>'+pb(P)}${rf?'':r.pedido!==P?`<span>· OC ${pkTxt(r.pedido,r)}</span>`:''}${tc}</div>`)
       +(r.deMas>0&&!rf?`<div class="ritem-meta" style="color:var(--c-ink);font-weight:700;margin-top:4px">La factura cobra ${pkTxt(r.fac,r)} y la OC pide ${pkTxt(r.pedido,r)}: recibe ${pkTxt(P,r)}; lo de más se regresa y se quita de la factura.</div>`:'')
       +(r.revisarFac?`<div class="ritem-meta" style="margin-top:4px">Se revisa contra la OC: ${r.revisarFac==='kg'?'se pide en kg':'la cantidad de la factura no se leyó bien'}.</div>`:'')
       +(r.nofac && !S.closedInfo && (S.pdEdit===r.sku || S.pdFoco===r.sku)?`<div class="pdb-pns"><b>No viene en la factura</b>Recíbelo y pide al proveedor que lo agregue a la factura.</div>`:'');
-  } else if(!r.pns) h+=`<div class="pdb-ped"><span>Pedido</span>${r.packFalta && (r.pend || S.pdEdit===r.sku)?ocRaw:pb(P)}${tc}</div>`;
+  } else if(!r.pns) h+=`<div class="pdb-ped">${r.packFalta && (r.pend || S.pdEdit===r.sku)?ocRaw:'<span>Pedido</span>'+pb(P)}${tc}</div>`;
   if(!r.pns) h+=(r.cad && (r.pend || S.pdEdit===r.sku || S.pdFoco===r.sku)?`<div class="pdb-cad"><small>Caducidad mínima</small><b>${dmy(r.cad)}</b></div>`:'');
   const codMal=!S.closedInfo && S.pdFoco===r.sku && S.pdCod && S.pdCod.sku===r.sku && !S.pdCod.ci
     ? `<button class="link-btn" style="margin-top:4px" onclick="pdBCodMal()">¿No es este producto? Código incorrecto en sistema · buscar por nombre</button>` : '';
@@ -3117,20 +3126,24 @@ function pdBLineHtml(r){
       <div class="pcard-actions" style="grid-template-columns:1fr 2fr;margin-top:8px"><button class="btn btn-secondary" onclick="pdBQuitarPns('${sk}')">Me equivoqué</button><button class="btn btn-primary" onclick="pdBSiguiente()">Siguiente</button></div>${codMal}`;
   } else if(r.pns){
     h+=`<div class="pdb-res"><span>${pdBResTxt(r)}</span>${S.closedInfo?'':`<button class="corr-btn" onclick="pdBQuitarPns('${sk}')">Me equivoqué</button>`}</div>`;
-  } else if(editing && S.pdPackQ && S.pdPackQ.sku===r.sku && r.packFalta){
-    // Pack line whose OC number is a multiple of N: was it written in piezas or in paquetes? Asked once, on the first answer.
+  } else if(editing && r.packFalta && !(f && f.kind==='conteo')){
+    // Pack line the invoice couldn't settle (OC number a multiple of N): ask what arrived, never what was ordered
     const n=r.pack, oc=r.pedidoOc, a=oc/n;
-    h+=`<div class="pdb-packq"><div class="sep-q">La OC pide <b>${q(oc)}</b>. Este producto es un paquete de ${n} piezas: ¿qué se pidió?</div>
-      <div class="pdb-btns"><button class="btn btn-secondary btn-main" onclick="pdBPack('${sk}','piezas')">${q(a)} paquete${a===1?'':'s'}<small>${q(oc)} piezas</small></button>
-      <button class="btn btn-secondary btn-main" onclick="pdBPack('${sk}','paquetes')">${q(oc)} paquetes<small>${q(oc*n)} piezas</small></button></div>
-      <button class="link-btn" style="margin-top:0" onclick="pdBCancel()">Cancelar</button></div>`;
+    h+=`<div class="pdb-packq"><div class="sep-q">Viene en paquetes de ${n} piezas. ¿Qué llegó?</div>
+      <div class="pdb-btns"><button class="btn btn-secondary btn-main" onclick="pdBLlego('${sk}','piezas')">${q(a)} paquete${a===1?'':'s'}<small>${q(oc)} piezas</small></button>
+      <button class="btn btn-secondary btn-main" onclick="pdBLlego('${sk}','paquetes')">${q(oc)} paquetes<small>${q(oc*n)} piezas</small></button></div>
+      <div class="pdb-btns"><button class="btn btn-secondary" onclick="pdBConteo('${sk}')">Otra cantidad</button>${screenActive('screen-resumen')?`<button class="btn btn-secondary" onclick="pdBLlegoNada('${sk}')">No llegó</button>`:''}</div>
+      ${r.pend?'':`<button class="link-btn" style="margin-top:0" onclick="pdBCancel()">Dejar como estaba</button>`}${codMal}</div>`;
   } else if(editing && f){
     const kg=r.kgpz==='Kg', m=f.motivo, pz=!!(r.pack && f.pz);
     // Pack line: typed in paquetes (default) or piezas, converted to paquetes on Guardar
     const sw=r.pack?`<div class="pk-switch"><button class="choice ${pz?'':'sel'}" onclick="pdBUnidad(false)">Paquetes</button><button class="choice ${pz?'sel':''}" onclick="pdBUnidad(true)">Piezas</button></div>`:'';
     const lim=v=>pz?`${q(v*r.pack)} piezas`:r.pack?pkTxt(v,r):q(v);
     const qn=r.pack?(pz?'piezas':'paquetes'):'';
-    if(f.kind==='faltante') h+=`<div style="margin-top:10px"><div class="sep-q">¿Cuánt${qn==='paquetes'?'os':'as'} ${qn?qn+' ':''}llegaron? ${kg?`(menos de ${q(P)} kg)`:`(de 0 a ${lim(P-1)})`}</div>${sw}
+    if(f.kind==='conteo') h+=`<div style="margin-top:10px"><div class="sep-q">¿Cuánt${pz?'as piezas':'os paquetes'} llegaron? Solo lo que recibes, sin lo que rechazas.</div>${sw}
+        <input id="pdb-n" class="text-input" type="text" inputmode="numeric" autocomplete="off" placeholder="0" onkeydown="if(event.key==='Enter')pdBGuardar('${sk}')">
+        `;
+    else if(f.kind==='faltante') h+=`<div style="margin-top:10px"><div class="sep-q">¿Cuánt${qn==='paquetes'?'os':'as'} ${qn?qn+' ':''}llegaron? ${kg?`(menos de ${q(P)} kg)`:`(de 0 a ${lim(P-1)})`}</div>${sw}
         <input id="pdb-n" class="text-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}" onkeydown="if(event.key==='Enter')pdBGuardar('${sk}')">
         `;
     else h+=`<div style="margin-top:10px"><div class="sep-q">¿Por qué?</div>
@@ -3163,8 +3176,8 @@ function pdBKeepInput(fn){
 }
 function pdBTap(sku, kind){
   const l=S.lines.get(sku); if(!l || S.closedInfo) return;
-  // Pack line with an OC number that's a multiple of N: paquetes or piezas first (pdBPack comes back here)
-  if(pdPackInfo(l).falta){ S.pdPackQ={ sku, kind }; S.pdForm=null; pdBRerender(); return; }
+  // Pack line nobody could settle yet: the line asks «¿Qué llegó?» instead (pdBLlego / pdBConteo)
+  if(pdPackInfo(l).falta){ S.pdEdit=sku; S.pdForm=null; pdBRerender(); return; }
   const T=pdObjDe(sku);
   if(kind==='completo'){ pdMarcar(sku, 'completo', { recibido:T }); toast(`✓ Completo · ${l.producto}`); return; }
   if(kind==='excedente'){ pdMarcar(sku, 'excedente', { recibido:T }); toast(`✓ Recibe ${pkPlano(T,pdLineaPk(l))} · lo de más regrésalo al camión`, 4000); return; }
@@ -3172,21 +3185,22 @@ function pdBTap(sku, kind){
   // No autofocus: the receptor taps the field when they need the keyboard (live test, 2026-11-18)
   S.pdForm={ sku, kind, motivo:null, pz:false }; pdBRerender();
 }
-function pdBPack(sku, en){
-  const l=S.lines.get(sku), k=S.pdPackQ && S.pdPackQ.sku===sku ? S.pdPackQ.kind : null; if(!l || !k) return;
-  (S.pdPackAns||(S.pdPackAns=new Map())).set(sku, { en, oc:l.esperado });
-  S.pdPackQ=null; pdBTap(sku, k);
-}
+function pdPackSet(l, en, fuente, exacto){ (S.pdPackAns||(S.pdPackAns=new Map())).set(l.sku_key, { en, oc:l.esperado, fuente, exacto }); }
+// «¿Qué llegó?»: one of the two readings in full = Completo against it
+function pdBLlego(sku, en){ const l=S.lines.get(sku); if(!l) return; pdPackSet(l, en, 'llego', true); pdBTap(sku, 'completo'); }
+function pdBLlegoNada(sku){ const l=S.lines.get(sku); if(!l) return; pdPackSet(l, pdPackHeredado()||'piezas', 'supuesto', false); pdBTap(sku, 'nollego'); }
+function pdBConteo(sku){ S.pdEdit=sku; S.pdForm={ sku, kind:'conteo', motivo:null, pz:false }; pdBRerender(); }
 function pdBUnidad(pz){ if(!S.pdForm) return; S.pdForm.pz=!!pz; pdBKeepInput(pdBRerender); }
 function pdMarcar(sku, marca, extra){
   const l=S.lines.get(sku); if(!l) return;
   const ci=S.pdCod && S.pdCod.sku===sku && S.pdCod.ci, pk=pdPackInfo(l);
   // Pack line: quantities are paquetes; pedido stays the OC's own number, pedido_ret is it in paquetes
-  const pkd=pk.n && !pk.falta ? { pack_n:pk.n, pedido_en:pk.en, pedido_ret:pk.P, pack_pregunta:pk.pregunta||undefined } : {};
+  const pkd=pk.n && !pk.falta ? { pack_n:pk.n, pedido_en:pk.en, pedido_ret:pk.P, pack_pregunta:pk.pregunta||undefined,
+    pack_fuente:pk.pregunta?pk.fuente||undefined:undefined, pack_dudoso:pk.pregunta && !pk.exacto || undefined } : {};
   recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:l.producto, cantidad:extra.recibido, metodo:ci?'codigo_incorrecto':'boton',
     detalle:Object.assign({ marca, pedido:l.esperado, kgpz:l.kgpz }, pkd, pdFacMapa()?{ objetivo:pdObjDe(sku), nofac:!pdFacMapa().has(sku)||undefined }:{}, extra, ci||{}) }));
   if(S.pdPackAns) S.pdPackAns.delete(sku);
-  S.pdEdit=null; S.pdForm=null; S.pdFoco=null; S.pdCod=null; S.pdPackQ=null; pdBRerender(); if(screenActive('screen-recibir')) focusScan();
+  S.pdEdit=null; S.pdForm=null; S.pdFoco=null; S.pdCod=null; pdBRerender(); if(screenActive('screen-recibir')) focusScan();
 }
 function pdBGuardar(sku){
   const f=S.pdForm, l=S.lines.get(sku), i=document.getElementById('pdb-n'), err=document.getElementById('pdb-err'); if(!f || !l || !i) return;
@@ -3195,6 +3209,20 @@ function pdBGuardar(sku){
   // Pack line typed in piezas: whole paquetes only, converted (capturado_pz keeps what was typed)
   const leer=zero=>{ const v=parseQty(i.value, l.kgpz, zero); if(v==null || !pz) return { n:v };
     const c=packDePiezas(v, N); return c==null ? { mal:`${q(v)} piezas no son paquetes completos: cada paquete trae ${N}. Escribe un múltiplo de ${N} o cámbialo a Paquetes.` } : { n:c, capturado_pz:v }; };
+  if(f.kind==='conteo'){
+    // «Otra cantidad»: the count decides the reading (nearer of oc/N and oc), then Completo / Faltante / Excedente against it
+    const x=leer(true), c=x.n;
+    if(x.mal){ err.textContent=x.mal; i.focus(); return; }
+    if(c==null){ err.textContent=`Escribe cuánt${pz?'as piezas':'os paquetes'} llegaron.`; i.focus(); return; }
+    if(c===0) return pdBLlegoNada(sku);
+    const e=packEnDe(c, l.esperado, N); pdPackSet(l, e.en, 'conteo', e.exacto);
+    const P2=pdObjDe(sku), cap=x.capturado_pz!=null?{ capturado_pz:x.capturado_pz }:{};
+    if(c===P2) pdMarcar(sku, 'completo', Object.assign({ recibido:P2 }, cap));
+    else if(c<P2) pdMarcar(sku, 'faltante', Object.assign({ recibido:c, llegaron:c, faltan:round2(P2-c) }, cap));
+    else pdMarcar(sku, 'excedente', Object.assign({ recibido:P2, llegaron:c }, cap));
+    toast(`✓ ${l.producto}: llegaron ${pkPlano(c,L)}${c>P2?' · lo de más regrésalo al camión':''}`, 4000);
+    return;
+  }
   if(f.kind==='faltante'){
     const x=leer(true), n=x.n;
     if(x.mal){ err.textContent=x.mal; i.focus(); return; }
@@ -3212,8 +3240,8 @@ function pdBGuardar(sku){
 }
 function pdBTodas(sku){ const l=S.lines.get(sku), i=document.getElementById('pdb-n'); if(l && i){ const N=pdLineaPk(l).pack, P=pdObjDe(sku); i.value=fmtQty(N && S.pdForm.pz?P*N:P,l.kgpz); if(S.pdForm.motivo) pdBGuardar(sku); else document.getElementById('pdb-err').textContent='Elige por qué: fecha corta o dañada.'; } }
 function pdBMotivo(k){ if(!S.pdForm) return; S.pdForm.motivo=k; pdBKeepInput(pdBRerender); }
-function pdBCancel(){ S.pdForm=null; S.pdEdit=null; S.pdPackQ=null; pdBRerender(); }
-function pdBCambiar(sku){ S.pdEdit=sku; S.pdForm=null; S.pdPackQ=null; pdBRerender(); }
+function pdBCancel(){ S.pdForm=null; S.pdEdit=null; pdBRerender(); }
+function pdBCambiar(sku){ S.pdEdit=sku; S.pdForm=null; pdBRerender(); }
 function pdBSiguiente(){ S.pdFoco=null; S.pdCod=null; pdBRerender(); focusScan(); }
 function pdBQuitarPns(sku){
   const e=pdMarcas().get(sku); if(!e) return;
@@ -3221,7 +3249,7 @@ function pdBQuitarPns(sku){
   recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:e.producto, metodo:'boton', detalle:{ marca:'quitado', kgpz:e.detalle.kgpz||'Pz' } }));
   pdBRerender();
 }
-function pdBTab(t){ S.pdTab=t; S.pdForm=null; S.pdEdit=null; S.pdPackQ=null; if(t!=='scan'){ S.pdFoco=null; S.pdCod=null; } pdBListRender(); if(t==='scan') focusScan(); }
+function pdBTab(t){ S.pdTab=t; S.pdForm=null; S.pdEdit=null; if(t!=='scan'){ S.pdFoco=null; S.pdCod=null; } pdBListRender(); if(t==='scan') focusScan(); }
 // Recibir: scan-first by default (many products share presentations, so the receptor confirms what they hold, not a
 // row picked from a list). «Pendientes» / «Todos» open the order as a list with a search, for products without a code.
 function pdBListRender(){
@@ -3255,7 +3283,7 @@ function pdBScan(r, code){
   if(r && r.line){
     // A line off the invoice that showed up: open its buttons straight away (received + reported)
     const fm=pdFacMapa(), off=fm && !fm.has(r.line.sku_key) && !pdMarcas().get(r.line.sku_key);
-    vibrate(true); S.pdFoco=r.line.sku_key; S.pdCod={ sku:r.line.sku_key, codigo:code, sistema:r.line }; S.pdEdit=off?r.line.sku_key:null; S.pdForm=null; S.pdPackQ=null; S.pdTab='scan'; document.getElementById('pd-q').value='';
+    vibrate(true); S.pdFoco=r.line.sku_key; S.pdCod={ sku:r.line.sku_key, codigo:code, sistema:r.line }; S.pdEdit=off?r.line.sku_key:null; S.pdForm=null; S.pdTab='scan'; document.getElementById('pd-q').value='';
     pdBListRender();
     const el=document.querySelector('.pdb-row.foco'); if(el) el.scrollIntoView({ block:'nearest', behavior:'smooth' });
     return;
@@ -3291,7 +3319,7 @@ function pdBPick(h, mal, det){
     S.pdCod=null;
   } else S.pdCod=ci ? { sku, ci } : null;
   const fm=h.env && pdFacMapa(), off=fm && !fm.has(sku) && !pdMarcas().get(sku);
-  vibrate(true); S.pdFoco=sku; S.pdEdit=off?sku:null; S.pdForm=null; S.pdPackQ=null; S.pdTab='scan'; document.getElementById('pd-q').value='';
+  vibrate(true); S.pdFoco=sku; S.pdEdit=off?sku:null; S.pdForm=null; S.pdTab='scan'; document.getElementById('pd-q').value='';
   renderRecibir();
   const el=document.querySelector('.pdb-row.foco'); if(el) el.scrollIntoView({ block:'nearest', behavior:'smooth' });
 }
@@ -3470,7 +3498,7 @@ function pdLineasTodas(rows){
     faltante:r.falt||undefined, no_solicitado:r.pns||undefined,
     // pack line: quantities above are paquetes; pedido_oc = the OC's number when it differs (written in piezas)
     pack_n:r.pack||undefined, pedido_en:r.pack?r.pedidoEn||undefined:undefined, pedido_oc:r.pack&&r.pedidoOc!==r.pedido?r.pedidoOc:undefined,
-    pack_pregunta:r.pack&&r.packPregunta||undefined, pack_dudoso:r.packDudoso||undefined }));
+    pack_pregunta:r.pack&&r.packPregunta||undefined, pack_fuente:r.pack&&r.packPregunta&&r.packFuente||undefined, pack_dudoso:r.packDudoso||undefined }));
 }
 function pdCerrarDetalle(rows, path, receptores, cambioIgnorado){
   const o=S.envio.orden, difs=rows.filter(r=>r.dif);
@@ -3491,7 +3519,7 @@ async function pdCargarSesion(info){
     const env=JSON.parse(await sbFetch(info.envio)); env._path=info.envio;
     S.hub=info.hub; S.area=info.area; S.receptor=INI.receptor||info.receptor;
     S.session={ id:info.session_id, fecha:info.fecha }; setEnvio(env);
-    S.events=[]; S.eventUids=new Set(); S.lastId=0; S.resumenOrder=new Map(); S.current=null; S.corrigiendo=null; S.pdEdit=S.pdForm=S.pdFoco=S.pdCod=S.pdPackQ=null; S.pdPackAns=new Map();
+    S.events=[]; S.eventUids=new Set(); S.lastId=0; S.resumenOrder=new Map(); S.current=null; S.corrigiendo=null; S.pdEdit=S.pdForm=S.pdFoco=S.pdCod=null; S.pdPackAns=new Map();
     addEvents(OUTBOX.filter(e=>e.session_id===info.session_id));
   }
   // A full read that throws: a correction must never rebuild the report from half the events
@@ -4205,6 +4233,13 @@ function packPedido(esperado, n, en){
   if(en==='piezas') return { P:oc/n, n, en, pregunta:true, falta:false };
   if(en==='paquetes') return { P:oc, n, en, pregunta:true, falta:false };
   return { P:null, n, en:null, pregunta:true, falta:true };
+}
+// Which reading of an ambiguous OC number (a multiple of N) a quantity in paquetes (billed or arrived) supports: the nearer,
+// by ratio, of oc/N (written in piezas) and oc (written in paquetes). exacto = the quantity is one of them. null for 0.
+function packEnDe(q, oc, n){
+  q=Number(q); oc=Number(oc); if(!(q>0) || !(n>1) || !(oc>0)) return null;
+  const a=oc/n; if(q===a) return { en:'piezas', exacto:true }; if(q===oc) return { en:'paquetes', exacto:true };
+  return { en:Math.abs(Math.log(q/a))<=Math.abs(Math.log(q/oc))?'piezas':'paquetes', exacto:false };
 }
 // A quantity typed in piezas, in paquetes; null when it isn't whole paquetes
 function packDePiezas(v, n){ return n>0 && Number(v)%n===0 ? Number(v)/n : null; }
@@ -5584,7 +5619,7 @@ function demoGenerar(){
     const P=(codigo, producto, pedido, sm)=>linea({ code:codigo, producto }, 0, { sku_marca:sm, pedido, temp:'Ambiente' });
     const ls=[P('7501055300785','Refresco Coca Cola Original 355ml (12-pack)',36,'1192'), P('7509990000417','Leche entera Prueba 1L (4 Pack)',61,'AL61'),
       P('7501055354900','Refresco original vidrio Coca Cola 235ml (12-pack)',24,'2442'), P('7509990000189','Huevo blanco Prueba caja 18pz',4,'HU18'),
-      P('7501055300075','Refresco lata Coca Cola 355ml',24,'59')];
+      P('7501055300075','Refresco lata Coca Cola 355ml',24,'59'), P('7509990000622','Agua mineral Prueba 355ml (6-pack)',12,'AG06')];
     ordenes.push({ num_oc:oc(), proveedor:prov, fecha_entrega:hoy, comercial:'Ana Prueba', comprador:'Luis Prueba', lineas:ls });
     const pk=(n, k)=>({ packKind:k?'pack':null, packSize:k||null, retoolUnit:k?'paquete':'pieza', piezasSueltas:k?n*k:null });
     const rows=[invRow(1, ls[0], 3, pk(3,12)), invRow(2, ls[1], 61, pk(61,4)), invRow(3, ls[2], 2, pk(2,12)), invRow(4, ls[3], 4, pk(4,0)), invRow(5, ls[4], 24, pk(24,0))];
@@ -5592,10 +5627,12 @@ function demoGenerar(){
     const items=[it({ code:ls[0].codigo, producto:ls[0].producto },{ llego:3, tipo:'ok', nota:'3 paquetes (36 latas)' }),
       it({ code:ls[1].codigo, producto:ls[1].producto },{ llego:61, tipo:'ok', nota:'61 paquetes' }),
       it({ code:ls[2].codigo, producto:ls[2].producto },{ llego:1, tipo:'menos', nota:'Llegó 1 paquete (12 botellas): escríbelo en Piezas' }),
-      it({ code:ls[3].codigo, producto:ls[3].producto },{ llego:4, tipo:'ok' }), it({ code:ls[4].codigo, producto:ls[4].producto },{ llego:24, tipo:'ok' })];
-    const espera=[`${ls[0].producto}: al confirmar pregunta «3 paquetes (36 piezas)» o «36 paquetes (432 piezas)»; elige 3 paquetes → Completo, Resumen «3 paquetes · = 36 piezas», la factura no cobra nada de más`,
-      `${ls[1].producto}: Pedido 61 paquetes (= 244 piezas), sin pregunta`,
-      `${ls[2].producto}: pregunta; elige «2 paquetes (24 piezas)» → Faltante en Piezas: 18 se rechaza (no son paquetes completos), 12 = 1 paquete → la factura cobra 1 paquete que no llegó`,
+      it({ code:ls[3].codigo, producto:ls[3].producto },{ llego:4, tipo:'ok' }), it({ code:ls[4].codigo, producto:ls[4].producto },{ llego:24, tipo:'ok' }),
+      it({ code:ls[5].codigo, producto:ls[5].producto },{ llego:2, tipo:'ok', nota:'No viene en la factura: 2 paquetes (12 botellas)' })];
+    const espera=[`${ls[0].producto}: OC 36, la factura cobra 3 paquetes → Factura 3 paquetes (= 36 piezas), sin pregunta; Completo → la factura no cobra nada de más`,
+      `${ls[1].producto}: 61 paquetes (= 244 piezas), sin pregunta`,
+      `${ls[2].producto}: 2 paquetes por la factura → Faltante en Piezas: 18 se rechaza (no son paquetes completos), 12 = 1 paquete → la factura cobra 1 paquete que no llegó`,
+      `${ls[5].producto}: no viene en la factura; al escanearlo pregunta «¿Qué llegó?» «2 paquetes (12 piezas)» | «12 paquetes (72 piezas)» | «Otra cantidad» → elige 2 paquetes: Completo, llegó sin facturar`,
       `${ls[3].producto} y ${ls[4].producto}: igual que siempre (sin paquetes)`];
     ent.pc={ key:'pc', titulo:prov, prov, items, espera, como:'Inicio → <b>Proveedor directo</b> → cualquier hub → <b>'+prov+'</b> → Empezar recepción → elige su factura de la lista.' };
   }
