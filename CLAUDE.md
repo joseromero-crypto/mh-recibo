@@ -224,7 +224,9 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   didn't place it, Jose): first the invoice compared at the start (`pdPackFactura` → `packEnDe`: billed paquetes nearer oc/N
   → piezas, nearer oc → paquetes; Arca billed 3 on 36 → piezas), else the line shows «¿Qué llegó?» instead of the buttons:
   «3 paquetes (36 piezas)» | «36 paquetes (432 piezas)» (= Completo, `pdBLlego`) | «Otra cantidad» (count with the switch →
-  `packEnDe` → Completo / Faltante / Excedente) | «No llegó» in Resumen. The decision rides on the marca: `pedido` stays the
+  `packEnDe` → Completo / Faltante / Excedente) | «Rechazo» (`pdBRechQ`, `S.pdPackRech`: the same question counting
+  what is rejected, then the rechazo form; a count is stored as `llegaron` and `pdBRows` rejects out of min(llegaron, P)) |
+  «No llegó» in Resumen. The decision rides on the marca: `pedido` stays the
   OC's number (validity), `pack_n`, `pedido_en` ('piezas'|'paquetes'), `pedido_ret`, `pack_pregunta` (the number was
   ambiguous), `pack_fuente` ('factura'|'llego'|'conteo'|'supuesto'), `pack_dudoso` (not an exact match). `pdPackInfo(l)` → P
   in paquetes (used by `pdBRows`, `pdObjOf`/`pdObjDe`); a line nobody settles (autoNofac) borrows this reception's other

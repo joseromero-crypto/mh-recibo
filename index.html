@@ -2968,7 +2968,8 @@ function pdBRows(){
       if(d.marca==='completo'){ r.rec=T; }
       else if(d.marca==='excedente'){ r.rec=T; r.excFlag=true; }
       else if(d.marca==='faltante'){ r.rec=Math.min(round2(Number(d.llegaron)||0), T); }
-      else { r.rech=Math.min(round2(Number(d.rechazadas)||0), T); r.motivo=d.motivo||''; r.rec=round2(T-r.rech); }
+      else { const base=d.llegaron!=null?Math.min(round2(Number(d.llegaron)||0), T):T; // llegaron: counted, rejected pieces included
+        r.rech=Math.min(round2(Number(d.rechazadas)||0), base); r.motivo=d.motivo||''; r.rec=round2(base-r.rech); }
       // Faltante is always against the OC (fill rate); faltFis = billed but didn't arrive (the invoice must drop it)
       r.falt=round2(P-r.rec-r.rech); r.gap=round2(P-r.rec); r.count=r.rec;
       if(fm && !o.nofac) r.faltFis=round2(T-r.rec-r.rech);
@@ -3128,19 +3129,22 @@ function pdBLineHtml(r){
     h+=`<div class="pdb-res"><span>${pdBResTxt(r)}</span>${S.closedInfo?'':`<button class="corr-btn" onclick="pdBQuitarPns('${sk}')">Me equivoqué</button>`}</div>`;
   } else if(editing && r.packFalta && !(f && f.kind==='conteo')){
     // Pack line the invoice couldn't settle (OC number a multiple of N): ask what arrived, never what was ordered
-    const n=r.pack, oc=r.pedidoOc, a=oc/n;
-    h+=`<div class="pdb-packq"><div class="sep-q">Viene en paquetes de ${n} piezas. ¿Qué llegó?</div>
+    const n=r.pack, oc=r.pedidoOc, a=oc/n, rq=S.pdPackRech===r.sku, res=screenActive('screen-resumen');
+    // Rechazo first asks the same thing, counting what is rejected, then opens the rechazo form against that reading
+    const otros=rq ? `<div class="pdb-btns"><button class="btn btn-secondary" onclick="pdBConteo('${sk}')">Otra cantidad</button><button class="btn btn-secondary" onclick="pdBRechQ(null)">Cancelar rechazo</button></div>`
+      : `<div class="${res?'pdb-btns3':'pdb-btns'}"><button class="btn btn-secondary" onclick="pdBConteo('${sk}')">Otra cantidad</button><button class="btn btn-secondary" onclick="pdBRechQ('${sk}')">Rechazo</button>${res?`<button class="btn btn-secondary" onclick="pdBLlegoNada('${sk}')">No llegó</button>`:''}</div>`;
+    h+=`<div class="pdb-packq"><div class="sep-q">${rq?`Rechazo · Viene en paquetes de ${n} piezas. ¿Qué llegó, contando lo que rechazas?`:`Viene en paquetes de ${n} piezas. ¿Qué llegó?`}</div>
       <div class="pdb-btns"><button class="btn btn-secondary btn-main" onclick="pdBLlego('${sk}','piezas')">${q(a)} paquete${a===1?'':'s'}<small>${q(oc)} piezas</small></button>
       <button class="btn btn-secondary btn-main" onclick="pdBLlego('${sk}','paquetes')">${q(oc)} paquetes<small>${q(oc*n)} piezas</small></button></div>
-      <div class="pdb-btns"><button class="btn btn-secondary" onclick="pdBConteo('${sk}')">Otra cantidad</button>${screenActive('screen-resumen')?`<button class="btn btn-secondary" onclick="pdBLlegoNada('${sk}')">No llegó</button>`:''}</div>
+      ${otros}
       ${r.pend?'':`<button class="link-btn" style="margin-top:0" onclick="pdBCancel()">Dejar como estaba</button>`}${codMal}</div>`;
   } else if(editing && f){
     const kg=r.kgpz==='Kg', m=f.motivo, pz=!!(r.pack && f.pz);
     // Pack line: typed in paquetes (default) or piezas, converted to paquetes on Guardar
     const sw=r.pack?`<div class="pk-switch"><button class="choice ${pz?'':'sel'}" onclick="pdBUnidad(false)">Paquetes</button><button class="choice ${pz?'sel':''}" onclick="pdBUnidad(true)">Piezas</button></div>`:'';
     const lim=v=>pz?`${q(v*r.pack)} piezas`:r.pack?pkTxt(v,r):q(v);
-    const qn=r.pack?(pz?'piezas':'paquetes'):'';
-    if(f.kind==='conteo') h+=`<div style="margin-top:10px"><div class="sep-q">¿Cuánt${pz?'as piezas':'os paquetes'} llegaron? Solo lo que recibes, sin lo que rechazas.</div>${sw}
+    const qn=r.pack?(pz?'piezas':'paquetes'):'', PB=f.llegaron!=null?Math.min(f.llegaron,P):P;
+    if(f.kind==='conteo') h+=`<div style="margin-top:10px"><div class="sep-q">¿Cuánt${pz?'as piezas':'os paquetes'} llegaron? ${f.rech?'En total, contando los que rechazas.':'Solo lo que recibes, sin lo que rechazas.'}</div>${sw}
         <input id="pdb-n" class="text-input" type="text" inputmode="numeric" autocomplete="off" placeholder="0" onkeydown="if(event.key==='Enter')pdBGuardar('${sk}')">
         `;
     else if(f.kind==='faltante') h+=`<div style="margin-top:10px"><div class="sep-q">¿Cuánt${qn==='paquetes'?'os':'as'} ${qn?qn+' ':''}llegaron? ${kg?`(menos de ${q(P)} kg)`:`(de 0 a ${lim(P-1)})`}</div>${sw}
@@ -3148,9 +3152,9 @@ function pdBLineHtml(r){
         `;
     else h+=`<div style="margin-top:10px"><div class="sep-q">¿Por qué?</div>
         <div class="sep-btns">${Object.entries(PD_MOTIVO).map(([k,n])=>`<button class="choice ${m===k?'sel':''}" onclick="pdBMotivo('${k}')">${n[0].toUpperCase()+n.slice(1)}</button>`).join('')}</div>
-        <div class="sep-q" style="margin-top:8px">¿Cuánt${qn==='paquetes'?'os':'as'} ${qn?qn+' ':''}rechazaste? (de 1 a ${r.pack?lim(P):q(P)+' '+u})</div>${sw}
+        <div class="sep-q" style="margin-top:8px">¿Cuánt${qn==='paquetes'?'os':'as'} ${qn?qn+' ':''}rechazaste? (de 1 a ${r.pack?lim(PB):q(PB)+' '+u})</div>${sw}
         <input id="pdb-n" class="text-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}" onkeydown="if(event.key==='Enter')pdBGuardar('${sk}')">
-        <button class="corr-btn" style="margin-top:6px" onclick="pdBTodas('${sk}')">Todas (${r.pack?pkPlano(P,r):q(P)+' '+u})</button>`;
+        <button class="corr-btn" style="margin-top:6px" onclick="pdBTodas('${sk}')">Todas (${r.pack?pkPlano(PB,r):q(PB)+' '+u})</button>`;
     h+=`<div class="qty-err" id="pdb-err"></div>
         <div class="pcard-actions" style="grid-template-columns:1fr 1fr;margin-top:4px"><button class="btn btn-secondary" onclick="pdBCancel()">Cancelar</button><button class="btn btn-primary" onclick="pdBGuardar('${sk}')">Guardar</button></div></div>`;
   } else if(editing){
@@ -3187,9 +3191,10 @@ function pdBTap(sku, kind){
 }
 function pdPackSet(l, en, fuente, exacto){ (S.pdPackAns||(S.pdPackAns=new Map())).set(l.sku_key, { en, oc:l.esperado, fuente, exacto }); }
 // «¿Qué llegó?»: one of the two readings in full = Completo against it
-function pdBLlego(sku, en){ const l=S.lines.get(sku); if(!l) return; pdPackSet(l, en, 'llego', true); pdBTap(sku, 'completo'); }
+function pdBLlego(sku, en){ const l=S.lines.get(sku); if(!l) return; const rq=S.pdPackRech===sku; S.pdPackRech=null; pdPackSet(l, en, 'llego', true); pdBTap(sku, rq?'rechazo':'completo'); }
+function pdBRechQ(sku){ S.pdPackRech=sku; if(sku) S.pdEdit=sku; S.pdForm=null; pdBRerender(); }
 function pdBLlegoNada(sku){ const l=S.lines.get(sku); if(!l) return; pdPackSet(l, pdPackHeredado()||'piezas', 'supuesto', false); pdBTap(sku, 'nollego'); }
-function pdBConteo(sku){ S.pdEdit=sku; S.pdForm={ sku, kind:'conteo', motivo:null, pz:false }; pdBRerender(); }
+function pdBConteo(sku){ const rech=S.pdPackRech===sku; S.pdPackRech=null; S.pdEdit=sku; S.pdForm={ sku, kind:'conteo', motivo:null, pz:false, rech }; pdBRerender(); }
 function pdBUnidad(pz){ if(!S.pdForm) return; S.pdForm.pz=!!pz; pdBKeepInput(pdBRerender); }
 function pdMarcar(sku, marca, extra){
   const l=S.lines.get(sku); if(!l) return;
@@ -3200,7 +3205,7 @@ function pdMarcar(sku, marca, extra){
   recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:l.producto, cantidad:extra.recibido, metodo:ci?'codigo_incorrecto':'boton',
     detalle:Object.assign({ marca, pedido:l.esperado, kgpz:l.kgpz }, pkd, pdFacMapa()?{ objetivo:pdObjDe(sku), nofac:!pdFacMapa().has(sku)||undefined }:{}, extra, ci||{}) }));
   if(S.pdPackAns) S.pdPackAns.delete(sku);
-  S.pdEdit=null; S.pdForm=null; S.pdFoco=null; S.pdCod=null; pdBRerender(); if(screenActive('screen-recibir')) focusScan();
+  S.pdEdit=null; S.pdForm=null; S.pdFoco=null; S.pdCod=null; S.pdPackRech=null; pdBRerender(); if(screenActive('screen-recibir')) focusScan();
 }
 function pdBGuardar(sku){
   const f=S.pdForm, l=S.lines.get(sku), i=document.getElementById('pdb-n'), err=document.getElementById('pdb-err'); if(!f || !l || !i) return;
@@ -3216,6 +3221,8 @@ function pdBGuardar(sku){
     if(c==null){ err.textContent=`Escribe cuánt${pz?'as piezas':'os paquetes'} llegaron.`; i.focus(); return; }
     if(c===0) return pdBLlegoNada(sku);
     const e=packEnDe(c, l.esperado, N); pdPackSet(l, e.en, 'conteo', e.exacto);
+    // From Rechazo: the count includes the rejected ones; the rechazo form then asks how many of them
+    if(f.rech){ S.pdForm={ sku, kind:'rechazo', motivo:null, pz:false, llegaron:c }; pdBRerender(); return; }
     const P2=pdObjDe(sku), cap=x.capturado_pz!=null?{ capturado_pz:x.capturado_pz }:{};
     if(c===P2) pdMarcar(sku, 'completo', Object.assign({ recibido:P2 }, cap));
     else if(c<P2) pdMarcar(sku, 'faltante', Object.assign({ recibido:c, llegaron:c, faltan:round2(P2-c) }, cap));
@@ -3233,15 +3240,16 @@ function pdBGuardar(sku){
     if(!f.motivo){ err.textContent='Elige por qué: fecha corta o dañada.'; return; }
     const x=leer(false), n=x.n;
     if(x.mal){ err.textContent=x.mal; i.focus(); return; }
-    if(n==null || n>P){ err.textContent=`Escribe cuánt${N&&!pz?'os':'as'} rechazaste: de 1 a ${T(P)}.`; i.focus(); return; }
-    pdMarcar(sku, 'rechazo', Object.assign({ recibido:round2(P-n), rechazadas:n, motivo:f.motivo }, x.capturado_pz!=null?{ capturado_pz:x.capturado_pz }:{}));
+    const PB=f.llegaron!=null?Math.min(f.llegaron,P):P; // a count from «¿Qué llegó?»: rejected out of what arrived
+    if(n==null || n>PB){ err.textContent=`Escribe cuánt${N&&!pz?'os':'as'} rechazaste: de 1 a ${T(PB)}.`; i.focus(); return; }
+    pdMarcar(sku, 'rechazo', Object.assign({ recibido:round2(PB-n), rechazadas:n, motivo:f.motivo }, f.llegaron!=null?{ llegaron:f.llegaron }:{}, x.capturado_pz!=null?{ capturado_pz:x.capturado_pz }:{}));
     toast(`✓ ${l.producto}: ${N?pkPlano(n,L):q(n)+' '+u} rechazad${N?'os':'as'}`);
   }
 }
-function pdBTodas(sku){ const l=S.lines.get(sku), i=document.getElementById('pdb-n'); if(l && i){ const N=pdLineaPk(l).pack, P=pdObjDe(sku); i.value=fmtQty(N && S.pdForm.pz?P*N:P,l.kgpz); if(S.pdForm.motivo) pdBGuardar(sku); else document.getElementById('pdb-err').textContent='Elige por qué: fecha corta o dañada.'; } }
+function pdBTodas(sku){ const l=S.lines.get(sku), i=document.getElementById('pdb-n'); if(l && i){ const N=pdLineaPk(l).pack, P0=pdObjDe(sku), P=S.pdForm.llegaron!=null?Math.min(S.pdForm.llegaron,P0):P0; i.value=fmtQty(N && S.pdForm.pz?P*N:P,l.kgpz); if(S.pdForm.motivo) pdBGuardar(sku); else document.getElementById('pdb-err').textContent='Elige por qué: fecha corta o dañada.'; } }
 function pdBMotivo(k){ if(!S.pdForm) return; S.pdForm.motivo=k; pdBKeepInput(pdBRerender); }
-function pdBCancel(){ S.pdForm=null; S.pdEdit=null; pdBRerender(); }
-function pdBCambiar(sku){ S.pdEdit=sku; S.pdForm=null; pdBRerender(); }
+function pdBCancel(){ S.pdForm=null; S.pdEdit=null; S.pdPackRech=null; pdBRerender(); }
+function pdBCambiar(sku){ S.pdEdit=sku; S.pdForm=null; S.pdPackRech=null; pdBRerender(); }
 function pdBSiguiente(){ S.pdFoco=null; S.pdCod=null; pdBRerender(); focusScan(); }
 function pdBQuitarPns(sku){
   const e=pdMarcas().get(sku); if(!e) return;
@@ -3249,7 +3257,7 @@ function pdBQuitarPns(sku){
   recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:e.producto, metodo:'boton', detalle:{ marca:'quitado', kgpz:e.detalle.kgpz||'Pz' } }));
   pdBRerender();
 }
-function pdBTab(t){ S.pdTab=t; S.pdForm=null; S.pdEdit=null; if(t!=='scan'){ S.pdFoco=null; S.pdCod=null; } pdBListRender(); if(t==='scan') focusScan(); }
+function pdBTab(t){ S.pdTab=t; S.pdForm=null; S.pdEdit=null; S.pdPackRech=null; if(t!=='scan'){ S.pdFoco=null; S.pdCod=null; } pdBListRender(); if(t==='scan') focusScan(); }
 // Recibir: scan-first by default (many products share presentations, so the receptor confirms what they hold, not a
 // row picked from a list). «Pendientes» / «Todos» open the order as a list with a search, for products without a code.
 function pdBListRender(){
