@@ -169,8 +169,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   never arrived → not on it. SKU Proveedor = the OC line's `sku_marca` read from
   the envío snapshot (`info.envio`); folio from the report's «Folio factura». Letterhead `FDR_EMPRESA` + `FDR_LOGO` (inline
   PNG taken from the form), 15 rows minimum like the paper, signatures Calii (receptores printed) / Proveedor. Opens by itself
-  after `pdCerrar` (`openRecepcion(…, {fdr:true})`) when something goes back; «Formato de devolución · n» in
-  `pdRecepcionHead` reprints it. Overlay `#fdr`; «Imprimir» adds `body.fdr-print` so `@media print` shows only the sheet.
+  after `pdCerrar` (`openRecepcion(…, {fdr:true})`) when something goes back; «Formato de devolución · n» next to
+  «Mensaje para Slack» (always shown, off when nothing goes back) reprints it. Overlay `#fdr`; «Imprimir» adds `body.fdr-print` so `@media print` shows only the sheet.
 
 ## Factura del proveedor (facturaProveedor-plan.md — built 2026-11-17)
 - Flags per supplier reception what the invoice charges that we shouldn't pay (we pay only what was ordered AND received,
@@ -239,6 +239,13 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   (old-shape rows compare as before). The start's comparison uses the OC number; `facObjetivo`/`facCierre` redo it with
   the paquetes Pedido. The blind count flow (receptions before 2026-11-14) is unchanged. Tests: `node tests/pack.test.mjs`
   (San Nicolás replay from gitignored `fixtures/arca-2026-11-20-*.json`); Modo prueba «Refrescos Prueba».
+
+- **Bimbo / Marinela (2026-11-24, Jose)** — compras writes both under «Bimbo», each with its own OC and invoice, so they are
+  received apart. `PD_SEPARAR` + `pdSepararOrdenes` (in `pdFetch`): an OC ≥80 % Marinela products becomes supplier «Marinela»
+  (área `pd-marinela`); an OC mixing both (Zapopan, Condesa) stays «Bimbo». The bridge, its catalog and contactos only know
+  `pdBase(name)`; re-reads use `grupo:true` (OCs looked up by key). Invoice list puts first the reads billing something of this
+  order; `facAjena` (no row on the order) asks «Esta factura parece de otra orden» before comparing (any supplier).
+  Receptions before this stay under `pd-bimbo`. Modo prueba: «Bimbo» and «Marinela».
 
 ## Modo prueba (2026-11-18)
 - `?demo={semilla}` runs the whole app unchanged on fake data; Admin → **Modo prueba** opens it in a new tab (no PIN

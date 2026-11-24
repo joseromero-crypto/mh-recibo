@@ -1316,6 +1316,19 @@ function pdFechaLabel(ymd){
   return ymd>t ? `programada ${dowCorto(ymd)} ${d}` : `atrasada: era el ${dowCorto(ymd)} ${d}`;
 }
 function sameName(a,b){ return normName(a)===normName(b); }
+/* One sheet supplier that delivers as two (2026-11-24, Jose): compras writes Bimbo and Marinela under «Bimbo», each with its
+   own OC and its own invoice. An order whose products are (nearly) all Marinela becomes supplier «Marinela» on every read, so
+   it is received apart. An OC that mixes both (Zapopan, Condesa) stays «Bimbo». The bridge, its catalog and Invoice Reader
+   only know the sheet's name: pdBase. */
+const PD_SEPARAR=[{ nombre:'Marinela', de:'Bimbo', re:/\bmarinela\b/i, min:0.8 }];
+function pdBase(name){ const g=PD_SEPARAR.find(x=>sameName(x.nombre, name)); return g?g.de:name; }
+function pdSepararOrdenes(d){
+  for(const g of PD_SEPARAR){
+    for(const o of d.ordenes){ const ls=o.lineas||[];
+      if(sameName(o.proveedor, g.de) && ls.length && ls.filter(l=>g.re.test(l.producto||'')).length/ls.length>=g.min) o.proveedor=g.nombre; }
+    if(d.proveedores.some(p=>sameName(p, g.de)) && !d.proveedores.some(p=>sameName(p, g.nombre))) d.proveedores.push(g.nombre);
+  }
+}
 
 // Saved copy (sql/pd-snapshot.sql): the Apps Script timer rewrites rec_pd_snapshot every minute (05:00–22:59), so a
 // read takes a fraction of a second instead of ~8 s. `revisado` (server clock) = last run that confirmed it. A copy
@@ -1337,7 +1350,8 @@ async function pdSnapshot(hub, maxMs){
 // GET the orders: the saved copy when it's recent enough, else the bridge (or the fixture on localhost). `prov` narrows
 // to one supplier; `fresh` = must reflect the sheet now (copy ≤ PD_SNAP_FRESH_MS, or the script without its 30 s cache);
 // `live` skips the copy («Volver a leer la orden»: the receptor asks because compras may have just fixed it).
-async function pdFetch(slug, { prov=null, fresh=false, live=false }={}){
+// `grupo`: keep every order of the sheet's supplier (Bimbo + Marinela) — a re-read looks its OCs up by key.
+async function pdFetch(slug, { prov=null, fresh=false, live=false, grupo=false }={}){
   const hub=PD_HUB[slug]||slug;
   let d=null;
   if(!PD_FIXTURE && !live) d=await pdSnapshot(hub, fresh ? PD_SNAP_FRESH_MS : PD_SNAP_MAX_MS);
@@ -1348,7 +1362,7 @@ async function pdFetch(slug, { prov=null, fresh=false, live=false }={}){
     d=await r.json();
   } else {
     if(!PD_URL) throw new Error('La conexión con las órdenes de proveedor aún no está configurada');
-    const q=new URLSearchParams({ token:PD_TOKEN, hub }); if(prov) q.set('proveedor', prov); if(fresh) q.set('fresh','1');
+    const q=new URLSearchParams({ token:PD_TOKEN, hub }); if(prov) q.set('proveedor', pdBase(prov)); if(fresh) q.set('fresh','1');
     const ctl=new AbortController(), to=setTimeout(()=>ctl.abort(), 30000);
     try{ d=await (await fetch(`${PD_URL}?${q}`, { signal:ctl.signal, cache:'no-store' })).json(); }
     catch(e){ throw e.name==='AbortError' ? new TypeError('timeout') : e; }
@@ -1356,10 +1370,12 @@ async function pdFetch(slug, { prov=null, fresh=false, live=false }={}){
     if(d && d.error) throw new Error(d.error==='token' ? 'Token de órdenes inválido' : d.error);
   }
   d.ordenes=d.ordenes||[]; d.contactos=d.contactos||{}; d.proveedores=d.proveedores||[];
+  pdSepararOrdenes(d);
   if(prov){ // the fixture and the saved copy hold every supplier; the script already narrowed it
-    d.ordenes=d.ordenes.filter(o=>sameName(o.proveedor, prov));
-    d.catalogo=(d.catalogo||[]).filter(c=>sameName(c.proveedor, prov));
-    if(d.copia){ const c={}; for(const n in d.contactos) if(sameName(n, prov)) c[n]=d.contactos[n]; d.contactos=c; }
+    const base=pdBase(prov);
+    d.ordenes=d.ordenes.filter(o=>sameName(pdBase(o.proveedor), base) && (grupo || sameName(o.proveedor, prov)));
+    d.catalogo=(d.catalogo||[]).filter(c=>sameName(c.proveedor, base));
+    if(d.copia){ const c={}; for(const n in d.contactos) if(sameName(n, base)) c[n]=d.contactos[n]; d.contactos=c; }
   }
   d.ordenes.forEach(o=>pdArea(o.proveedor));
   return d;
@@ -1440,7 +1456,7 @@ function pdOtro(v){ INI.otro=v; renderInicio(); const el=document.getElementById
 // Contacts (plan §3.3): Comercial from Encargados + Comprador from the order. Phones only become tel: links.
 function pdContactos(prov){
   const d=(INI.pd&&INI.pd.data)||{}, ords=pdOrdenesDe(prov);
-  const c=Object.entries(d.contactos||{}).find(([k])=>sameName(k, prov));
+  const c=Object.entries(d.contactos||{}).find(([k])=>sameName(k, pdBase(prov)));
   const comercial=(ords.find(o=>o.comercial)||{}).comercial || (c&&c[1].comercial) || '';
   const comprador=(ords.find(o=>o.comprador)||{}).comprador || (c&&c[1].comprador) || '';
   return { comercial, comprador };
@@ -1529,6 +1545,8 @@ function pdPanelHtml(){
     if(rec.length) h+=`<div class="muted" style="font-size:13px;margin-bottom:8px">${rec.map(o=>`${o.num_oc?'OC '+escapeHtml(o.num_oc):pdFechaLabel(o.fecha_entrega)}: recibida ${fechaLarga(pdRecibida(o))}`).join(' · ')}</div>`;
     return h+releer+`<div class="muted" style="font-size:12px;margin-top:6px;text-align:center">Leída ${P.data.leido?localHM(new Date(P.data.leido)):''}</div>`;
   }
+  const par=(P.data.ordenes||[]).find(o=>!sameName(o.proveedor, prov) && sameName(pdBase(o.proveedor), pdBase(prov)) && !pdRecibida(o));
+  if(par) h+=`<div class="note">También hay orden de <b>${escapeHtml(par.proveedor)}</b>. Se recibe aparte, con su propia factura.</div>`;
   // which orders arrived (§6.1: several OCs → tick; default = the nearest date)
   if(pend.length>1 || rec.length){
     h+=`<div class="step-title" style="margin-top:4px">¿Qué orden llegó?</div><div class="pd-list">`
@@ -1619,14 +1637,14 @@ async function pdRecibirLive(){
 }
 function pdOtrasDe(d, ses){
   const keys=new Set(S.envio.orden.ocs.map(o=>o.key));
-  S.pdOtras=d.ordenes.filter(o=>!keys.has(pdKey(o)) && !(ses && ses.recibidas.has(pdKey(o))));
+  S.pdOtras=d.ordenes.filter(o=>sameName(o.proveedor, S.envio.orden.proveedor) && !keys.has(pdKey(o)) && !(ses && ses.recibidas.has(pdKey(o))));
 }
 // «Volver a leer la orden»: same OCs, fresh from the sheet. A change writes a new snapshot in the same session
 // (reemplazo, orden_releida) and every line is recomputed; the counts never move (they are physical).
 // Reads the same OCs fresh (plus extraKey) → { data, cambio, d, ses } or { gone:true, d, ses } when they left the sheet
 async function pdLeerOrden(extraKey, { live=false }={}){
   const sid=S.session.id, prov=S.envio.orden.proveedor, slug=S.hub, area=S.area;
-  const [d, ses]=await Promise.all([ pdFetch(slug, { prov, fresh:true, live }), pdSesiones(slug).catch(()=>null) ]);
+  const [d, ses]=await Promise.all([ pdFetch(slug, { prov, fresh:true, live, grupo:true }), pdSesiones(slug).catch(()=>null) ]);
   if(!S.session || S.session.id!==sid) return null;
   S.pdLeido=d.leido;
   const keys=new Set(S.envio.orden.ocs.map(o=>o.key)); if(extraKey) keys.add(extraKey);
@@ -4059,6 +4077,7 @@ function renderRecepcion(){
       <div>${(I.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div></div>`)+`
     ${RV.rows.some(r=>r.corta>0||r.dan>0)?`<div class="warn-box">Registra en el sistema todo lo recibido, también lo de fecha corta y lo dañado. Después regístralo como merma (MNA) y sepáralo.</div>`:''}
     ${P?'':`<button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="openSlackMensaje()">Mensaje para Slack</button>`}
+    ${RV.pd&&!P?`<div id="fdr-btn">${fdrBtnHtml()}</div>`:''}
     <button class="btn btn-secondary btn-block" onclick="descargarReporte()">Descargar CSV</button>
     ${P?'':'<div class="tabs" id="rv-vistas" style="margin:12px 0 0"></div>'}
     <input class="text-input" style="margin-top:12px" placeholder="Buscar producto…" oninput="rvSet('q',this.value)" autocomplete="off">
@@ -4123,8 +4142,7 @@ function pdRecepcionHead(I){
   return `<h2>${escapeHtml(I.proveedor||areaName(I.area))} · ${fechaLarga(I.fecha)}</h2>
     <div class="info-card">${I.num_oc&&I.num_oc.length?'OC '+escapeHtml(I.num_oc.join(', '))+'<br>':''}Cerrada ${localDateStr(new Date(I.ts))!==I.fecha?'el '+fechaLarga(localDateStr(new Date(I.ts)))+' ':''}a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}<br>
       ${I.lineas||0} productos en la orden · ${I.diferencias?`<b style="color:var(--orange)">${I.diferencias} con diferencia</b>`:'sin diferencias'}${dev?` · ${dev} con devolución`:''}${fal?` · ${fal} con faltante`:''}${I.no_solicitados?` · ${I.no_solicitados} no solicitado(s)`:''}</div>
-    <div class="note">Registra en el sistema el <b>Recibido</b> de cada producto: es lo que se factura. Lo devuelto y lo que no llegó ya está descontado.</div>
-    <div id="fdr-btn">${RV.fdrFac!==undefined?fdrBtnHtml():''}</div>`;
+    <div class="note">Registra en el sistema el <b>Recibido</b> de cada producto: es lo que se factura. Lo devuelto y lo que no llegó ya está descontado.</div>`;
 }
 /* ── FDR · Formato de devolución (comercial's form, 2026-11-23): what goes back on the supplier's truck, on Calii's
    letterhead, signed by the receptor and the driver. Built from the closed report (RV.rows), so it opens by itself
@@ -4170,9 +4188,10 @@ async function fdrPrep(abrir){
   if(abrir && fdrItems(R.rows).length) fdrAbrir();
 }
 function fdrBtn(){ const el=document.getElementById('fdr-btn'); if(el && RV) el.innerHTML=fdrBtnHtml(); }
+// Always next to «Mensaje para Slack»; off while the review loads or when the invoice charges nothing that goes back
 function fdrBtnHtml(){
-  const n=fdrItems(RV.rows).length;
-  return n?`<button class="btn btn-secondary btn-block" style="margin-bottom:12px" onclick="fdrAbrir()">Formato de devolución · ${n} producto${n===1?'':'s'}</button>`:'';
+  const listo=RV.fdrFac!==undefined, n=listo?fdrItems(RV.rows).length:0;
+  return `<button class="btn btn-secondary btn-block" style="margin-bottom:8px" ${n?'':'disabled'} onclick="fdrAbrir()">Formato de devolución${n?` · ${n} producto${n===1?'':'s'}`:listo?' · nada que devolver':''}</button>`;
 }
 function fdrFecha(ymd){ const [y,m,d]=String(ymd).split('-').map(Number); return m?`${d} de ${MESES[m-1]} de ${y}`:String(ymd||''); }
 async function fdrAbrir(){
@@ -4608,16 +4627,25 @@ function facLectura(){
   if(FACV.elegida) return FACV.elegida;
   const f=FAC[FACV.info.session_id], d=f && facDone(f);
   if(FACV.recomparar){ const id=FACV.recomparar; return (f&&f.reads||[]).find(x=>x.read_id===id && x.status==='done') || (FACV.lista||[]).find(x=>x.read_id===id && x.status==='done') || null; }
-  if(!d) return null;
+  if(!d || d.read_id===FACV.omitir) return null;
   if(FACV.cambiando && FACV.saved && FACV.saved.detalle && FACV.saved.detalle.read_id===d.read_id) return null;
   return d;
 }
 function facAvisos(r){ return r && (r.totals_ok===false || (r.warnings||[]).length>0); }
+// Not one row of the invoice is on this order (none even suggested): it's most likely another order's invoice.
+function facAjena(r){
+  if(!(r.rows||[]).length || !(FACV.lines||[]).length) return false;
+  const c=facComparar({ lines:FACV.lines, todas:FACV.info.lineas_todas||[], rows:r.rows, picks:{} });
+  return !c.lineas.length && !c.no_identificados.some(n=>n.sugeridas.length);
+}
+function facPideAjena(r){ return !FACV.recomparar && FACV.ajenaOk!==r.read_id && facAjena(r); }
+function facOtra(id){ FACV.omitir=id; FACV.elegida=null; FACV.picks={}; FACV.ack=false; FACV.compStart=0; FACV.lista=null; facBoxRender(); }
 function facCmp(r){ return facComparar({ lines:FACV.lines||[], todas:FACV.info.lineas_todas||[], rows:r.rows||[], picks:FACV.picks }); }
 // No question left (no page warning, nobody to identify) → save right away; with questions, the auxiliar saves.
 function facAutoGuardar(){
   if(FACV.saving || (FACV.saved && !FACV.cambiando) || !FACV.lines) return;
   const f=FAC[FACV.info.session_id], r=facLectura(); if(!r || !f || ['fotos','subiendo','pendiente','error'].includes(facEstado(f))) return;
+  if(facPideAjena(r)) return;
   if(facAvisos(r) && !FACV.ack) return;
   if(FACV.saved && FACV.saved.detalle && FACV.saved.detalle.read_id===r.read_id && !FACV.cambiando) return;
   if(facComparando()) return;
@@ -4739,6 +4767,9 @@ function facBoxInner(){
   if(['fotos','subiendo','pendiente','error'].includes(st) || f.preparando) return h+facStripHtml(sid, true)+(st==='error'?`<button class="link-btn" onclick="facManual()">Comparar a mano</button>`:'');
   const r=facLectura();
   if(r){
+    if(facPideAjena(r)) return h+`<div class="warn-box"><b>Esta factura parece de otra orden.</b>
+      <div>Ninguno de sus ${(r.rows||[]).length} productos está en la orden de ${escapeHtml(I.proveedor||areaName(I.area))}${r.reference?' · folio '+escapeHtml(r.reference):''}.</div>
+      ${facFotoLink(r.read_id)}<div class="fac-btns"><button class="btn btn-secondary" onclick="facOtra(${facJs(r.read_id)})">Elegir otra factura</button><button class="btn btn-secondary" onclick="FACV.ajenaOk=${facJs(r.read_id)};FACV.compStart=0;facBoxRender()">Sí es esta: comparar</button></div></div>`;
     if(facAvisos(r) && !FACV.ack) return h+`<div class="warn-box"><b>¿Falta una página de la factura?</b>
       ${r.totals_ok===false?'<div>Los totales de la factura no cuadran con los renglones leídos.</div>':''}${(r.warnings||[]).map(w=>`<div>· ${escapeHtml(w)}</div>`).join('')}
       <div class="fac-btns">${facVigente(sid)?`<button class="btn btn-secondary" onclick="facPick(${J},true)">Tomar todas las páginas</button>`:''}<button class="btn btn-secondary" onclick="FACV.ack=true;FACV.compStart=0;facBoxRender()">Está completa: comparar</button></div></div>`;
@@ -4763,7 +4794,10 @@ function facBoxInner(){
   // No read for this session: one scanned in Invoice Reader, or photos, or by hand
   if(FACV.lista===null){ facCargarLista(); return h+(FACV.recomparar?(INI_?facLoaderHtml('Comparando la factura contra la OC…', 'Con la orden nueva.'):facLoaderHtml('Comparando la recepción contra la factura…', 'Con lo que corregiste.')):'<div class="muted">Buscando facturas del proveedor…</div>'); }
   if(FACV.recomparar){ FACV.recomparar=null; FACV.picks={}; } // that read is gone: pick the invoice again
-  const prov=I.proveedor||areaName(I.area), mine=FACV.lista.filter(x=>x.status==='done' && (facMismoProveedor(prov, x.supplier) || facMismoProveedor(prov, x.printed_supplier)));
+  const prov=I.proveedor||areaName(I.area), suyo=n=>facMismoProveedor(prov, n) || facMismoProveedor(pdBase(prov), n);
+  let mine=FACV.lista.filter(x=>x.status==='done' && (suyo(x.supplier) || suyo(x.printed_supplier)));
+  // Same supplier name, other order (Bimbo / Marinela, two OCs): the ones billing something of this order come first
+  const deEsta=mine.filter(x=>!facAjena(x)); if(deEsta.length) mine=deEsta;
   const otras=FACV.lista.filter(x=>x.status==='done' && !mine.includes(x));
   const opt=x=>`<div class="fac-opt"><button class="res-item" onclick="facElegir(${facJs(x.read_id)})"><div style="flex:1"><div class="res-name">${escapeHtml(facNombre(x))}</div>
     <div class="res-sub">${facSub(x)}</div></div><span style="font-size:20px">›</span></button>${facFotoLink(x.read_id)}</div>`;
@@ -4776,7 +4810,7 @@ function facBoxInner(){
   else h+=`<div class="muted" style="margin-bottom:8px">No hay factura leída de ${escapeHtml(prov)}.</div>`;
   if(otras.length) h+=`<details style="margin:8px 0"><summary class="muted" style="cursor:pointer">${mine.length===1?'No es esta: ver o':'O'}tras facturas del hub · ${otras.length}</summary>${otras.map(opt).join('')}</details>`;
   if(FACV.ligadas) h+=`<div class="muted" style="margin:4px 0 8px">${FACV.ligadas===1?'Una factura ya está ligada':FACV.ligadas+' facturas ya están ligadas'} a otra recepción y no se muestra${FACV.ligadas===1?'':'n'}.</div>`;
-  if(facVigente(sid) && st!=='vencida') h+=`<div class="muted" style="margin-top:10px">O tómale foto ahora:</div>`+facStripHtml(sid, true);
+  if(facVigente(sid) && st!=='vencida') h+=`<div class="muted" style="margin-top:10px">O tómale foto ahora:</div>`+(FACV.omitir && st==='lista'?facFotoBtns(sid,0):facStripHtml(sid, true));
   return h+`<button class="link-btn" onclick="facCargarLista(true)">Actualizar</button>`
     +(FACV.cambiando?`<button class="link-btn" onclick="FACV.cambiando=false;facBoxRender()">Dejar la revisión guardada</button>`:'')
     +(!FACV.cambiando || INI_?`<button class="link-btn" onclick="facManual()">${INI_?'Empezar sin factura (revisar contra la OC)':'Comparar a mano (sin factura leída)'}</button>`:'');
@@ -5647,8 +5681,21 @@ function demoGenerar(){
       `${ls[3].producto} y ${ls[4].producto}: igual que siempre (sin paquetes)`];
     ent.pc={ key:'pc', titulo:prov, prov, items, espera, como:'Inicio → <b>Proveedor directo</b> → cualquier hub → <b>'+prov+'</b> → Empezar recepción → elige su factura de la lista.' };
   }
-  const contactos={ 'Lácteos Prueba':{ comercial:'Ana Prueba', comprador:'Luis Prueba' }, 'Abarrotes Prueba':{ comercial:'Ana Prueba', comprador:'Marta Prueba' }, 'Refrescos Prueba':{ comercial:'Ana Prueba', comprador:'Luis Prueba' } };
-  DEMO.data={ ent, picks:ent.ab.picks, invoices, bridge:{ ordenes, catalogo, contactos, proveedores:['Abarrotes Prueba','Lácteos Prueba','Refrescos Prueba','Proveedor Sin Orden'], avisos:[] } };
+  /* ── Bimbo / Marinela (2026-11-24): one supplier in the sheet, two OCs, two invoices → received apart ── */
+  {
+    const P=(codigo, producto, pedido, sm)=>linea({ code:codigo, producto }, 0, { sku_marca:sm, pedido, temp:'24' });
+    const casos=[['px','Bimbo',hoy,'B',[P('7509990001001','Pan blanco Bimbo prueba 620g',15,'BB01'),P('7509990001002','Medias noches Bimbo prueba 340g',12,'BB02'),P('7509990001003','Conchas Tía Rosa prueba 120g',7,'BB03')]],
+      ['py','Marinela',addDaysStr(hoy,1),'M',[P('7509990002001','Galletas maxitubo Marinela prueba 210g',12,'MM01'),P('7509990002002','Pingüinos Marinela prueba 80g',6,'MM02'),P('7509990002003','Gansito Marinela prueba 150g',5,'MM03')]]];
+    for(const [key, nombre, fecha, pre, ls] of casos){
+      ordenes.push({ num_oc:oc(), proveedor:'Bimbo', fecha_entrega:fecha, comercial:'Ana Prueba', comprador:'Luis Prueba', lineas:ls });
+      invoices.push({ area:pdArea(nombre), read_id:'demo-fac-'+key, rec:{ supplier:'Bimbo', printed_supplier:'BIMBO PRUEBA SA DE CV', reference:pre+'-'+int(10000,99999), totals_ok:true, warnings:[], rows:ls.map((l,i)=>invRow(i+1, l, l.pedido)) } });
+      ent[key]={ key, titulo:nombre, prov:nombre, items:ls.map((l,i)=>it({ code:l.codigo, producto:l.producto },{ llego:l.pedido, tipo:i?'ok':'rechazo', nota:i?undefined:'Rechaza 2 por fecha corta' })),
+        espera:[`Compras lo pide como «Bimbo»: Inicio muestra Bimbo y Marinela por separado`,`La lista de facturas propone solo la de ${nombre}; si eliges la otra: «Esta factura parece de otra orden»`,`${ls[0].producto}: 2 rechazadas → Formato de devolución junto a Mensaje para Slack`],
+        como:'Inicio → <b>Proveedor directo</b> → cualquier hub → <b>'+nombre+'</b> → Empezar recepción → elige su factura.' };
+    }
+  }
+  const contactos={ 'Bimbo':{ comercial:'Ana Prueba', comprador:'Luis Prueba' }, 'Lácteos Prueba':{ comercial:'Ana Prueba', comprador:'Luis Prueba' }, 'Abarrotes Prueba':{ comercial:'Ana Prueba', comprador:'Marta Prueba' }, 'Refrescos Prueba':{ comercial:'Ana Prueba', comprador:'Luis Prueba' } };
+  DEMO.data={ ent, picks:ent.ab.picks, invoices, bridge:{ ordenes, catalogo, contactos, proveedores:['Abarrotes Prueba','Bimbo','Lácteos Prueba','Refrescos Prueba','Proveedor Sin Orden'], avisos:[] } };
   DEMO._ready();
 }
 // The order bridge (proveedor/apps-script.gs) answers {leido, ordenes, contactos, proveedores, catalogo, avisos}
@@ -5758,7 +5805,7 @@ function demoRender(){
     for(const k of ['ab','ca']){ const e=E[k];
       h+=`<div class="demo-sec">${escapeHtml(e.titulo)} · archivo de envío</div><div class="muted" style="font-size:13px">${escapeHtml(e.archivo)} · ${e.items.filter(x=>x.tipo!=='no_envio'&&x.tipo!=='desconocido').length} productos</div>
         <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-primary" style="flex:1" onclick="demoCargarEnvio('${k}')">Cargar en la app</button><button class="btn btn-secondary" style="flex:1" onclick="demoBajarEnvio('${k}')">Descargar CSV</button></div>`; }
-    for(const k of ['pa','pb','pc']){ const e=E[k], v=DEMO.data.invoices.find(x=>x.area===pdArea(e.prov));
+    for(const k of ['pa','pb','pc','px','py']){ const e=E[k], v=DEMO.data.invoices.find(x=>x.area===pdArea(e.prov));
       h+=`<div class="demo-sec">${escapeHtml(e.titulo)} · factura ${escapeHtml(v.rec.reference)}</div>
         <img src="${demoFacturaUrl(v)}" alt="Factura de prueba" style="width:100%;max-width:360px;border:1px solid var(--c-line);border-radius:8px;display:block">
         <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-primary" style="flex:1" onclick="demoUsarFactura('${k}')">Usar como foto de factura</button><button class="btn btn-secondary" style="flex:1" onclick="demoBajarFactura('${k}')">Descargar imagen</button></div>
