@@ -4169,7 +4169,7 @@ const FDR_LOGO='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAABOCAYAAACngR
 const FDR_FILAS=15; // the form's rows; blank ones are for anything added by hand
 // Only what the invoice charges goes on the form (Jose, 2026-11-23): it asks the supplier to swap it or take it off the bill.
 // A rejected OC line counts when the invoice bills it (or its quantity couldn't be read); excess only up to what's billed above
-// the OC (de_mas, which also gives modo botones a count); a product outside the OC only when the invoice bills it. Anything else
+// the OC (de_mas, which also gives modo botones a count); a product outside the OC only when the invoice bills it (scanned or not); billed pieces that never arrived go as «No llegó» (2026-11-24). Anything else
 // scanned is the driver's mistake: it goes back on the truck with no form. No invoice review yet: rejections only.
 function fdrFac(){ const d=RV && RV.fdrFac; return d && !d.manual ? d : null; }
 function fdrNs(d, r){
@@ -4188,6 +4188,15 @@ function fdrItems(rows, d=fdrFac()){
       out.push({ r, cant:c!=null?q(c):'', motivo:'No solicitado', obs:'Facturado sin estar en la orden de compra' }); }
     else if((r.exc>0||r.excFlag) && x && x.de_mas>0)
       out.push({ r, cant:q(r.exc>0?Math.min(r.exc, x.de_mas):x.de_mas), motivo:'Excedente', obs:`Facturado de más (pedido: ${q(r.env)}, facturado: ${q(x.facturado)})` });
+    // Billed but never arrived. no_fisico also counts the rejected pieces, which already have their own row.
+    const nl=!r.pns && x && !x.revisar ? facR2((x.no_fisico||0)-(r.rech||0)) : 0;
+    if(nl>0) out.push({ r, cant:q(nl), motivo:'No llegó', obs:`Facturado: ${q(x.facturado)}, recibido: ${q(x.recibido||0)}${r.rech>0?`, rechazado: ${q(r.rech)}`:''}` });
+  }
+  // Billed without being on the OC and never scanned: nothing was received, so it comes off the bill too
+  if(d) for(const n of d.no_solicitados||[]){
+    if(rows.some(r=>r.pns && fdrNs({ no_solicitados:[n] }, r))) continue;
+    const bc=(n.codigos||[]).find(c=>/^\d{8,14}$/.test(c))||'', r={ producto:n.producto, barcode:bc, kgpz:'Pz', pack:n.pack_n||0, env:0 };
+    out.push({ r, cant:n.piezas==null?'':r.pack?pkPlano(n.piezas, r):`${fmtQty(n.piezas,'Pz')} pz`, motivo:'No solicitado', obs:'Facturado sin estar en la orden de compra; no se recibió' });
   }
   return out;
 }
@@ -4205,7 +4214,7 @@ async function fdrPrep(abrir){
 function fdrBtn(){ const el=document.getElementById('fdr-btn'); if(el && RV) el.innerHTML=fdrBtnHtml(); }
 // Always next to «Mensaje para Slack»; off while the review loads or when the invoice charges nothing that goes back
 function fdrBtnHtml(){
-  const listo=RV.fdrFac!==undefined, n=listo?fdrItems(RV.rows).length:0;
+  const listo=RV.fdrFac!==undefined, n=listo?new Set(fdrItems(RV.rows).map(x=>rvSkuOf(x.r))).size:0;
   return `<button class="btn btn-secondary btn-block" style="margin-bottom:8px" ${n?'':'disabled'} onclick="fdrAbrir()">Formato de devolución${n?` · ${n} producto${n===1?'':'s'}`:listo?' · nada que devolver':''}</button>`;
 }
 function fdrFecha(ymd){ const [y,m,d]=String(ymd).split('-').map(Number); return m?`${d} de ${MESES[m-1]} de ${y}`:String(ymd||''); }
@@ -4223,7 +4232,7 @@ async function fdrAbrir(){
   const ref=[folio?`Factura: <b>${e(folio)}</b>`:'Factura: '+u('', 120), I.num_oc&&I.num_oc.length?`Orden de compra: <b>${e(I.num_oc.join(', '))}</b>`:'', `Entrega: <b>${e(fdrFecha(I.fecha))}</b>`].filter(Boolean).join(' &nbsp;·&nbsp; ');
   fdrCerrar();
   document.body.insertAdjacentHTML('beforeend', `<div id="fdr" class="fdr-wrap" role="dialog" aria-label="Formato de devolución">
-    <div class="fdr-bar"><button class="btn btn-secondary" onclick="fdrCerrar()">Cerrar</button><button class="btn btn-primary" onclick="fdrImprimir()">Imprimir</button></div>${sinFac?`<div class="note fdr-nota">Aún no se revisa la factura: solo van los rechazos. Lo que la factura cobre de más o sin pedir se agrega al revisarla; vuelve a abrir el formato desde la recepción.</div>`:''}
+    <div class="fdr-bar"><button class="btn btn-secondary" onclick="fdrCerrar()">Cerrar</button><button class="btn btn-primary" onclick="fdrImprimir()">Imprimir</button></div>${sinFac?`<div class="note fdr-nota">Aún no se revisa la factura: solo van los rechazos. Lo que la factura cobre de más, sin pedir o que no llegó se agrega al revisarla; vuelve a abrir el formato desde la recepción.</div>`:''}
     <div class="fdr-page">
       <div class="fdr-top"><div><div class="fdr-emp">${e(FDR_EMPRESA[0])}</div><div class="fdr-dir">${FDR_EMPRESA.slice(1).map(e).join('<br>')}</div></div><img class="fdr-logo" src="${FDR_LOGO}" alt="Calii"></div>
       <p>Estimado proveedor ${u(I.proveedor||areaName(I.area), 200)},</p>

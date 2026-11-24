@@ -165,8 +165,9 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   (`fdrPrep` → `RV.fdrFac`). **Only what the invoice charges** (Jose): rejected pieces (Fecha corta with «Caducidad mínima
   aceptada», Producto dañado) of billed lines; Excedente only when billed above the OC, Cantidad = min(excess, `de_mas`); a
   scanned No solicitado only when the invoice bills it (`fdrNs`). Anything else scanned = driver's mistake, no form. No review
-  yet → rejections only + an on-screen note; a review saved later updates the button (`fdrBtn`). Facturado sin pedir that
-  never arrived → not on it. SKU Proveedor = the OC line's `sku_marca` read from
+  yet → rejections only + an on-screen note; a review saved later updates the button (`fdrBtn`). Since 2026-11-24 (Jose):
+  billed pieces that never arrived = «No llegó», Cantidad = `no_fisico` − rejected (those already have a row); Facturado sin
+  pedir never scanned = «No solicitado», «no se recibió». SKU Proveedor = the OC line's `sku_marca` read from
   the envío snapshot (`info.envio`); folio from the report's «Folio factura». Letterhead `FDR_EMPRESA` + `FDR_LOGO` (inline
   PNG taken from the form), 15 rows minimum like the paper, signatures Calii (receptores printed) / Proveedor. Opens by itself
   after `pdCerrar` (`openRecepcion(…, {fdr:true})`) when something goes back; «Formato de devolución · n» next to
