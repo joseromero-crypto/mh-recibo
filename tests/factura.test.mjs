@@ -10,8 +10,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const html = readFileSync(join(root, 'index.html'), 'utf8');
 const block = html.slice(html.indexOf('/* FACTURA-PURE:BEGIN'), html.indexOf('/* FACTURA-PURE:END */'));
 assert.ok(block.length > 100, 'FACTURA-PURE block not found');
-const { facNormCode, facComparar, facMismoProveedor, facLigadas, facInicio, facObjetivo, facCierre, facFolios, facFacturas, facFilasDe, facFolioDe } =
-  new Function(block + '\nreturn { facNormCode, facComparar, facMismoProveedor, facLigadas, facInicio, facObjetivo, facCierre, facFolios, facFacturas, facFilasDe, facFolioDe };')();
+const { facNormCode, facComparar, facMismoProveedor, facLigadas, facInicio, facObjetivo, facCierre, facFolios, facFacturas, facFilasDe, facFolioDe, fdrPartes } =
+  new Function(block + '\nreturn { facNormCode, facComparar, facMismoProveedor, facLigadas, facInicio, facObjetivo, facCierre, facFolios, facFacturas, facFilasDe, facFolioDe, fdrPartes };')();
 
 let n = 0;
 const test = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -184,6 +184,18 @@ test('two invoices in one upload: only the chosen photos are compared', () => {
   const e = (d) => [{ session_id: 'a', detalle: { read_id: 'r1', ...d } }];
   assert.ok(facLigadas(e({}), 'b').has('r1'));
   assert.ok(!facLigadas(e({ fotos: [1] }), 'b').has('r1'));
+});
+
+test('FDR: facturado − recibido, whatever the reason', () => {
+  const x = (facturado, pedido, recibido) => ({ facturado, pedido, recibido, de_mas: Math.max(0, facturado - pedido), no_fisico: Math.max(0, Math.min(facturado, pedido) - recibido) });
+  assert.deepEqual(fdrPartes(x(5, 5, 2), 0), { rechazo: 0, no_llego: 3, de_mas: 0, a_mano: false });
+  assert.deepEqual(fdrPartes(x(9, 9, 7), 1), { rechazo: 1, no_llego: 1, de_mas: 0, a_mano: false });
+  assert.deepEqual(fdrPartes(x(60, 30, 30), 0), { rechazo: 0, no_llego: 0, de_mas: 30, a_mano: false });
+  assert.equal(fdrPartes(x(8, 12, 8), 2).rechazo, 0);          // rejected pieces the invoice doesn't charge
+  for (let f = 0; f < 8; f++) for (let p = 0; p < 8; p++) for (let rec = 0; rec <= Math.min(f, p); rec++) for (let rj = 0; rj < 5; rj++) {
+    const o = fdrPartes(x(f, p, rec), rj); assert.equal(o.rechazo + o.no_llego + o.de_mas, f - rec);
+  }
+  assert.deepEqual(fdrPartes({ revisar: 'kg', facturado: 4 }, 1), { rechazo: 1, no_llego: 0, de_mas: 0, a_mano: true });
 });
 
 console.log(`${n} tests passed`);

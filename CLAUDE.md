@@ -162,12 +162,13 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 
 - **FDR · Formato de devolución (2026-11-23, comercial's form)** — printable return form for supplier receptions only
   (CH never returns: merma MNA). `fdrAbrir` builds it from the closed report (`RV.rows`) + the latest `factura` event
-  (`fdrPrep` → `RV.fdrFac`). **Only what the invoice charges** (Jose): rejected pieces (Fecha corta with «Caducidad mínima
-  aceptada», Producto dañado) of billed lines; Excedente only when billed above the OC, Cantidad = min(excess, `de_mas`); a
-  scanned No solicitado only when the invoice bills it (`fdrNs`). Anything else scanned = driver's mistake, no form. No review
-  yet → rejections only + an on-screen note; a review saved later updates the button (`fdrBtn`). Since 2026-11-24 (Jose):
-  billed pieces that never arrived = «No llegó», Cantidad = `no_fisico` − rejected (those already have a row); Facturado sin
-  pedir never scanned = «No solicitado», «no se recibió». SKU Proveedor = the OC line's `sku_marca` read from
+  (`fdrPrep` → `RV.fdrFac`). **Global rule (Jose, 2026-11-24):
+  everything charged and not into our system goes on it, whatever the reason.** Per billed OC line `fdrPartes` splits
+  facturado − recibido: rechazo (≤ billed; Fecha corta with «Caducidad mínima aceptada», Producto dañado) + «No llegó» + de
+  más above the OC («Excedente» if it arrived, else «Facturado de más»); plus every billed product outside the OC, scanned or
+  not (full billed quantity). Kg / unread quantity (`a_mano`): nothing received → «No llegó» with Cantidad blank; something
+  received → on-screen note to check by hand. Never what the invoice doesn't charge (driver's mistake, no form). No review
+  yet → rejections only + a note; a review saved later updates the button (`fdrBtn`, counts products). SKU Proveedor = the OC line's `sku_marca` read from
   the envío snapshot (`info.envio`); folio from the report's «Folio factura». Letterhead `FDR_EMPRESA` + `FDR_LOGO` (inline
   PNG taken from the form), 15 rows minimum like the paper, signatures Calii (receptores printed) / Proveedor. Opens by itself
   after `pdCerrar` (`openRecepcion(…, {fdr:true})`) when something goes back; «Formato de devolución · n» next to
@@ -255,6 +256,12 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   `reference` = the chosen folios. A folio is put on a photo by order, only when the counts match. A read used with some
   photos only isn't hidden from other receptions. «Cambiar qué folios son de esta orden» asks again. Rows without `photo`
   (older reader) → compared whole as before. Planted case: «Refrescos Prueba».
+
+- **Retake / re-upload always (2026-11-24, Jose)** — `facOtraFotoHtml` («Tomar o subir otra foto») at every step of the
+  box (reading, failed, questions, saved review, list), for 24 h (Invoice Reader's limit; then scan it there and pick it).
+  `facNuevaFoto`: the saved review stays until the new read replaces it; «Descartar estas fotos» / «Dejar la revisión
+  guardada» go back. `facLectura` never compares an older read by itself while a newer one is being read or failed; the
+  list shows this reception's own reads so a retake can be undone. Invoice Reader allows 10 reads per reception.
 
 ## Modo prueba (2026-11-18)
 - `?demo={semilla}` runs the whole app unchanged on fake data; Admin → **Modo prueba** opens it in a new tab (no PIN
