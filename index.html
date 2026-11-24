@@ -274,6 +274,15 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .pdb-row .btn-secondary{background:var(--c-white)}
 .pdb-res{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;font-size:14px;font-weight:700}
 .pdb-btns .btn-main{min-height:56px;font-size:17px}
+.pdb-ped{flex-wrap:wrap}
+/* Pack lines: the piezas under the paquetes count, always small and muted */
+.pk-nota,.pdb-ped .pk-nota{font-size:12px;font-weight:500;color:var(--c-muted);white-space:nowrap}
+.pdb-packq{margin-top:10px;padding:12px 14px;background:var(--c-white);border-left:4px solid var(--c-ink);border-radius:var(--r-md)}
+.pdb-packq .btn-main{min-height:64px;flex-direction:column;line-height:1.15;border:1.5px solid var(--c-ink)}
+.pdb-packq .btn small{display:block;font-size:13px;font-weight:500;color:var(--c-muted);margin-top:2px}
+.pk-switch{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0 8px;max-width:260px}
+.pk-switch .choice{min-height:36px;padding:0 10px;text-align:center;font-size:14px;background:var(--c-white)}
+.pk-switch .choice.sel{background:var(--c-ink);color:var(--c-white)}
 .pdb-btns3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:6px}
 .pdb-btns3 .btn{min-height:44px;padding:0 6px;font-size:14px;background:var(--c-white)}
 .pdb-cad{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-top:8px;padding:8px 12px;background:var(--c-white);border-radius:var(--r-md)}
@@ -1978,7 +1987,7 @@ function openRecibir(data, opts={}){
   showScreen('screen-recibir');
   renderRecibir(); focusScan();
   loadSorting(S.hub).then(()=>{ buildCatalog(); renderRecibir(); });
-  S.pdOtras=[]; S.pdBusy=false; S.pdTab='scan'; S.pdEdit=null; S.pdForm=null; S.pdFoco=null; S.pdCod=null; const pq=document.getElementById('pd-q'); if(pq) pq.value='';
+  S.pdOtras=[]; S.pdBusy=false; S.pdTab='scan'; S.pdEdit=null; S.pdForm=null; S.pdFoco=null; S.pdCod=null; S.pdPackQ=null; S.pdPackAns=new Map(); const pq=document.getElementById('pd-q'); if(pq) pq.value='';
   syncServerEvents().then(()=>{ if(opts.revisar && revisarItems().length) openRevisar(); });
   pdRecibirLive();
   if(isPd()) facInit(S.session.id, S.hub);
@@ -2944,12 +2953,15 @@ function pdMarcas(){ const m=new Map(); for(const e of S.events) if(e.tipo==='co
 function pdBRows(){
   const M=pdMarcas(), fm=pdFacMapa(), rows=[];
   for(const l of [...S.lines.values()].sort((a,b)=>a.rowIndex-b.rowIndex)){
-    const e=M.get(l.sku_key), d=e&&e.detalle, P=l.esperado, o=pdObjOf(l, fm), T=o.nofac?P:o.obj;
-    // An answer holds while the Pedido AND the invoice's target it was given for are unchanged
-    const valid=!!(d && PD_MARCA[d.marca] && round2(Number(d.pedido))===round2(P) && round2(d.objetivo!=null?Number(d.objetivo):P)===round2(T));
+    // P = the Pedido in Retool units (paquetes on a pack line, pdPackInfo); d.pedido keeps the OC's own number
+    const e=M.get(l.sku_key), d=e&&e.detalle, pk=pdPackInfo(l), P=pk.P, o=pdObjOf(l, fm), T=o.nofac?P:o.obj;
+    // An answer holds while the Pedido AND the invoice's target it was given for are unchanged (and, on a pack line whose
+    // OC number is a multiple of N, while it's known whether that number was paquetes or piezas)
+    const valid=!!(d && PD_MARCA[d.marca] && round2(Number(d.pedido))===round2(l.esperado) && !pk.falta && round2(d.objetivo!=null?Number(d.objetivo):P)===round2(T));
     const r={ sku:l.sku_key, producto:l.producto, barcode:l.barcode, kgpz:l.kgpz, pedido:P, cad:l.caducidad_min||'', temp:l.temp||'', rowIndex:l.rowIndex,
+      pack:pk.n, pedidoOc:l.esperado, pedidoEn:pk.en, packPregunta:pk.pregunta, packFalta:pk.falta,
       pns:false, rec:0, count:0, exc:0, excFlag:false, gap:0, rech:0, motivo:'', falt:0, ack:valid?e:null, marca:valid?d.marca:null,
-      cambio:!!(d && PD_MARCA[d.marca] && !valid), pend:!valid, dif:false, estado:'Por revisar',
+      cambio:!!(d && PD_MARCA[d.marca] && !valid && !pk.falta), pend:!valid, dif:false, estado:'Por revisar',
       facPrimero:!!fm, obj:T, fac:o.fac, deMas:o.de_mas||0, nofac:!!o.nofac, revisarFac:o.revisar||null, faltFis:0, sinFac:false, autoNofac:false };
     if(valid){
       if(d.marca==='completo'){ r.rec=T; }
@@ -2964,7 +2976,8 @@ function pdBRows(){
       r.dif=d.marca!=='completo' || r.falt>0 || r.sinFac;
     } else if(o.nofac){
       // Not on the invoice: nothing to look for, faltante with no question. If it shows up, a scan opens it (received + reported).
-      Object.assign(r, { pend:false, marca:'nofac', autoNofac:true, falt:P, gap:P, dif:true, estado:'Faltante', cambio:false });
+      // A pack line never answered: paquetes vs piezas comes from this reception's other answers (packDudoso when guessed)
+      Object.assign(r, { pend:false, marca:'nofac', autoNofac:true, falt:P, gap:P, dif:true, estado:'Faltante', cambio:false, packDudoso:pk.falta||undefined });
     }
     rows.push(r);
   }
@@ -2984,9 +2997,34 @@ function pdFacPrimero(){ return pdBotones() && !!S.envio.factura_primero; }
 function pdFacIni(){ if(!pdFacPrimero()) return null; let a=null; for(const e of S.events) if(e.tipo==='factura' && e.detalle && e.detalle.fase==='inicio') a=e; return a; }
 // sku → the invoice's word on that OC line; null = no invoice compared (the check runs against the OC)
 function pdFacMapa(){ const e=pdFacIni(), d=e&&e.detalle; return d && !d.manual ? new Map((d.lineas||[]).map(x=>[x.sku_key, x])) : null; }
-function pdObjOf(l, fm){ return fm ? facObjetivo(fm.get(l.sku_key), l.esperado) : { obj:l.esperado }; }
+function pdObjOf(l, fm){ const P=pdPackInfo(l).P; return fm ? facObjetivo(fm.get(l.sku_key), P) : { obj:P }; }
 // What Completo means for a line right now (a line off the invoice that showed up is checked against the OC)
-function pdObjDe(sku){ const l=S.lines.get(sku); if(!l) return 0; const o=pdObjOf(l, pdFacMapa()); return o.nofac?l.esperado:o.obj; }
+function pdObjDe(sku){ const l=S.lines.get(sku); if(!l) return 0; const o=pdObjOf(l, pdFacMapa()); return o.nofac?pdPackInfo(l).P:o.obj; }
+/* ── Paquetes (2026-11-23, Jose; packOf / packPedido in FACTURA-PURE). On an N-pack line every quantity is in paquetes,
+   what Retool counts, with the piezas as a small note. The OC's Pedido may be paquetes or piezas: a multiple of N asks
+   once, on the line's first answer («3 paquetes (36 piezas)» / «36 paquetes (432 piezas)»). The answer rides on the marca
+   (detalle.pedido_en + pack_n + pedido_ret, pack_pregunta when asked) and holds while the OC number is the same.
+   pedido_en 'piezas' = an order written in piezas for a product sold in paquetes: logged for Admin → Proveedores. ── */
+function pdPackAnswer(l){
+  const m=S.pdPackAns && S.pdPackAns.get(l.sku_key); if(m && round2(m.oc)===round2(l.esperado)) return m.en;
+  let en=null; for(const e of S.events) if(e.tipo==='confirmacion' && e.sku_key===l.sku_key && e.detalle && e.detalle.pedido_en && round2(Number(e.detalle.pedido))===round2(l.esperado)) en=e.detalle.pedido_en;
+  return en;
+}
+// The answer given on this reception's other asked lines (same supplier, same comercial): the guess for a line nobody answers
+function pdPackHeredado(){ let en=null; for(const e of S.events) if(e.tipo==='confirmacion' && e.detalle && e.detalle.pack_pregunta && e.detalle.pedido_en) en=e.detalle.pedido_en; return en; }
+// packPedido for an envío line; while unanswered, P is the guess (other answers, else the OC number as paquetes)
+function pdPackInfo(l){
+  const n=packN(l.producto, l.kgpz), i=packPedido(l.esperado, n, n?pdPackAnswer(l):null);
+  if(i.falta){ const g=packPedido(l.esperado, n, pdPackHeredado()||'paquetes'); i.P=g.P; i.en=g.en; }
+  return i;
+}
+// Quantity text: «3 paquetes» on a pack line, «12 pz» / «1.50 kg» elsewhere. r: a row or line with kgpz and pack (N)
+function pkU(v, r){ return r.pack ? (Math.round(Number(v))===1?'paquete':'paquetes') : unitOf(r.kgpz); }
+function pkTxt(v, r){ return fmtQty(v, r.kgpz)+' '+pkU(v, r); }
+function pkNota(v, r){ return r.pack ? `<span class="pk-nota">= ${fmtQty(Number(v)*r.pack,'Pz')} piezas</span>` : ''; }
+function pkH(v, r){ return pkTxt(v, r)+(r.pack?' '+pkNota(v, r):''); }
+function pkPlano(v, r){ return pkTxt(v, r)+(r.pack?` (${fmtQty(Number(v)*r.pack,'Pz')} piezas)`:''); }
+function pdLineaPk(l){ return { kgpz:l.kgpz, pack:packN(l.producto, l.kgpz) }; }
 // The invoice step is on screen until it's compared (or skipped) and the receptor taps «Empezar revisión física»
 function pdFacPaso(){ return pdFacPrimero() && !S.closedInfo && !(pdFacIni() && S.facOk); }
 // A scanned code the invoice bills without it being on the OC
@@ -3014,15 +3052,15 @@ function facIniGuardadaHtml(S0){
   const billed=new Set(lin.map(x=>x.sku_key)), nofac=(S.envio.lines||[]).filter(l=>!billed.has(l.sku_key));
   const it=(a, fn)=>a.map(x=>`<div class="fac-item">${fn(x)}</div>`).join('');
   const act=(t, sub, body, cls)=>`<div class="fac-act ${cls||''}"><h3>${t}</h3>${sub?`<div class="fac-act-sub">${sub}</div>`:''}${body||''}</div>`;
-  let h=`<div class="muted" style="margin-bottom:8px">${d.reference?'Folio <b>'+escapeHtml(d.reference)+'</b> · ':''}${escapeHtml(d.supplier||d.printed_supplier||'')} · ${d.filas||0} renglones · ${fmtQty((d.piezas||{}).facturadas||0,'Pz')} pz facturadas</div>`;
+  let h=`<div class="muted" style="margin-bottom:8px">${d.reference?'Folio <b>'+escapeHtml(d.reference)+'</b> · ':''}${escapeHtml(d.supplier||d.printed_supplier||'')} · ${d.filas||0} renglones · ${fmtQty((d.piezas||{}).facturadas||0,'Pz')} ${(d.lineas||[]).some(x=>x.pack_n)?'unidades':'pz'} facturadas</div>`;
   if(d.totals_ok===false || (d.warnings||[]).length) h+=`<div class="note">Se comparó aunque ${d.totals_ok===false?'los totales de la factura no cuadraron':'la lectura tuvo avisos'}.</div>`;
   if(d.limpia && !nofac.length) h+=act('La factura coincide con la OC', 'Cobra lo pedido, nada más.', '', 'ok');
   if(ns.length) h+=act(`Regresar si llegan · ${ns.length}`, 'La factura los cobra pero no están en la OC: no se reciben. Que el proveedor los quite de la factura.',
-    it(ns, x=>`<span>${escapeHtml(x.producto)}</span><b>${x.piezas!=null?fmtQty(x.piezas,'Pz')+' pz':'¿?'}</b>`));
+    it(ns, x=>`<span>${escapeHtml(x.producto)}</span><b>${x.piezas!=null?facQ(x.piezas,x):'¿?'}</b>`));
   if(dm.length) h+=act(`Cobra más de lo pedido · ${dm.length}`, 'Se reciben solo las piezas de la OC; lo de más se regresa y se quita de la factura.',
-    it(dm, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">factura ${fmtQty(x.facturado,'Pz')} · OC ${fmtQty(x.pedido,'Pz')}</small></span><b>${fmtQty(x.de_mas,'Pz')} pz</b>`));
+    it(dm, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">factura ${facQ(x.facturado,x,x.piezas_sueltas)} · OC ${fmtQty(x.pedido,'Pz')}</small></span><b>${facQ(x.de_mas,x)}</b>`));
   if(nofac.length) h+=`<div class="fac-sec">No vienen en la factura · ${nofac.length}</div><div class="muted" style="margin-bottom:6px">Quedan como faltante, sin preguntar. Si alguno llega, escanéalo: se recibe y se reporta para que lo agreguen a la factura.</div>`
-    +it(nofac, l=>`<span>${escapeHtml(l.producto)}</span><b>OC ${fmtQty(l.esperado,l.kgpz)} ${unitOf(l.kgpz)}</b>`);
+    +it(nofac, l=>`<span>${escapeHtml(l.producto)}</span><b>OC ${fmtQty(l.esperado,l.kgpz)}${pdLineaPk(l).pack?'':' '+unitOf(l.kgpz)}</b>`);
   if(rv.length) h+=`<div class="fac-sec">Se revisan contra la OC · ${rv.length}</div>`+it(rv, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">${x.revisar==='kg'?'Se pide en kg':'La cantidad de la factura no se leyó bien'}</small></span><b>OC ${fmtQty(x.pedido,x.kgpz)} ${unitOf(x.kgpz)}</b>`);
   h+=`<div class="note" style="margin-top:8px">Vas a revisar en físico <b>${lin.length} producto${lin.length===1?'':'s'}</b>: lo que cobra la factura, nunca más de lo que pide la OC.</div>`;
   return h+J+(d.read_id?facFotoLink(d.read_id):'')+`<button class="link-btn" onclick="facCambiar()">Cambiar factura</button>`;
@@ -3035,24 +3073,27 @@ function pdFacInfoHtml(){
   if(d.manual) return `<div class="note">Sin factura (${escapeHtml(d.motivo||'')}): revisa contra la OC, también lo que no llegó. <button class="link-btn" style="margin:0" onclick="pdFacCambiar()">Revisar con la factura</button></div>`;
   const ns=d.no_solicitados||[];
   let h=`<div class="note" style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap"><span>Factura ${d.reference?'<b>'+escapeHtml(d.reference)+'</b>':''} comparada contra la OC: revisas ${(d.lineas||[]).length} producto${(d.lineas||[]).length===1?'':'s'}.</span><button class="link-btn" style="margin:0" onclick="pdFacCambiar()">Cambiar factura</button></div>`;
-  if(ns.length) h+=`<div class="warn-box"><b>La factura cobra ${ns.length===1?'un producto que no está':ns.length+' productos que no están'} en la OC.</b> Si llega${ns.length===1?'':'n'}, regrésa${ns.length===1?'lo':'los'} al camión:${ns.map(x=>`<div style="margin-top:4px">· ${escapeHtml(x.producto)}${x.piezas!=null?` · ${fmtQty(x.piezas,'Pz')} pz`:''}</div>`).join('')}</div>`;
+  if(ns.length) h+=`<div class="warn-box"><b>La factura cobra ${ns.length===1?'un producto que no está':ns.length+' productos que no están'} en la OC.</b> Si llega${ns.length===1?'':'n'}, regrésa${ns.length===1?'lo':'los'} al camión:${ns.map(x=>`<div style="margin-top:4px">· ${escapeHtml(x.producto)}${x.piezas!=null?` · ${facQ(x.piezas,x)}`:''}</div>`).join('')}</div>`;
   return h;
 }
 function pdBResTxt(r){
-  const q=v=>fmtQty(v,r.kgpz), u=unitOf(r.kgpz);
+  const H=v=>pkH(v,r), T=v=>pkTxt(v,r);
   if(r.pns) return r.fsp ? 'Viene en la factura pero no en la OC: regrésalo y que lo quiten de la factura' : 'No viene en la orden: no se recibe, regrésalo al camión';
-  if(r.autoNofac) return `No viene en la factura · faltan ${q(r.falt)} ${u} para la OC`;
+  if(r.autoNofac) return `No viene en la factura · faltan ${H(r.falt)} para la OC`;
   const sf=r.sinFac?'Llegó sin facturar · ':'';
-  if(r.marca==='completo') return sf+`Completo · ${q(r.rec)} ${u}`+(r.falt>0?` · la OC pedía ${q(r.pedido)}: faltan ${q(r.falt)} (no facturadas)`:'');
-  if(r.marca==='excedente') return sf+`Recibiste ${q(r.rec)} ${u} · lo de más se rechazó`;
-  if(r.marca==='faltante') return sf+(r.rec>0 ? `Llegaron ${q(r.rec)} ${u} · faltan ${q(r.falt)}` : `No llegó · faltan ${q(r.falt)} ${u}`);
-  if(r.marca==='rechazo') return sf+`Rechazaste ${q(r.rech)} ${u} (${PD_MOTIVO[r.motivo]||r.motivo})${r.rec>0?` · recibiste ${q(r.rec)}`:''}`;
+  if(r.marca==='completo') return sf+`Completo · ${H(r.rec)}`+(r.falt>0?` · la OC pedía ${T(r.pedido)}: faltan ${T(r.falt)} (no facturadas)`:'');
+  if(r.marca==='excedente') return sf+`Recibiste ${H(r.rec)} · lo de más se rechazó`;
+  if(r.marca==='faltante') return sf+(r.rec>0 ? `Llegaron ${H(r.rec)} · faltan ${T(r.falt)}` : `No llegó · faltan ${H(r.falt)}`);
+  if(r.marca==='rechazo') return sf+`Rechazaste ${H(r.rech)} (${PD_MOTIVO[r.motivo]||r.motivo})${r.rec>0?` · recibiste ${H(r.rec)}`:''}`;
   return '';
 }
 const pdBEsc=s=>escapeHtml(s).replace(/'/g,'&#39;');
 function pdBLineHtml(r){
   const sk=pdBEsc(r.sku), q=v=>fmtQty(v,r.kgpz), u=unitOf(r.kgpz), t=tempLabel(r.temp), P=r.pns?0:r.obj;
-  const meta=[r.kgpz, r.barcode?'':'sin código'].filter(Boolean).join(' · ');
+  // Pack line: «3 paquetes» big, «= 36 piezas» muted; before the paquetes/piezas answer, the OC's own number
+  const pb=(v, lbl)=>r.pack ? `<b>${q(v)}</b><span>${pkU(v,r)}</span>${pkNota(v,r)}` : `<b>${q(v)}</b><span>${lbl||u}</span>`;
+  const ocRaw=`<b>${q(r.pedidoOc)}</b><span>en la OC · ¿paquetes o piezas?</span>`;
+  const meta=[r.kgpz, r.pack?`paquete de ${r.pack}`:'', r.barcode?'':'sin código'].filter(Boolean).join(' · ');
   const editing=!r.pns && !S.closedInfo && (r.pend || S.pdEdit===r.sku), f=S.pdForm&&S.pdForm.sku===r.sku?S.pdForm:null;
   let h=`<div class="pdb-row ${r.pend?'':r.dif?'dif':'done'} ${S.pdFoco===r.sku?'foco':''}" data-sku="${escapeHtml(r.sku)}">
     <div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
@@ -3060,12 +3101,13 @@ function pdBLineHtml(r){
   const tc=t?`<span class="temp-chip" style="margin-left:auto">${escapeHtml(t)}</span>`:'';
   if(!r.pns && r.facPrimero){
     // Factura primero: the target is what the invoice bills (never above the OC); the OC's number stays beside it
-    h+=(r.nofac?`<div class="pdb-ped"><span>OC</span><b>${q(r.pedido)}</b><span>${u} · no viene en la factura</span>${tc}</div>`
-      :`<div class="pdb-ped"><span>Factura</span><b>${q(P)}</b><span>${u}</span>${r.pedido!==P?`<span>· OC ${q(r.pedido)}</span>`:''}${tc}</div>`)
-      +(r.deMas>0?`<div class="ritem-meta" style="color:var(--c-ink);font-weight:700;margin-top:4px">La factura cobra ${q(r.fac)} y la OC pide ${q(r.pedido)}: recibe ${q(P)}; lo de más se regresa y se quita de la factura.</div>`:'')
+    const rf=r.packFalta && (r.pend || S.pdEdit===r.sku);
+    h+=(r.nofac?`<div class="pdb-ped"><span>OC</span>${rf?ocRaw:pb(r.pedido, u+' · no viene en la factura')}${r.pack&&!rf?'<span>· no viene en la factura</span>':''}${tc}</div>`
+      :`<div class="pdb-ped"><span>Factura</span>${pb(P)}${rf?`<span>· OC ${q(r.pedidoOc)} (¿paquetes o piezas?)</span>`:r.pedido!==P?`<span>· OC ${pkTxt(r.pedido,r)}</span>`:''}${tc}</div>`)
+      +(r.deMas>0&&!rf?`<div class="ritem-meta" style="color:var(--c-ink);font-weight:700;margin-top:4px">La factura cobra ${pkTxt(r.fac,r)} y la OC pide ${pkTxt(r.pedido,r)}: recibe ${pkTxt(P,r)}; lo de más se regresa y se quita de la factura.</div>`:'')
       +(r.revisarFac?`<div class="ritem-meta" style="margin-top:4px">Se revisa contra la OC: ${r.revisarFac==='kg'?'se pide en kg':'la cantidad de la factura no se leyó bien'}.</div>`:'')
       +(r.nofac && !S.closedInfo && (S.pdEdit===r.sku || S.pdFoco===r.sku)?`<div class="pdb-pns"><b>No viene en la factura</b>Recíbelo y pide al proveedor que lo agregue a la factura.</div>`:'');
-  } else if(!r.pns) h+=`<div class="pdb-ped"><span>Pedido</span><b>${q(P)}</b><span>${u}</span>${tc}</div>`;
+  } else if(!r.pns) h+=`<div class="pdb-ped"><span>Pedido</span>${r.packFalta && (r.pend || S.pdEdit===r.sku)?ocRaw:pb(P)}${tc}</div>`;
   if(!r.pns) h+=(r.cad && (r.pend || S.pdEdit===r.sku || S.pdFoco===r.sku)?`<div class="pdb-cad"><small>Caducidad mínima</small><b>${dmy(r.cad)}</b></div>`:'');
   const codMal=!S.closedInfo && S.pdFoco===r.sku && S.pdCod && S.pdCod.sku===r.sku && !S.pdCod.ci
     ? `<button class="link-btn" style="margin-top:4px" onclick="pdBCodMal()">¿No es este producto? Código incorrecto en sistema · buscar por nombre</button>` : '';
@@ -3075,16 +3117,27 @@ function pdBLineHtml(r){
       <div class="pcard-actions" style="grid-template-columns:1fr 2fr;margin-top:8px"><button class="btn btn-secondary" onclick="pdBQuitarPns('${sk}')">Me equivoqué</button><button class="btn btn-primary" onclick="pdBSiguiente()">Siguiente</button></div>${codMal}`;
   } else if(r.pns){
     h+=`<div class="pdb-res"><span>${pdBResTxt(r)}</span>${S.closedInfo?'':`<button class="corr-btn" onclick="pdBQuitarPns('${sk}')">Me equivoqué</button>`}</div>`;
+  } else if(editing && S.pdPackQ && S.pdPackQ.sku===r.sku && r.packFalta){
+    // Pack line whose OC number is a multiple of N: was it written in piezas or in paquetes? Asked once, on the first answer.
+    const n=r.pack, oc=r.pedidoOc, a=oc/n;
+    h+=`<div class="pdb-packq"><div class="sep-q">La OC pide <b>${q(oc)}</b>. Este producto es un paquete de ${n} piezas: ¿qué se pidió?</div>
+      <div class="pdb-btns"><button class="btn btn-secondary btn-main" onclick="pdBPack('${sk}','piezas')">${q(a)} paquete${a===1?'':'s'}<small>${q(oc)} piezas</small></button>
+      <button class="btn btn-secondary btn-main" onclick="pdBPack('${sk}','paquetes')">${q(oc)} paquetes<small>${q(oc*n)} piezas</small></button></div>
+      <button class="link-btn" style="margin-top:0" onclick="pdBCancel()">Cancelar</button></div>`;
   } else if(editing && f){
-    const kg=r.kgpz==='Kg', m=f.motivo;
-    if(f.kind==='faltante') h+=`<div style="margin-top:10px"><div class="sep-q">¿Cuántas llegaron? ${kg?`(menos de ${q(P)} kg)`:`(de 1 a ${q(P-1)})`}</div>
+    const kg=r.kgpz==='Kg', m=f.motivo, pz=!!(r.pack && f.pz);
+    // Pack line: typed in paquetes (default) or piezas, converted to paquetes on Guardar
+    const sw=r.pack?`<div class="pk-switch"><button class="choice ${pz?'':'sel'}" onclick="pdBUnidad(false)">Paquetes</button><button class="choice ${pz?'sel':''}" onclick="pdBUnidad(true)">Piezas</button></div>`:'';
+    const lim=v=>pz?`${q(v*r.pack)} piezas`:r.pack?pkTxt(v,r):q(v);
+    const qn=r.pack?(pz?'piezas':'paquetes'):'';
+    if(f.kind==='faltante') h+=`<div style="margin-top:10px"><div class="sep-q">¿Cuánt${qn==='paquetes'?'os':'as'} ${qn?qn+' ':''}llegaron? ${kg?`(menos de ${q(P)} kg)`:`(de 0 a ${lim(P-1)})`}</div>${sw}
         <input id="pdb-n" class="text-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}" onkeydown="if(event.key==='Enter')pdBGuardar('${sk}')">
         `;
     else h+=`<div style="margin-top:10px"><div class="sep-q">¿Por qué?</div>
         <div class="sep-btns">${Object.entries(PD_MOTIVO).map(([k,n])=>`<button class="choice ${m===k?'sel':''}" onclick="pdBMotivo('${k}')">${n[0].toUpperCase()+n.slice(1)}</button>`).join('')}</div>
-        <div class="sep-q" style="margin-top:8px">¿Cuántas rechazaste? (de 1 a ${q(P)} ${u})</div>
+        <div class="sep-q" style="margin-top:8px">¿Cuánt${qn==='paquetes'?'os':'as'} ${qn?qn+' ':''}rechazaste? (de 1 a ${r.pack?lim(P):q(P)+' '+u})</div>${sw}
         <input id="pdb-n" class="text-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" placeholder="${kg?'0.00':'0'}" onkeydown="if(event.key==='Enter')pdBGuardar('${sk}')">
-        <button class="corr-btn" style="margin-top:6px" onclick="pdBTodas('${sk}')">Todas (${q(P)} ${u})</button>`;
+        <button class="corr-btn" style="margin-top:6px" onclick="pdBTodas('${sk}')">Todas (${r.pack?pkPlano(P,r):q(P)+' '+u})</button>`;
     h+=`<div class="qty-err" id="pdb-err"></div>
         <div class="pcard-actions" style="grid-template-columns:1fr 1fr;margin-top:4px"><button class="btn btn-secondary" onclick="pdBCancel()">Cancelar</button><button class="btn btn-primary" onclick="pdBGuardar('${sk}')">Guardar</button></div></div>`;
   } else if(editing){
@@ -3110,40 +3163,57 @@ function pdBKeepInput(fn){
 }
 function pdBTap(sku, kind){
   const l=S.lines.get(sku); if(!l || S.closedInfo) return;
+  // Pack line with an OC number that's a multiple of N: paquetes or piezas first (pdBPack comes back here)
+  if(pdPackInfo(l).falta){ S.pdPackQ={ sku, kind }; S.pdForm=null; pdBRerender(); return; }
   const T=pdObjDe(sku);
   if(kind==='completo'){ pdMarcar(sku, 'completo', { recibido:T }); toast(`✓ Completo · ${l.producto}`); return; }
-  if(kind==='excedente'){ pdMarcar(sku, 'excedente', { recibido:T }); toast(`✓ Recibe ${fmtQty(T,l.kgpz)} ${unitOf(l.kgpz)} · lo de más regrésalo al camión`, 4000); return; }
+  if(kind==='excedente'){ pdMarcar(sku, 'excedente', { recibido:T }); toast(`✓ Recibe ${pkPlano(T,pdLineaPk(l))} · lo de más regrésalo al camión`, 4000); return; }
   if(kind==='nollego'){ pdMarcar(sku, 'faltante', { recibido:0, llegaron:0, faltan:T }); toast(`✓ ${l.producto}: no llegó`); return; }
   // No autofocus: the receptor taps the field when they need the keyboard (live test, 2026-11-18)
-  S.pdForm={ sku, kind, motivo:null }; pdBRerender();
+  S.pdForm={ sku, kind, motivo:null, pz:false }; pdBRerender();
 }
+function pdBPack(sku, en){
+  const l=S.lines.get(sku), k=S.pdPackQ && S.pdPackQ.sku===sku ? S.pdPackQ.kind : null; if(!l || !k) return;
+  (S.pdPackAns||(S.pdPackAns=new Map())).set(sku, { en, oc:l.esperado });
+  S.pdPackQ=null; pdBTap(sku, k);
+}
+function pdBUnidad(pz){ if(!S.pdForm) return; S.pdForm.pz=!!pz; pdBKeepInput(pdBRerender); }
 function pdMarcar(sku, marca, extra){
   const l=S.lines.get(sku); if(!l) return;
-  const ci=S.pdCod && S.pdCod.sku===sku && S.pdCod.ci;
+  const ci=S.pdCod && S.pdCod.sku===sku && S.pdCod.ci, pk=pdPackInfo(l);
+  // Pack line: quantities are paquetes; pedido stays the OC's own number, pedido_ret is it in paquetes
+  const pkd=pk.n && !pk.falta ? { pack_n:pk.n, pedido_en:pk.en, pedido_ret:pk.P, pack_pregunta:pk.pregunta||undefined } : {};
   recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:l.producto, cantidad:extra.recibido, metodo:ci?'codigo_incorrecto':'boton',
-    detalle:Object.assign({ marca, pedido:l.esperado, kgpz:l.kgpz }, pdFacMapa()?{ objetivo:pdObjDe(sku), nofac:!pdFacMapa().has(sku)||undefined }:{}, extra, ci||{}) }));
-  S.pdEdit=null; S.pdForm=null; S.pdFoco=null; S.pdCod=null; pdBRerender(); if(screenActive('screen-recibir')) focusScan();
+    detalle:Object.assign({ marca, pedido:l.esperado, kgpz:l.kgpz }, pkd, pdFacMapa()?{ objetivo:pdObjDe(sku), nofac:!pdFacMapa().has(sku)||undefined }:{}, extra, ci||{}) }));
+  if(S.pdPackAns) S.pdPackAns.delete(sku);
+  S.pdEdit=null; S.pdForm=null; S.pdFoco=null; S.pdCod=null; S.pdPackQ=null; pdBRerender(); if(screenActive('screen-recibir')) focusScan();
 }
 function pdBGuardar(sku){
   const f=S.pdForm, l=S.lines.get(sku), i=document.getElementById('pdb-n'), err=document.getElementById('pdb-err'); if(!f || !l || !i) return;
-  const P=pdObjDe(sku), q=v=>fmtQty(v,l.kgpz), u=unitOf(l.kgpz);
+  const P=pdObjDe(sku), L=pdLineaPk(l), N=L.pack, pz=!!(N && f.pz), q=v=>fmtQty(v,l.kgpz), u=unitOf(l.kgpz);
+  const T=v=>pz?`${q(v*N)} piezas`:N?pkTxt(v,L):`${q(v)} ${u}`;
+  // Pack line typed in piezas: whole paquetes only, converted (capturado_pz keeps what was typed)
+  const leer=zero=>{ const v=parseQty(i.value, l.kgpz, zero); if(v==null || !pz) return { n:v };
+    const c=packDePiezas(v, N); return c==null ? { mal:`${q(v)} piezas no son paquetes completos: cada paquete trae ${N}. Escribe un múltiplo de ${N} o cámbialo a Paquetes.` } : { n:c, capturado_pz:v }; };
   if(f.kind==='faltante'){
-    const n=parseQty(i.value, l.kgpz, true);
-    if(n==null || n>=P){ err.textContent = n!=null && n>=P ? `Llegó todo lo pedido: usa Completo${n>P?' o Excedente':''}.` : `Escribe cuántas llegaron: ${l.kgpz==='Kg'?`menos de ${q(P)} kg`:`de 0 a ${q(P-1)}`}.`; i.focus(); return; }
-    pdMarcar(sku, 'faltante', { recibido:n, llegaron:n, faltan:round2(P-n) });
-    toast(`✓ ${l.producto}: ${n>0?`llegaron ${q(n)} ${u}`:'no llegó'}`);
+    const x=leer(true), n=x.n;
+    if(x.mal){ err.textContent=x.mal; i.focus(); return; }
+    if(n==null || n>=P){ err.textContent = n!=null && n>=P ? `Llegó todo lo pedido: usa Completo${n>P?' o Excedente':''}.` : `Escribe cuánt${N&&!pz?'os':'as'} llegaron: ${l.kgpz==='Kg'?`menos de ${q(P)} kg`:`de 0 a ${T(P-1)}`}.`; i.focus(); return; }
+    pdMarcar(sku, 'faltante', Object.assign({ recibido:n, llegaron:n, faltan:round2(P-n) }, x.capturado_pz!=null?{ capturado_pz:x.capturado_pz }:{}));
+    toast(`✓ ${l.producto}: ${n>0?`llegaron ${N?pkPlano(n,L):q(n)+' '+u}`:'no llegó'}`);
   } else {
     if(!f.motivo){ err.textContent='Elige por qué: fecha corta o dañada.'; return; }
-    const n=parseQty(i.value, l.kgpz);
-    if(n==null || n>P){ err.textContent=`Escribe cuántas rechazaste: de 1 a ${q(P)} ${u}.`; i.focus(); return; }
-    pdMarcar(sku, 'rechazo', { recibido:round2(P-n), rechazadas:n, motivo:f.motivo });
-    toast(`✓ ${l.producto}: ${q(n)} ${u} rechazadas`);
+    const x=leer(false), n=x.n;
+    if(x.mal){ err.textContent=x.mal; i.focus(); return; }
+    if(n==null || n>P){ err.textContent=`Escribe cuánt${N&&!pz?'os':'as'} rechazaste: de 1 a ${T(P)}.`; i.focus(); return; }
+    pdMarcar(sku, 'rechazo', Object.assign({ recibido:round2(P-n), rechazadas:n, motivo:f.motivo }, x.capturado_pz!=null?{ capturado_pz:x.capturado_pz }:{}));
+    toast(`✓ ${l.producto}: ${N?pkPlano(n,L):q(n)+' '+u} rechazad${N?'os':'as'}`);
   }
 }
-function pdBTodas(sku){ const l=S.lines.get(sku), i=document.getElementById('pdb-n'); if(l && i){ i.value=fmtQty(pdObjDe(sku),l.kgpz); if(S.pdForm.motivo) pdBGuardar(sku); else document.getElementById('pdb-err').textContent='Elige por qué: fecha corta o dañada.'; } }
+function pdBTodas(sku){ const l=S.lines.get(sku), i=document.getElementById('pdb-n'); if(l && i){ const N=pdLineaPk(l).pack, P=pdObjDe(sku); i.value=fmtQty(N && S.pdForm.pz?P*N:P,l.kgpz); if(S.pdForm.motivo) pdBGuardar(sku); else document.getElementById('pdb-err').textContent='Elige por qué: fecha corta o dañada.'; } }
 function pdBMotivo(k){ if(!S.pdForm) return; S.pdForm.motivo=k; pdBKeepInput(pdBRerender); }
-function pdBCancel(){ S.pdForm=null; S.pdEdit=null; pdBRerender(); }
-function pdBCambiar(sku){ S.pdEdit=sku; S.pdForm=null; pdBRerender(); }
+function pdBCancel(){ S.pdForm=null; S.pdEdit=null; S.pdPackQ=null; pdBRerender(); }
+function pdBCambiar(sku){ S.pdEdit=sku; S.pdForm=null; S.pdPackQ=null; pdBRerender(); }
 function pdBSiguiente(){ S.pdFoco=null; S.pdCod=null; pdBRerender(); focusScan(); }
 function pdBQuitarPns(sku){
   const e=pdMarcas().get(sku); if(!e) return;
@@ -3151,7 +3221,7 @@ function pdBQuitarPns(sku){
   recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:e.producto, metodo:'boton', detalle:{ marca:'quitado', kgpz:e.detalle.kgpz||'Pz' } }));
   pdBRerender();
 }
-function pdBTab(t){ S.pdTab=t; S.pdForm=null; S.pdEdit=null; if(t!=='scan'){ S.pdFoco=null; S.pdCod=null; } pdBListRender(); if(t==='scan') focusScan(); }
+function pdBTab(t){ S.pdTab=t; S.pdForm=null; S.pdEdit=null; S.pdPackQ=null; if(t!=='scan'){ S.pdFoco=null; S.pdCod=null; } pdBListRender(); if(t==='scan') focusScan(); }
 // Recibir: scan-first by default (many products share presentations, so the receptor confirms what they hold, not a
 // row picked from a list). «Pendientes» / «Todos» open the order as a list with a search, for products without a code.
 function pdBListRender(){
@@ -3185,7 +3255,7 @@ function pdBScan(r, code){
   if(r && r.line){
     // A line off the invoice that showed up: open its buttons straight away (received + reported)
     const fm=pdFacMapa(), off=fm && !fm.has(r.line.sku_key) && !pdMarcas().get(r.line.sku_key);
-    vibrate(true); S.pdFoco=r.line.sku_key; S.pdCod={ sku:r.line.sku_key, codigo:code, sistema:r.line }; S.pdEdit=off?r.line.sku_key:null; S.pdForm=null; S.pdTab='scan'; document.getElementById('pd-q').value='';
+    vibrate(true); S.pdFoco=r.line.sku_key; S.pdCod={ sku:r.line.sku_key, codigo:code, sistema:r.line }; S.pdEdit=off?r.line.sku_key:null; S.pdForm=null; S.pdPackQ=null; S.pdTab='scan'; document.getElementById('pd-q').value='';
     pdBListRender();
     const el=document.querySelector('.pdb-row.foco'); if(el) el.scrollIntoView({ block:'nearest', behavior:'smooth' });
     return;
@@ -3221,7 +3291,7 @@ function pdBPick(h, mal, det){
     S.pdCod=null;
   } else S.pdCod=ci ? { sku, ci } : null;
   const fm=h.env && pdFacMapa(), off=fm && !fm.has(sku) && !pdMarcas().get(sku);
-  vibrate(true); S.pdFoco=sku; S.pdEdit=off?sku:null; S.pdForm=null; S.pdTab='scan'; document.getElementById('pd-q').value='';
+  vibrate(true); S.pdFoco=sku; S.pdEdit=off?sku:null; S.pdForm=null; S.pdPackQ=null; S.pdTab='scan'; document.getElementById('pd-q').value='';
   renderRecibir();
   const el=document.querySelector('.pdb-row.foco'); if(el) el.scrollIntoView({ block:'nearest', behavior:'smooth' });
 }
@@ -3253,7 +3323,8 @@ function pdBRenderResumen(){
 // Facturar list as Código · Producto · Recibido, tab-separated, to type it in the system
 async function pdCopiarFacturar(){
   const rows=pdRows().filter(r=>r.rec>0);
-  const txt=['Código\tProducto\tRecibido\tUnd'].concat(rows.map(r=>[r.barcode, r.producto, fmtQty(r.rec,r.kgpz), unitOf(r.kgpz)].join('\t'))).join('\n');
+  // Recibido is what Retool counts: paquetes on a pack line (the piezas go in Und, as a reminder)
+  const txt=['Código\tProducto\tRecibido\tUnd'].concat(rows.map(r=>[r.barcode, r.producto, fmtQty(r.rec,r.kgpz), r.pack?`${pkU(r.rec,r)} (${fmtQty(r.rec*r.pack,'Pz')} piezas)`:unitOf(r.kgpz)].join('\t'))).join('\n');
   try{ await navigator.clipboard.writeText(txt); }
   catch(_){ const t=document.createElement('textarea'); t.value=txt; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
   toast('✓ Lista copiada');
@@ -3306,17 +3377,17 @@ function pdQuestionHtml(r){
 function pdCamionHtml(rows){
   const dev=[], fal=[], fac=rows.filter(r=>r.rec>0), fm=pdFacMapa();
   for(const r of rows){
-    const u=unitOf(r.kgpz), q=v=>fmtQty(v,r.kgpz);
-    if(r.exc>0) dev.push(`${escapeHtml(r.producto)}: <b>${q(r.exc)} ${u}</b> ${r.pns?'no solicitado':'excedente'}`);
+    const T=v=>pkTxt(v,r);
+    if(r.exc>0) dev.push(`${escapeHtml(r.producto)}: <b>${T(r.exc)}</b> ${r.pns?'no solicitado':'excedente'}`);
     else if(r.excFlag) dev.push(`${escapeHtml(r.producto)}: <b>lo que llegó de más</b> (excedente)`);
     else if(r.pns) dev.push(`${escapeHtml(r.producto)}: <b>${r.fsp?'facturado sin pedir':'no solicitado'}</b>`);
-    if(r.rech>0) dev.push(`${escapeHtml(r.producto)}: <b>${q(r.rech)} ${u}</b> ${PD_MOTIVO[r.motivo]||r.motivo}`);
+    if(r.rech>0) dev.push(`${escapeHtml(r.producto)}: <b>${T(r.rech)}</b> ${PD_MOTIVO[r.motivo]||r.motivo}`);
     if(fm){ // factura primero: the invoice was compared at the start
-      if(r.faltFis>0) fal.push(`${escapeHtml(r.producto)}: <b>cobra ${q(r.faltFis)} ${u} que no llegaron</b>`);
-      if(r.rech>0 && !r.sinFac) fal.push(`${escapeHtml(r.producto)}: <b>cobra ${q(r.rech)} ${u} rechazadas</b> (${PD_MOTIVO[r.motivo]||r.motivo})`);
-      if(r.deMas>0) fal.push(`${escapeHtml(r.producto)}: <b>cobra ${q(r.deMas)} ${u} más de lo pedido</b>`);
-      if(r.sinFac && r.rec>0) fal.push(`${escapeHtml(r.producto)}: <b>llegaron ${q(r.rec)} ${u} sin facturar</b> (que lo agreguen)`);
-    } else if(r.falt>0 && r.ack) fal.push(`${escapeHtml(r.producto)}: <b>faltan ${q(r.falt)} ${u}</b>`);
+      if(r.faltFis>0) fal.push(`${escapeHtml(r.producto)}: <b>cobra ${T(r.faltFis)} que no llegaron</b>`);
+      if(r.rech>0 && !r.sinFac) fal.push(`${escapeHtml(r.producto)}: <b>cobra ${T(r.rech)} rechazadas</b> (${PD_MOTIVO[r.motivo]||r.motivo})`);
+      if(r.deMas>0) fal.push(`${escapeHtml(r.producto)}: <b>cobra ${T(r.deMas)} más de lo pedido</b>`);
+      if(r.sinFac && r.rec>0) fal.push(`${escapeHtml(r.producto)}: <b>llegaron ${T(r.rec)} sin facturar</b> (que lo agreguen)`);
+    } else if(r.falt>0 && r.ack) fal.push(`${escapeHtml(r.producto)}: <b>faltan ${T(r.falt)}</b>`);
   }
   if(fm) for(const x of (pdFacIni().detalle.no_solicitados||[])) fal.push(`${escapeHtml(x.producto)}: <b>no está en la OC</b> (que lo quiten)`);
   let h=`<div class="section-title" style="margin-top:16px">Antes de que se vaya el camión</div>`;
@@ -3324,7 +3395,7 @@ function pdCamionHtml(rows){
   if(fm) h+=`<div class="info-card" style="margin-top:8px"><b>Corregir la factura${fal.length?' · '+fal.length:''}</b>${fal.length?fal.map(x=>`<div style="margin-top:4px">${x}</div>`).join(''):'<div class="muted">La factura cobra justo lo recibido.</div>'}</div>`;
   else if(fal.length) h+=`<div class="info-card" style="margin-top:8px"><b>Faltan: que no se facture</b>${fal.map(x=>`<div style="margin-top:4px">${x}</div>`).join('')}</div>`;
   h+=`<details class="info-card" style="margin-top:8px"><summary style="cursor:pointer"><b>Facturar · ${fac.length} producto${fac.length===1?'':'s'}</b> <span class="muted">(lo recibido, nunca más de lo pedido)</span></summary>
-    ${fac.map(r=>`<div style="margin-top:4px;display:flex;justify-content:space-between;gap:8px"><span>${escapeHtml(r.producto)}</span><b style="white-space:nowrap">${fmtQty(r.rec,r.kgpz)} ${unitOf(r.kgpz)}</b></div>`).join('')}
+    ${fac.map(r=>`<div style="margin-top:4px;display:flex;justify-content:space-between;gap:8px"><span>${escapeHtml(r.producto)}</span><span style="white-space:nowrap;text-align:right"><b>${pkTxt(r.rec,r)}</b>${r.pack?`<br>${pkNota(r.rec,r)}`:''}</span></div>`).join('')}
     <button class="btn btn-secondary btn-block" style="margin-top:10px;background:var(--c-white)" onclick="pdCopiarFacturar()">Copiar lista para el sistema</button></details>`;
   return h;
 }
@@ -3380,13 +3451,15 @@ function pdExcResumen(sku){
   recordEvent(makeEvent('confirmacion', { sku_key:sku, producto:r.producto, cantidad:r.count, detalle:{ excedente:true, recibido:r.count, pedido:r.pedido, separar:r.porSeparar, kgpz:r.kgpz } }));
   renderResumen();
 }
-const PD_REPORT_COLS=['Hub','Proveedor','Orden de compra','Fecha','Receptor(es)','Código','Producto','Und','Pedido','Recibido','Excedente','Rechazadas','Motivo','Faltante','Facturar','Caducidad mínima','Temp','Estado','Notas'];
+// Pack lines (Und «Paquete»): every quantity in paquetes; «Paquete de» = piezas per paquete, «Pedido en OC» = the OC's own
+// number when comercial wrote it in piezas
+const PD_REPORT_COLS=['Hub','Proveedor','Orden de compra','Fecha','Receptor(es)','Código','Producto','Und','Pedido','Recibido','Excedente','Rechazadas','Motivo','Faltante','Facturar','Caducidad mínima','Temp','Estado','Notas','Paquete de','Pedido en OC'];
 function pdBuildReportCsv(rows, receptores){
   const o=S.envio.orden, head=PD_REPORT_COLS.map(csvCell).join(',');
   const body=rows.map(r=>{ const q=v=>fmtQty(v,r.kgpz);
-    return [hubName(S.hub), o.proveedor, o.num_oc.join(', '), S.session.fecha, receptores.join(', '), r.barcode, r.producto, r.kgpz,
+    return [hubName(S.hub), o.proveedor, o.num_oc.join(', '), S.session.fecha, receptores.join(', '), r.barcode, r.producto, r.pack?'Paquete':r.kgpz,
       q(r.pedido), q(r.rec), r.exc?q(r.exc):r.excFlag?'Sí':'', r.rech?q(r.rech):'', r.rech?(PD_MOTIVO[r.motivo]||r.motivo):'', r.falt?q(r.falt):'', q(r.rec),
-      r.cad?dmy(r.cad):'', tempLabel(r.temp), r.estado, notasDe(r.sku, r.kgpz)].map(csvCell).join(','); });
+      r.cad?dmy(r.cad):'', tempLabel(r.temp), r.estado, notasDe(r.sku, r.kgpz), r.pack||'', r.pack&&r.pedidoEn==='piezas'?`${fmtQty(r.pedidoOc,'Pz')} piezas`:''].map(csvCell).join(','); });
   return [head].concat(body).join('\r\n')+'\r\n';
 }
 // Every order line (+ no solicitados) on the cerrar event, so Admin → Proveedores computes fill rate from rec_events
@@ -3394,7 +3467,10 @@ function pdBuildReportCsv(rows, receptores){
 function pdLineasTodas(rows){
   return rows.map(r=>({ sku_key:r.sku, producto:r.producto, kgpz:r.kgpz, pedido:r.pedido, contado:r.count, recibido:r.rec,
     excedente:r.exc||(r.excFlag?true:undefined), rechazadas:r.rech||undefined, motivo:r.rech?(r.motivo||undefined):undefined,
-    faltante:r.falt||undefined, no_solicitado:r.pns||undefined }));
+    faltante:r.falt||undefined, no_solicitado:r.pns||undefined,
+    // pack line: quantities above are paquetes; pedido_oc = the OC's number when it differs (written in piezas)
+    pack_n:r.pack||undefined, pedido_en:r.pack?r.pedidoEn||undefined:undefined, pedido_oc:r.pack&&r.pedidoOc!==r.pedido?r.pedidoOc:undefined,
+    pack_pregunta:r.pack&&r.packPregunta||undefined, pack_dudoso:r.packDudoso||undefined }));
 }
 function pdCerrarDetalle(rows, path, receptores, cambioIgnorado){
   const o=S.envio.orden, difs=rows.filter(r=>r.dif);
@@ -3415,7 +3491,7 @@ async function pdCargarSesion(info){
     const env=JSON.parse(await sbFetch(info.envio)); env._path=info.envio;
     S.hub=info.hub; S.area=info.area; S.receptor=INI.receptor||info.receptor;
     S.session={ id:info.session_id, fecha:info.fecha }; setEnvio(env);
-    S.events=[]; S.eventUids=new Set(); S.lastId=0; S.resumenOrder=new Map(); S.current=null; S.corrigiendo=null; S.pdEdit=S.pdForm=S.pdFoco=S.pdCod=null;
+    S.events=[]; S.eventUids=new Set(); S.lastId=0; S.resumenOrder=new Map(); S.current=null; S.corrigiendo=null; S.pdEdit=S.pdForm=S.pdFoco=S.pdCod=S.pdPackQ=null; S.pdPackAns=new Map();
     addEvents(OUTBOX.filter(e=>e.session_id===info.session_id));
   }
   // A full read that throws: a correction must never rebuild the report from half the events
@@ -3430,7 +3506,7 @@ function rvCorrCancel(){ RV.corr=null; renderRecepcionRows(); }
 async function rvCorrGuardar(i){
   const r=RV.rows.find(x=>x.i===i), inp=document.getElementById('rv-corr-n'), err=document.getElementById('rv-corr-err'); if(!r || !inp || RV.corrBusy) return;
   const n=parseQty(inp.value, r.kgpz, true);
-  if(n==null || n>r.env){ err.textContent=`Escribe cuántas recibiste al final: de 0 a ${fmtQty(r.env,r.kgpz)} ${unitOf(r.kgpz)}. Lo de más se regresa.`; return; }
+  if(n==null || n>r.env){ err.textContent=`Escribe cuánt${r.pack?'os paquetes':'as'} recibiste al final: de 0 a ${pkTxt(r.env,r)}. Lo de más se regresa.`; return; }
   if(round2(n)===round2(r.rec)){ rvCorrCancel(); return; }
   RV.corrBusy=true; renderRecepcionRows();
   const I=RV.info, from=RV.from;
@@ -3448,7 +3524,7 @@ async function rvCorrGuardar(i){
     const det=Object.assign(pdCerrarDetalle(rows, I.reporte, receptoresDeSesion(), I.orden_cambio_ignorado),
       { correccion:{ sku_key:sku, producto:l.producto, antes:r.rec, despues:Math.min(n,P) } });
     const ev=makeEvent('cerrar', { detalle:det }); recordEvent(ev); S.closedInfo=closedState(); await flushAndWait();
-    toast(`✓ ${l.producto}: recibido ${fmtQty(Math.min(n,P),l.kgpz)} ${unitOf(l.kgpz)}`, 3500);
+    toast(`✓ ${l.producto}: recibido ${pkPlano(Math.min(n,P),pdLineaPk(l))}`, 3500);
     // The CSV goes in by hand: the storage CDN can still serve the old report for a while after an overwrite
     openRecepcion(Object.assign({ ts:I.ts, fecha:I.fecha, hub:I.hub, area:I.area, session_id:I.session_id, receptor:I.receptor }, det), from, { recomparar:true, csv });
   }catch(e){
@@ -3719,7 +3795,7 @@ function personaTag(nombre){ const k=Object.keys(SLACK_PERSONAS).find(x=>sameNam
 // Proveedor directo (proveedorDirecto-plan §4, §6.4): header, one §4 line per product with a difference, then the
 // supplier's Comercial and Comprador (their Slack tag from Admin → Slack, else the plain name). Names only, never phones.
 function pdSlackMensaje(info, rvRows, orden){
-  const u=r=>r.kgpz==='Kg'?' kg':'', q=(v,r)=>fmtQty(v,r.kgpz)+u(r);
+  const u=r=>r.kgpz==='Kg'?' kg':'', q=(v,r)=>r.pack?pkPlano(v,r):fmtQty(v,r.kgpz)+u(r);
   const difs=rvRows.filter(r=>r.pns || !/^Completo/.test(r.estado));
   const quien=(info.receptores||[info.receptor]).filter(Boolean).join(', ');
   const out=[`*${hubName(info.hub)} · ${info.proveedor||areaName(info.area)} · entrega ${fechaLarga(info.fecha)}*${info.num_oc&&info.num_oc.length?' · OC '+info.num_oc.join(', '):''}: ${difs.length?`${difs.length} producto(s) con diferencia`:'llegó completo'}${quien?' · recibió '+quien:''}`];
@@ -3897,12 +3973,12 @@ async function openRecepcion(info, from, opts={}){
   const p=Papa.parse(stripBOM(csv), { header:true, skipEmptyLines:true });
   const pdRep=(p.meta.fields||[]).includes('Pedido'); // supplier report (Phase 5 gives it its own Retool view)
   const rows=(p.data||[]).filter(r=>!pdRep || pickCol(r,'Estado')!==FAC_ESTADO_SIN_PEDIR).map((r,i)=>{ const g=n=>pickCol(r, n)||'';
-    if(pdRep){ const ped=parseNum(g('Pedido')), rec=parseNum(g('Recibido')), kgpz=g('Und')==='Kg'?'Kg':'Pz', u=unitOf(kgpz);
-      const excFlag=g('Excedente')==='Sí', extra=[excFlag?'Llegó excedente (rechazado)':g('Excedente')?`Excedente ${g('Excedente')} ${u} (devuelto)`:'', g('Rechazadas')?`Rechazadas ${g('Rechazadas')} ${u} (${g('Motivo')})`:'', g('Faltante')?`Faltan ${g('Faltante')} ${u}`:''].filter(Boolean);
+    if(pdRep){ const ped=parseNum(g('Pedido')), rec=parseNum(g('Recibido')), kgpz=g('Und')==='Kg'?'Kg':'Pz', pack=parseNum(g('Paquete de'))||0, U=v=>pkTxt(v,{ kgpz, pack });
+      const excFlag=g('Excedente')==='Sí', extra=[excFlag?'Llegó excedente (rechazado)':g('Excedente')?`Excedente ${U(parseNum(g('Excedente')))} (devuelto)`:'', g('Rechazadas')?`Rechazadas ${U(parseNum(g('Rechazadas')))} (${g('Motivo')})`:'', g('Faltante')?`Faltan ${U(parseNum(g('Faltante')))}`:'', g('Pedido en OC')?`La OC lo pidió como ${g('Pedido en OC')}`:''].filter(Boolean);
       return { i, producto:g('Producto'), barcode:g('Código'), kgpz, pos:'', pasillo:'', armado:'', env:ped, rec, dif:round2(rec-ped), estado:g('Estado'), acum:null,
         corta:0, cad:g('Caducidad mínima'), dan:0, notas:extra.concat(g('Notas')||[]).join(' · '), _n:normName(g('Producto')), pd:true,
         exc:excFlag?0:parseNum(g('Excedente'))||0, excFlag, rech:parseNum(g('Rechazadas'))||0, motivo:g('Motivo'), falt:parseNum(g('Faltante'))||0, fac:parseNum(g('Facturar'))||0,
-        pns:g('Estado')==='No solicitado', temp:g('Temp') }; }
+        pns:g('Estado')==='No solicitado', temp:g('Temp'), pack }; }
     const pos=g('Posición'), kgpz=g('Kg/Pz')==='Kg'?'Kg':'Pz';
     return { i, producto:g('Producto'), barcode:g('Código de barras'), kgpz, pos, pasillo:(pos.split(/[-·\s]/)[0]||'').trim(), armado:g('Armado'),
       env:parseNum(g('Enviado')), rec:parseNum(g('Recibido')), dif:parseNum(g('Diferencia')), estado:info.parcial?'Entrega '+info.entrega:g('Estado'),
@@ -3986,20 +4062,20 @@ function renderRecepcionRows(){
     return `<div class="sum-row ${on?'ticked':''} ${r.acum!=null||/^Completo/.test(r.estado)?'':'delta'}"><div class="ritem-row">
       <input type="checkbox" class="chk" ${on?'checked':''} onchange="rvTick(${r.i})">${imgTag(r.barcode, r.producto, 'thumb')}
       <div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div><div class="ritem-meta">${escapeHtml(r.barcode||'sin código')}${r.pos?' · '+escapeHtml(r.pos):''}${r.corta>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(r.corta,r.kgpz)} ${u} fecha corta · separar para MNA</span>`:''}${r.dan>0?` · <span style="color:var(--orange);font-weight:700">${fmtQty(r.dan,r.kgpz)} ${u} dañadas · separar para MNA</span>`:''}</div></div>
-      <div style="text-align:right"><div style="font-size:30px;font-weight:800;color:var(--green-dark)">${fmtQty(r.rec,r.kgpz)}</div><div class="ritem-meta">${u} recibido</div></div></div>
-      ${r.acum!=null?`<div class="ritem-meta" style="margin-top:4px">Acumulado en la recepción: ${fmtQty(r.acum,r.kgpz)} ${u}</div>`:`<div class="ritem-meta" style="margin-top:4px">${r.pd?'Pedido':'Enviado'} ${fmtQty(r.env,r.kgpz)}${r.armado&&r.armado!=='—'?' · Armado '+escapeHtml(r.armado):''} · Dif ${r.dif>0?'+':''}${fmtQty(r.dif,r.kgpz)} · <span class="estado ${ESTADO_CLS[r.estado]||PD_ESTADO_CLS[r.estado]||'mid'}">${escapeHtml(r.estado)}</span></div>`}
+      <div style="text-align:right"><div style="font-size:30px;font-weight:800;color:var(--green-dark)">${fmtQty(r.rec,r.kgpz)}</div><div class="ritem-meta">${r.pack?pkU(r.rec,r):u} recibido${r.pack?`<br>${pkNota(r.rec,r)}`:''}</div></div></div>
+      ${r.acum!=null?`<div class="ritem-meta" style="margin-top:4px">Acumulado en la recepción: ${fmtQty(r.acum,r.kgpz)} ${u}</div>`:`<div class="ritem-meta" style="margin-top:4px">${r.pd?'Pedido':'Enviado'} ${r.pack?pkTxt(r.env,r):fmtQty(r.env,r.kgpz)}${r.armado&&r.armado!=='—'?' · Armado '+escapeHtml(r.armado):''} · Dif ${r.dif>0?'+':''}${fmtQty(r.dif,r.kgpz)} · <span class="estado ${ESTADO_CLS[r.estado]||PD_ESTADO_CLS[r.estado]||'mid'}">${escapeHtml(r.estado)}</span></div>`}
       ${r.notas?`<div class="ritem-meta">${escapeHtml(r.notas)}</div>`:''}${rvCorrHtml(r)}</div>`; }).join('') || `<div class="empty-hint">${vista==='dif'&&!difs.length?`Sin diferencias: todo llegó igual a lo ${RV.pd?'pedido':'enviado'}.`:'Nada coincide con el filtro.'}</div>`;
   const dv=devueltos.filter(r=>!words.length || words.every(w=>r._n.includes(w)));
   if(dv.length) document.getElementById('rv-rows').insertAdjacentHTML('beforeend', `<div class="section-title" style="margin-top:16px">No solicitados · ${dv.length}</div>
     <div class="muted" style="margin-bottom:8px">Se regresaron al proveedor. No se registran en el sistema.</div>`
     +dv.map(r=>`<div class="sum-row"><div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
-      <div class="ritem-meta">${escapeHtml(r.barcode||'sin código')} · ${r.exc?`${fmtQty(r.exc,r.kgpz)} ${unitOf(r.kgpz)} devueltas`:'devuelto'}</div></div></div></div>`).join(''));
+      <div class="ritem-meta">${escapeHtml(r.barcode||'sin código')} · ${r.exc?`${pkTxt(r.exc,r)} devuelt${r.pack?'os':'as'}`:'devuelto'}</div></div></div></div>`).join(''));
 }
 function rvCorrHtml(r){
   if(!r.pd || !rvEditable()) return '';
   if(RV.corr!==r.i) return `<button class="corr-btn" style="margin-top:6px" onclick="rvCorr(${r.i})">Corregir lo recibido</button>`;
   const kg=r.kgpz==='Kg', u=unitOf(r.kgpz);
-  return `<div class="rv-corr"><div class="sep-q">¿Cuántas recibiste al final? (pedido ${fmtQty(r.env,r.kgpz)} ${u})</div>
+  return `<div class="rv-corr"><div class="sep-q">¿Cuánt${r.pack?'os paquetes':'as'} recibiste al final? (pedido ${r.pack?pkPlano(r.env,r):fmtQty(r.env,r.kgpz)+' '+u})</div>
     <input id="rv-corr-n" class="text-input" type="text" inputmode="${kg?'decimal':'numeric'}" autocomplete="off" value="${fmtQty(r.rec,r.kgpz)}" onkeydown="if(event.key==='Enter')rvCorrGuardar(${r.i})">
     <div class="qty-err" id="rv-corr-err"></div>
     <div class="pcard-actions" style="grid-template-columns:1fr 1fr;margin-top:6px"><button class="btn btn-secondary" ${RV.corrBusy?'disabled':''} onclick="rvCorrCancel()">Cancelar</button><button class="btn btn-primary" ${RV.corrBusy?'disabled':''} onclick="rvCorrGuardar(${r.i})">${RV.corrBusy?'Guardando…':'Guardar'}</button></div>
@@ -4033,7 +4109,7 @@ function fdrNs(d, r){
 function fdrItems(rows, d=fdrFac()){
   const out=[], by=d?new Map((d.lineas||[]).map(x=>[x.sku_key, x])):null;
   for(const r of rows){
-    const q=v=>`${fmtQty(v,r.kgpz)} ${unitOf(r.kgpz)}`, x=by && by.get(rvSkuOf(r));
+    const q=v=>r.pack?pkPlano(v,r):`${fmtQty(v,r.kgpz)} ${unitOf(r.kgpz)}`, x=by && by.get(rvSkuOf(r));
     if(r.rech>0 && !r.pns && (!by || x)){ const fc=/corta/i.test(r.motivo);
       out.push({ r, cant:q(r.rech), motivo:fc?'Fecha corta':/da[ñn]/i.test(r.motivo)?'Producto dañado':(r.motivo||'Calidad'), obs:fc&&r.cad?`Caducidad mínima aceptada: ${r.cad}`:'' }); }
     if(!by) continue;
@@ -4102,6 +4178,36 @@ function descargarReporte(){
 // Exactly Invoice Reader's normCode (lean/match.ts): uppercase, keep 0-9A-Z, strip leading zeros of all-digit codes.
 function facNormCode(v){ const s=String(v==null?'':v).toUpperCase().replace(/[^0-9A-Z]/g,''); return /^\d+$/.test(s)?s.replace(/^0+(?=\d)/,''):s; }
 function facR2(n){ return Math.round(Number(n)*100)/100; }
+/* Paquetes (2026-11-23, Jose). Retool counts the Masterview item, and the pack size lives only in its name. packOf is a
+   copy of Invoice Reader's (lean/match.ts; keep the regexes identical):
+     pack      «(12-pack)», «4 Pack», «3-pack»: 1 Retool unit = 1 paquete of N piezas. Only these lines change here.
+     contenido «caja 18pz», «6pz», «10 sobres»: one unit holds N, but the receptor counts it as one. No question, shown as before.
+   N = 1 and ranges («5-7 pz») are not counts. */
+function facFold(s){ return String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase(); }
+function packOf(name){
+  const f=facFold(name);
+  const pack=f.match(/(?<![\d.,-])(\d+)\s*-?\s*(?:pack|pk|mpk)\b/);
+  if(pack && +pack[1]>1) return { n:+pack[1], kind:'pack' };
+  const inside=f.match(/(?<![\d.,]|\d\s?-\s?)(\d+)\s*(?:pz|pzs|pza|pzas|piezas|sobres|rollos|latas|botellas|paquetes)\b/);
+  if(inside && +inside[1]>1) return { n:+inside[1], kind:'contenido' };
+  return null;
+}
+// N for an N-pack line; 0 for everything else (Kg, single items, contents like «caja 18pz»)
+function packN(producto, kgpz){ if(kgpz==='Kg') return 0; const p=packOf(producto); return p && p.kind==='pack' ? p.n : 0; }
+// The OC's Pedido of a line in Retool units. Comercial writes pack lines in paquetes (Alpura, Sigma, LALA) or in piezas
+// (every Arca/FEMSA line is a multiple of N): a number that isn't a multiple of N can only be paquetes; a multiple (36 on a
+// 12-pack) needs the auxiliar's answer en ('piezas' → 3 paquetes, 'paquetes' → 36). → { P, n, en, pregunta, falta }:
+// pregunta = the line needs the question; falta = it wasn't answered yet (P is then null).
+function packPedido(esperado, n, en){
+  const oc=Number(esperado)||0;
+  if(!n) return { P:oc, n:0, en:null, pregunta:false, falta:false };
+  if(!oc || oc%n!==0) return { P:oc, n, en:'paquetes', pregunta:false, falta:false };
+  if(en==='piezas') return { P:oc/n, n, en, pregunta:true, falta:false };
+  if(en==='paquetes') return { P:oc, n, en, pregunta:true, falta:false };
+  return { P:null, n, en:null, pregunta:true, falta:true };
+}
+// A quantity typed in piezas, in paquetes; null when it isn't whole paquetes
+function packDePiezas(v, n){ return n>0 && Number(v)%n===0 ? Number(v)/n : null; }
 // An OC line's codes: barcode, sku_key (not a 'name:' key) and the supplier's sku_marca, normalized. matchKeys come normalized.
 function facLineKeys(l){
   const out=new Set();
@@ -4127,7 +4233,8 @@ function facComparar({ lines=[], todas=[], rows=[], picks={} }){
     if(sku){ if(!linked.has(sku)) linked.set(sku, []); linked.get(sku).push(r); continue; }
     if(pick==='no_oc' || (!hits.length && r.confident)){
       // codigos: so a scan of that product during the physical check can be told to go back (factura primero)
-      no_solicitados.push({ sourceRow:r.sourceRow, producto:nombre(r), piezas:r.piezas, sku:r.sku||null, a_mano:pick==='no_oc'||undefined, codigos:(r.matchKeys||[]).length?r.matchKeys:undefined });
+      no_solicitados.push({ sourceRow:r.sourceRow, producto:nombre(r), piezas:r.piezas, sku:r.sku||null, a_mano:pick==='no_oc'||undefined, codigos:(r.matchKeys||[]).length?r.matchKeys:undefined,
+        pack_n:r.packKind==='pack' && r.retoolUnit==='paquete' && r.packSize>1 ? r.packSize : undefined });
       continue;
     }
     // Suggestions first: the ambiguous hits, then OC lines a candidate's Masterview codes point to.
@@ -4143,8 +4250,12 @@ function facComparar({ lines=[], todas=[], rows=[], picks={} }){
   for(const [sku, rs] of linked){
     const l=bySku.get(sku).l, t=tBy.get(sku)||{};
     const pedido=facR2(t.pedido!=null?t.pedido:(l.esperado||0)), recibido=facR2(t.recibido||0);
-    const kg=(t.kgpz||l.kgpz)==='Kg', dudosa=rs.some(r=>r.piezas==null || r.quantityOk===false);
+    // Pack line: piezas come in Retool units (paquetes) from Invoice Reader's record. A row of the newer record shape
+    // (it has packKind) that doesn't say paquete (a row picked by hand, nobody sure of the product) can't be compared.
+    const kg=(t.kgpz||l.kgpz)==='Kg', pn=packN(l.producto, l.kgpz);
+    const dudosa=rs.some(r=>r.piezas==null || r.quantityOk===false || (pn>0 && 'packKind' in r && r.retoolUnit!=='paquete'));
     const x={ sku_key:sku, producto:l.producto, kgpz:kg?'Kg':'Pz', pedido, recibido, filas:rs.map(r=>r.sourceRow) };
+    if(pn){ x.pack_n=pn; const ps=rs.map(r=>r.piezasSueltas); if(ps.every(v=>v!=null)) x.piezas_sueltas=facR2(ps.reduce((s,v)=>s+Number(v),0)); }
     if(kg || dudosa){ x.revisar=kg?'kg':'cantidad'; x.facturado=dudosa?null:facR2(rs.reduce((s,r)=>s+Number(r.piezas),0)); }
     else{
       x.facturado=facR2(rs.reduce((s,r)=>s+Number(r.piezas),0));
@@ -4506,9 +4617,11 @@ async function facGuardarDetalle(detalle){
 const FAC_COLS=['Folio factura','Facturado','Revisión factura'], FAC_ESTADO_SIN_PEDIR='Facturado sin pedir';
 function facLineaTxt(x, kgpz){
   if(!x) return 'No facturado';
-  const q=v=>fmtQty(v, kgpz||x.kgpz), u=unitOf(kgpz||x.kgpz);
+  const q=v=>fmtQty(v, kgpz||x.kgpz), u=unitOf(kgpz||x.kgpz), P=v=>v===1?'paquete':'paquetes';
   if(x.revisar) return x.revisar==='kg'?'Kg: revisar a mano':'Cantidad por revisar';
-  const t=[]; if(x.de_mas>0) t.push(`Cobra ${q(x.de_mas)} ${u} de más`); if(x.no_fisico>0) t.push(`Cobra ${q(x.no_fisico)} ${u} no recibidas`);
+  const t=[];
+  if(x.pack_n){ if(x.de_mas>0) t.push(`Cobra ${q(x.de_mas)} ${P(x.de_mas)} de más`); if(x.no_fisico>0) t.push(`Cobra ${q(x.no_fisico)} ${P(x.no_fisico)} no recibido${x.no_fisico===1?'':'s'}`); }
+  else { if(x.de_mas>0) t.push(`Cobra ${q(x.de_mas)} ${u} de más`); if(x.no_fisico>0) t.push(`Cobra ${q(x.no_fisico)} ${u} no recibidas`); }
   return t.join(' · ')||'OK';
 }
 async function facReporte(I, d){
@@ -4538,22 +4651,28 @@ function facReporteCsv(csv, d){
 
 // The invoice check, in what the receptor does next: Regresar (not in the OC) and Reportar (billed but not received / above the
 // OC) as big separate blocks, then what needs a manual look (live test 2026-11-18: the small grey box hid them).
+// Invoice quantities: paquetes on a pack line (pack_n, Retool units), the piezas as the muted note; pz elsewhere
+function facQ(v, x, sueltas){
+  const n=x && x.pack_n, k=(x && x.kgpz)||'Pz';
+  if(!n) return `${fmtQty(v,k)} ${unitOf(k)}`;
+  return `${fmtQty(v,'Pz')} paquete${Math.round(Number(v))===1?'':'s'} <span class="pk-nota">= ${fmtQty(sueltas!=null?sueltas:Number(v)*n,'Pz')} piezas</span>`;
+}
 function facResultadoHtml(d){
   const u='pz', it=(a, fn)=>a.map(x=>`<div class="fac-item">${fn(x)}</div>`).join('');
   const lin=d.lineas||[], dm=lin.filter(x=>x.de_mas>0), nf=lin.filter(x=>x.no_fisico>0), rv=lin.filter(x=>x.revisar), ns=d.no_solicitados||[], sf=d.sin_facturar||[];
   const act=(t, sub, body, cls)=>`<div class="fac-act ${cls||''}"><h3>${t}</h3>${sub?`<div class="fac-act-sub">${sub}</div>`:''}${body||''}</div>`;
-  let h=`<div class="muted" style="margin-bottom:8px">${d.reference?'Folio <b>'+escapeHtml(d.reference)+'</b> · ':''}${escapeHtml(d.supplier||d.printed_supplier||'')}${d.invoice_date?' · '+fechaLarga(d.invoice_date):''} · ${d.filas||0} renglones · ${fmtQty((d.piezas||{}).facturadas||0,'Pz')} pz facturadas</div>`;
+  let h=`<div class="muted" style="margin-bottom:8px">${d.reference?'Folio <b>'+escapeHtml(d.reference)+'</b> · ':''}${escapeHtml(d.supplier||d.printed_supplier||'')}${d.invoice_date?' · '+fechaLarga(d.invoice_date):''} · ${d.filas||0} renglones · ${fmtQty((d.piezas||{}).facturadas||0,'Pz')} ${(d.lineas||[]).some(x=>x.pack_n)?'unidades':'pz'} facturadas</div>`;
   if(d.totals_ok===false || (d.warnings||[]).length) h+=`<div class="note">Se revisó aunque ${d.totals_ok===false?'los totales de la factura no cuadraron':'la lectura tuvo avisos'}.</div>`;
   if(d.limpia) return h+act('La factura está bien', 'Cobra solo lo pedido y recibido. No hay nada que regresar ni reportar.', '', 'ok');
   if(ns.length) h+=act(`Regresar · ${ns.length}`, 'Vienen en la factura pero no en la OC: no se reciben ni se pagan.',
-    it(ns, x=>`<span>${escapeHtml(x.producto)}</span><b>${x.piezas!=null?fmtQty(x.piezas,'Pz')+' '+u:'¿?'}</b>`));
+    it(ns, x=>`<span>${escapeHtml(x.producto)}</span><b>${x.piezas!=null?facQ(x.piezas,x):'¿?'}</b>`));
   if(nf.length) h+=act(`Reportar: cobradas que no llegaron · ${nf.length}`, 'La factura cobra piezas que no recibimos en físico. Que el proveedor las quite de la factura.',
-    it(nf, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">factura ${fmtQty(x.facturado,'Pz')} · recibido ${fmtQty(x.recibido,'Pz')}</small></span><b>${fmtQty(x.no_fisico,'Pz')} ${u}</b>`));
+    it(nf, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">factura ${facQ(x.facturado,x,x.piezas_sueltas)} · recibido ${facQ(x.recibido,x)}</small></span><b>${facQ(x.no_fisico,x)}</b>`));
   if(dm.length) h+=act(`Reportar: más de lo pedido · ${dm.length}`, 'La factura cobra más piezas de las que pide la OC.',
-    it(dm, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">factura ${fmtQty(x.facturado,'Pz')} · pedido ${fmtQty(x.pedido,'Pz')}</small></span><b>${fmtQty(x.de_mas,'Pz')} ${u}</b>`));
+    it(dm, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">factura ${facQ(x.facturado,x,x.piezas_sueltas)} · pedido ${facQ(x.pedido,x)}</small></span><b>${facQ(x.de_mas,x)}</b>`));
   if(sf.length) h+=act(`Reportar: llegaron sin facturar · ${sf.length}`, 'Se recibieron pero la factura no los cobra. Que el proveedor los agregue a la factura.',
     it(sf, x=>`<span>${escapeHtml(x.producto)}</span><b>${fmtQty(x.recibido,x.kgpz)} ${unitOf(x.kgpz)}</b>`));
-  if(rv.length) h+=`<div class="fac-sec">Revisar a mano · ${rv.length}</div>`+it(rv, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">${x.revisar==='kg'?'Se pide en kg: compara a mano':'La cantidad de la factura no se leyó bien'}${x.facturado!=null?' · factura '+fmtQty(x.facturado,x.kgpz):''} · recibido ${fmtQty(x.recibido,x.kgpz)} ${unitOf(x.kgpz)}</small></span><b>revisar</b>`);
+  if(rv.length) h+=`<div class="fac-sec">Revisar a mano · ${rv.length}</div>`+it(rv, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">${x.revisar==='kg'?'Se pide en kg: compara a mano':'La cantidad de la factura no se leyó bien'}${x.facturado!=null?' · factura '+facQ(x.facturado,x,x.piezas_sueltas):''} · recibido ${facQ(x.recibido,x)}</small></span><b>revisar</b>`);
   return h+`<div class="note" style="margin-top:8px">Solo se paga lo pedido <b>y</b> recibido. ¿El proveedor trajo algo que faltaba? Usa «Corregir lo recibido» en el producto.</div>`;
 }
 function facBoxInner(){
@@ -4900,7 +5019,8 @@ function pvLinesFromCsv(text){
     return { sku_key:skuKeyOf(cleanBC(g('Código')), g('Producto')), producto:g('Producto'), kgpz:g('Und')==='Kg'?'Kg':'Pz',
       pedido:num('Pedido'), recibido:num('Recibido'), excedente:exc==='Sí'?true:(num('Excedente')||undefined),
       rechazadas:num('Rechazadas')||undefined, motivo:PV_MOTIVO_INV[mot]||mot||undefined,
-      faltante:num('Faltante')||undefined, no_solicitado:g('Estado')==='No solicitado'||undefined, _fac:g('Estado')===FAC_ESTADO_SIN_PEDIR };
+      faltante:num('Faltante')||undefined, no_solicitado:g('Estado')==='No solicitado'||undefined, pack_n:num('Paquete de')||undefined,
+      pedido_en:g('Pedido en OC')?'piezas':undefined, _fac:g('Estado')===FAC_ESTADO_SIN_PEDIR };
   }).filter(l=>l.producto && !l._fac).map(({ _fac, ...l })=>l);
 }
 async function pvLoad(){
@@ -5018,15 +5138,15 @@ function pvProducts(recs){
 }
 const pvIssues=p=>p.fcL+p.danL+p.faltL+p.pnsL+p.excL+p.cobL;
 function pvLineTxt(l, cob){
-  const q=v=>fmtQty(v,l.kgpz), u=unitOf(l.kgpz), p=[];
+  const q=v=>fmtQty(v,l.kgpz), pk={ kgpz:l.kgpz, pack:l.pack_n||0 }, p=[];
   if(l.no_solicitado) p.push('No venía en la OC (se regresó)');
   else {
-    p.push(`Pedido ${q(l.pedido)} ${u}`, `recibido ${q(l.recibido)}`);
+    p.push(`Pedido ${pkTxt(l.pedido, pk)}${l.pedido_en==='piezas'?' (la OC lo pidió en piezas)':''}`, `recibido ${q(l.recibido)}`);
     if(l.rechazadas) p.push(`${q(l.rechazadas)} rechazadas por ${PD_MOTIVO[l.motivo]||l.motivo||'fecha corta'}`);
     if(l.faltante) p.push(`faltaron ${q(l.faltante)}`);
     if(l.excedente) p.push(typeof l.excedente==='number'?`${q(l.excedente)} de más (se regresaron)`:'llegó de más (se regresó)');
   }
-  if(cob>0) p.push(`la factura cobra ${fmtQty(cob,'Pz')} pz que no llegaron`);
+  if(cob>0) p.push(`la factura cobra ${pkTxt(cob, pk)} que no llegaron`);
   return p.join(' · ');
 }
 function pvFecha(k, v){
@@ -5456,8 +5576,31 @@ function demoGenerar(){
       warnings:['El total impreso no coincide con la suma de renglones.'], rows } });
     ent.pb={ key:'pb', titulo:prov, prov, items, espera, como:'Inicio → <b>Proveedor directo</b> → cualquier hub → <b>'+prov+'</b> → marca <b>las dos órdenes</b> (una está atrasada) → Empezar recepción.' };
   }
-  const contactos={ 'Lácteos Prueba':{ comercial:'Ana Prueba', comprador:'Luis Prueba' }, 'Abarrotes Prueba':{ comercial:'Ana Prueba', comprador:'Marta Prueba' } };
-  DEMO.data={ ent, picks:ent.ab.picks, invoices, bridge:{ ordenes, catalogo, contactos, proveedores:['Abarrotes Prueba','Lácteos Prueba','Proveedor Sin Orden'], avisos:[] } };
+  /* ── Paquetes (2026-11-23): the San Nicolás Arca case. OC 36 of a 12-pack (written in piezas), invoice CAJAS 3 / PIEZAS 36
+     (Invoice Reader gives piezas 3 + piezasSueltas 36), 3 paquetes arrive. Plus a pack Pedido that can only be paquetes
+     (61 on a 4-pack), a pack line short in piezas, a «caja 18pz» contents item and single cans, which look as before. ── */
+  {
+    const prov='Refrescos Prueba';
+    const P=(codigo, producto, pedido, sm)=>linea({ code:codigo, producto }, 0, { sku_marca:sm, pedido, temp:'Ambiente' });
+    const ls=[P('7501055300785','Refresco Coca Cola Original 355ml (12-pack)',36,'1192'), P('7509990000417','Leche entera Prueba 1L (4 Pack)',61,'AL61'),
+      P('7501055354900','Refresco original vidrio Coca Cola 235ml (12-pack)',24,'2442'), P('7509990000189','Huevo blanco Prueba caja 18pz',4,'HU18'),
+      P('7501055300075','Refresco lata Coca Cola 355ml',24,'59')];
+    ordenes.push({ num_oc:oc(), proveedor:prov, fecha_entrega:hoy, comercial:'Ana Prueba', comprador:'Luis Prueba', lineas:ls });
+    const pk=(n, k)=>({ packKind:k?'pack':null, packSize:k||null, retoolUnit:k?'paquete':'pieza', piezasSueltas:k?n*k:null });
+    const rows=[invRow(1, ls[0], 3, pk(3,12)), invRow(2, ls[1], 61, pk(61,4)), invRow(3, ls[2], 2, pk(2,12)), invRow(4, ls[3], 4, pk(4,0)), invRow(5, ls[4], 24, pk(24,0))];
+    invoices.push({ area:pdArea(prov), read_id:'demo-fac-refrescos', rec:{ supplier:prov, printed_supplier:'REFRESCOS PRUEBA SA DE CV', reference:'R-'+int(10000,99999), totals_ok:true, warnings:[], rows } });
+    const items=[it({ code:ls[0].codigo, producto:ls[0].producto },{ llego:3, tipo:'ok', nota:'3 paquetes (36 latas)' }),
+      it({ code:ls[1].codigo, producto:ls[1].producto },{ llego:61, tipo:'ok', nota:'61 paquetes' }),
+      it({ code:ls[2].codigo, producto:ls[2].producto },{ llego:1, tipo:'menos', nota:'Llegó 1 paquete (12 botellas): escríbelo en Piezas' }),
+      it({ code:ls[3].codigo, producto:ls[3].producto },{ llego:4, tipo:'ok' }), it({ code:ls[4].codigo, producto:ls[4].producto },{ llego:24, tipo:'ok' })];
+    const espera=[`${ls[0].producto}: al confirmar pregunta «3 paquetes (36 piezas)» o «36 paquetes (432 piezas)»; elige 3 paquetes → Completo, Resumen «3 paquetes · = 36 piezas», la factura no cobra nada de más`,
+      `${ls[1].producto}: Pedido 61 paquetes (= 244 piezas), sin pregunta`,
+      `${ls[2].producto}: pregunta; elige «2 paquetes (24 piezas)» → Faltante en Piezas: 18 se rechaza (no son paquetes completos), 12 = 1 paquete → la factura cobra 1 paquete que no llegó`,
+      `${ls[3].producto} y ${ls[4].producto}: igual que siempre (sin paquetes)`];
+    ent.pc={ key:'pc', titulo:prov, prov, items, espera, como:'Inicio → <b>Proveedor directo</b> → cualquier hub → <b>'+prov+'</b> → Empezar recepción → elige su factura de la lista.' };
+  }
+  const contactos={ 'Lácteos Prueba':{ comercial:'Ana Prueba', comprador:'Luis Prueba' }, 'Abarrotes Prueba':{ comercial:'Ana Prueba', comprador:'Marta Prueba' }, 'Refrescos Prueba':{ comercial:'Ana Prueba', comprador:'Luis Prueba' } };
+  DEMO.data={ ent, picks:ent.ab.picks, invoices, bridge:{ ordenes, catalogo, contactos, proveedores:['Abarrotes Prueba','Lácteos Prueba','Refrescos Prueba','Proveedor Sin Orden'], avisos:[] } };
   DEMO._ready();
 }
 // The order bridge (proveedor/apps-script.gs) answers {leido, ordenes, contactos, proveedores, catalogo, avisos}
@@ -5554,7 +5697,7 @@ function demoRender(){
     h+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">${Object.values(E).map(e=>`<button class="choice ${DUI.ent===e.key?'sel':''}" style="min-height:0;padding:12px 8px;font-size:14px" onclick="DUI.ent='${e.key}';demoRender()">${escapeHtml(e.titulo)}</button>`).join('')}</div>`;
     const e=E[DUI.ent], hecho=k=>DEMO.st.hechos[e.key+':'+k];
     h+=`<div class="info-card" style="margin-top:10px;font-size:14px">${e.como}<br><span class="muted">«Escanear» manda el código como el escáner; la cantidad la escribes tú en la tarjeta.</span></div>`;
-    const row=x=>{ const img=getImgUrl(x.code, x.producto), u=unitOf(x.kgpz);
+    const row=x=>{ const img=getImgUrl(x.code, x.producto), u=pkU(x.llego, { kgpz:x.kgpz, pack:packN(x.producto, x.kgpz) });
       return `<div class="demo-row ${hecho(x.id)?'hecho':''}">${img?`<img src="${escapeHtml(img)}" alt="">`:'<div class="noimg"></div>'}
         <div class="t"><div class="n">${escapeHtml(x.producto)}</div><div class="c">${x.code?escapeHtml(x.code):'sin código'}</div>${x.nota?`<div class="demo-nota">${escapeHtml(x.nota)}</div>`:''}</div>
         <div style="text-align:right"><div class="q">${x.llego>0?fmtQty(x.llego,x.kgpz)+' '+u:'—'}</div>
@@ -5567,7 +5710,7 @@ function demoRender(){
     for(const k of ['ab','ca']){ const e=E[k];
       h+=`<div class="demo-sec">${escapeHtml(e.titulo)} · archivo de envío</div><div class="muted" style="font-size:13px">${escapeHtml(e.archivo)} · ${e.items.filter(x=>x.tipo!=='no_envio'&&x.tipo!=='desconocido').length} productos</div>
         <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-primary" style="flex:1" onclick="demoCargarEnvio('${k}')">Cargar en la app</button><button class="btn btn-secondary" style="flex:1" onclick="demoBajarEnvio('${k}')">Descargar CSV</button></div>`; }
-    for(const k of ['pa','pb']){ const e=E[k], v=DEMO.data.invoices.find(x=>x.area===pdArea(e.prov));
+    for(const k of ['pa','pb','pc']){ const e=E[k], v=DEMO.data.invoices.find(x=>x.area===pdArea(e.prov));
       h+=`<div class="demo-sec">${escapeHtml(e.titulo)} · factura ${escapeHtml(v.rec.reference)}</div>
         <img src="${demoFacturaUrl(v)}" alt="Factura de prueba" style="width:100%;max-width:360px;border:1px solid var(--c-line);border-radius:8px;display:block">
         <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-primary" style="flex:1" onclick="demoUsarFactura('${k}')">Usar como foto de factura</button><button class="btn btn-secondary" style="flex:1" onclick="demoBajarFactura('${k}')">Descargar imagen</button></div>
@@ -5587,7 +5730,7 @@ function demoScan(ek, id){
   if(!document.getElementById('screen-recibir').classList.contains('active')){ toast('Primero abre la recepción en la pantalla de escanear'); return; }
   DEMO.st.hechos[ek+':'+id]=true; DEMO_SAVE(); demoCerrar();
   const chip=document.getElementById('demo-chip');
-  chip.textContent=`Llegaron ${fmtQty(x.llego,x.kgpz)} ${unitOf(x.kgpz)}${x.nota?' · '+x.nota:''}`; chip.style.display='block';
+  chip.textContent=`Llegaron ${pkTxt(x.llego, { kgpz:x.kgpz, pack:packN(x.producto, x.kgpz) })}${x.nota?' · '+x.nota:''}`; chip.style.display='block';
   clearTimeout(DUI.chipT); DUI.chipT=setTimeout(()=>{ chip.style.display='none'; }, 20000);
   setTimeout(()=>processScan(x.code, 'scanner'), 120);
 }
