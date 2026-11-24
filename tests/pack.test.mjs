@@ -80,6 +80,7 @@ test('invoice in paquetes: CAJAS 3 / PIEZAS 36 vs OC 36 answered «3 paquetes (3
   assert.equal(x.facturado, 3);
   assert.equal(x.pack_n, 12);
   assert.equal(x.piezas_sueltas, 36);
+  assert.equal(x.pack_retool, true, 'the read counted paquetes: it may settle the OC unit');
   const P = packPedido(coca.esperado, packN(coca.producto, coca.kgpz), 'piezas').P;
   assert.deepEqual(facObjetivo(x, P), { obj: 3, fac: 3, de_mas: 0 });
   const c = facCierre(ini, [{ sku_key: coca.sku_key, pedido: 3, recibido: 3, kgpz: 'Pz', pack_n: 12 }, { sku_key: lata.sku_key, pedido: 24, recibido: 24, kgpz: 'Pz' }]);
@@ -103,6 +104,7 @@ test('a pack row nobody is sure of (picked by hand, no paquete unit) is «cantid
 test('old record rows (no packKind) are compared as before', () => {
   const old = row(1, coca, 36);
   const c = facComparar({ lines: [coca], todas: [{ sku_key: coca.sku_key, pedido: 36, recibido: 36 }], rows: [old] });
+  assert.equal(c.lineas[0].pack_retool, undefined, 'an old read never settles paquetes vs piezas');
   assert.equal(c.lineas[0].revisar, undefined);
   assert.equal(c.flagged.length, 0);
 });

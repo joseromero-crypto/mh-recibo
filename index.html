@@ -3019,7 +3019,8 @@ function pdPackAnswer(l){
 // The answer given on this reception's other ambiguous lines (same supplier, same comercial)
 function pdPackHeredado(){ let en=null; for(const e of S.events) if(e.tipo==='confirmacion' && e.detalle && e.detalle.pack_pregunta && e.detalle.pedido_en) en=e.detalle.pedido_en; return en; }
 // What the invoice compared at the start (factura primero) says: billed paquetes near oc/N or near oc
-function pdPackFactura(l, n){ const fm=pdFacMapa(), x=fm && fm.get(l.sku_key); return x && !x.revisar && x.facturado>0 ? packEnDe(x.facturado, l.esperado, n) : null; }
+// Only a read that says it counted paquetes (pack_retool): an older read billing «36» could be piezas and would settle it wrong
+function pdPackFactura(l, n){ const fm=pdFacMapa(), x=fm && fm.get(l.sku_key); return x && x.pack_retool && !x.revisar && x.facturado>0 ? packEnDe(x.facturado, l.esperado, n) : null; }
 // packPedido for an envío line + fuente / exacto. falta = nothing decided yet: P is then a guess (other answers, else piezas)
 function pdPackInfo(l){
   const n=packN(l.producto, l.kgpz), ans=n?pdPackAnswer(l):null, i=packPedido(l.esperado, n, ans&&ans.en);
@@ -4298,7 +4299,9 @@ function facComparar({ lines=[], todas=[], rows=[], picks={} }){
     const kg=(t.kgpz||l.kgpz)==='Kg', pn=packN(l.producto, l.kgpz);
     const dudosa=rs.some(r=>r.piezas==null || r.quantityOk===false || (pn>0 && 'packKind' in r && r.retoolUnit!=='paquete'));
     const x={ sku_key:sku, producto:l.producto, kgpz:kg?'Kg':'Pz', pedido, recibido, filas:rs.map(r=>r.sourceRow) };
-    if(pn){ x.pack_n=pn; const ps=rs.map(r=>r.piezasSueltas); if(ps.every(v=>v!=null)) x.piezas_sueltas=facR2(ps.reduce((s,v)=>s+Number(v),0)); }
+    if(pn){ x.pack_n=pn; const ps=rs.map(r=>r.piezasSueltas); if(ps.every(v=>v!=null)) x.piezas_sueltas=facR2(ps.reduce((s,v)=>s+Number(v),0));
+      // pack_retool: every row says it counted paquetes (Invoice Reader ≥ faf84a4). Only then can the invoice settle paquetes vs piezas.
+      if(rs.every(r=>r.retoolUnit==='paquete')) x.pack_retool=true; }
     if(kg || dudosa){ x.revisar=kg?'kg':'cantidad'; x.facturado=dudosa?null:facR2(rs.reduce((s,r)=>s+Number(r.piezas),0)); }
     else{
       x.facturado=facR2(rs.reduce((s,r)=>s+Number(r.piezas),0));

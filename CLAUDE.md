@@ -221,7 +221,7 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   («caja 18pz», «6pz», «8 sobres») and Kg → 0, shown as before. On a pack line (modo botones) every quantity is paquetes:
   `pkTxt`/`pkH`/`pkPlano` («3 paquetes» + muted `.pk-nota` «= 36 piezas», `--c-muted`). `packPedido(esperado, N, en)`: not a
   multiple of N → paquetes (Alpura 61 on a 4-pack). A multiple is settled without asking about the order (the receptor
-  didn't place it, Jose): first the invoice compared at the start (`pdPackFactura` → `packEnDe`: billed paquetes nearer oc/N
+  didn't place it, Jose): first the invoice compared at the start, only when its rows say paquetes (`pack_retool`; `pdPackFactura` → `packEnDe`: billed paquetes nearer oc/N
   → piezas, nearer oc → paquetes; Arca billed 3 on 36 → piezas), else the line shows «¿Qué llegó?» instead of the buttons:
   «3 paquetes (36 piezas)» | «36 paquetes (432 piezas)» (= Completo, `pdBLlego`) | «Otra cantidad» (count with the switch →
   `packEnDe` → Completo / Faltante / Excedente) | «Rechazo» (`pdBRechQ`, `S.pdPackRech`: the same question counting
