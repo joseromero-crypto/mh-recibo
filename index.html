@@ -3107,7 +3107,7 @@ function facIniGuardadaHtml(S0){
     +it(nofac, l=>`<span>${escapeHtml(l.producto)}</span><b>OC ${fmtQty(l.esperado,l.kgpz)}${pdLineaPk(l).pack?'':' '+unitOf(l.kgpz)}</b>`);
   if(rv.length) h+=`<div class="fac-sec">Se revisan contra la OC · ${rv.length}</div>`+it(rv, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">${x.revisar==='kg'?'Se pide en kg':'La cantidad de la factura no se leyó bien'}</small></span><b>OC ${fmtQty(x.pedido,x.kgpz)} ${unitOf(x.kgpz)}</b>`);
   h+=`<div class="note" style="margin-top:8px">Vas a revisar en físico <b>${lin.length} producto${lin.length===1?'':'s'}</b>: lo que cobra la factura, nunca más de lo que pide la OC.</div>`;
-  return h+J+(d.read_id?facFotoLink(d.read_id):'')+`<button class="link-btn" onclick="facCambiar()">Cambiar factura</button>`;
+  return h+J+(d.read_id?facFotoLink(d.read_id):'')+`${facFolios((d.folios_leidos||[d.reference]).join(' / ')).length>1&&d.read_id?`<button class="link-btn" onclick="facCambiarFacturas()">Cambiar qué folios son de esta orden</button>`:''}<button class="link-btn" onclick="facCambiar()">Cambiar factura</button>`;
 }
 function pdFacEmpezar(){ S.facOk=true; S.pdTab='scan'; S.pdFoco=null; renderRecibir(); focusScan(); }
 function pdFacCambiar(){ S.facOk=false; renderRecibir(); facCambiar(); }
@@ -4397,11 +4397,36 @@ function facCierre(ini, todas){
     piezas:{ facturadas:(ini.piezas||{}).facturadas||0, de_mas:sum(lineas,'de_mas'), no_fisico:sum(lineas,'no_fisico'), no_solicitado:sum(ns,'piezas') },
     limpia:!flagged.length && !ns.length && !sin_facturar.length };
 }
+/* Two invoices in one upload (Cumbres, Qualtia 2026-11-24: RK 262247 + RK 262246 added up as one, 30 + 30 = «60
+   facturadas» against an OC of 30). The read's reference lists both folios and each row says its photo (Invoice Reader ≥
+   2026-11-24), so the auxiliar says which photos are of this order. A folio is put on a photo only by order, when there are
+   as many folios as photos. null: one folio, or the rows don't come from 2+ photos. */
+function facFolios(ref){
+  const out=[];
+  for(const p of String(ref==null?'':ref).split(/\s+\/\s+|\s*[,;+]\s*|\s+y\s+/i)){ const t=p.trim(); if(/\d/.test(t) && !out.includes(t)) out.push(t); }
+  return out;
+}
+function facFacturas(r){
+  const folios=facFolios(r && r.reference), by=new Map();
+  if(folios.length<2) return null;
+  for(const x of (r.rows||[])){ if(x.photo==null) return null; if(!by.has(x.photo)) by.set(x.photo, []); by.get(x.photo).push(x); }
+  if(by.size<2) return null;
+  const fotos=[...by.keys()].sort((a,b)=>a-b);
+  return { folios, grupos:fotos.map((f,i)=>({ foto:f, folio:folios.length===fotos.length?folios[i]:null, filas:by.get(f).length,
+    piezas:facR2(by.get(f).reduce((s,x)=>s+(Number(x.piezas)||0),0)) })) };
+}
+// The rows of the chosen photos (fotos null = the whole read), and the folio to save with them
+function facFilasDe(r, fotos){ return fotos ? (r.rows||[]).filter(x=>fotos.includes(x.photo)) : (r.rows||[]); }
+function facFolioDe(r, fotos){
+  const f=fotos && facFacturas(r); if(!f) return r.reference||null;
+  const g=f.grupos.filter(x=>fotos.includes(x.foto));
+  return g.every(x=>x.folio) ? g.map(x=>x.folio).join(' / ') : r.reference||null;
+}
 // read_ids another reception has linked: each session's latest 'factura' event counts (a later one, or a bypass,
-// frees the read it replaced). events: factura rows in id order; sid: the reception asking (its own link never hides).
+// frees the read it replaced; one that used only some photos leaves the read for the other order). events: factura rows in id order; sid: the reception asking (its own link never hides).
 function facLigadas(events, sid){
   const last=new Map(); for(const e of events) last.set(e.session_id, e);
-  const out=new Set(); for(const [s, e] of last) if(s!==sid && e.detalle && e.detalle.read_id && !e.detalle.manual) out.add(e.detalle.read_id);
+  const out=new Set(); for(const [s, e] of last) if(s!==sid && e.detalle && e.detalle.read_id && !e.detalle.manual && !e.detalle.fotos) out.add(e.detalle.read_id);
   return out;
 }
 // Supplier names from the order vs the read: norm, company suffixes out, any shared significant word counts.
@@ -4655,12 +4680,44 @@ function facAjena(r){
 }
 function facPideAjena(r){ return !FACV.recomparar && FACV.ajenaOk!==r.read_id && facAjena(r); }
 function facOtra(id){ FACV.omitir=id; FACV.elegida=null; FACV.picks={}; FACV.ack=false; FACV.compStart=0; FACV.lista=null; facBoxRender(); }
-function facCmp(r){ return facComparar({ lines:FACV.lines||[], todas:FACV.info.lineas_todas||[], rows:r.rows||[], picks:FACV.picks }); }
+function facCmp(r){ return facComparar({ lines:FACV.lines||[], todas:FACV.info.lineas_todas||[], rows:facFilas(r), picks:FACV.picks }); }
+// Which photos of the read are of this order. FACV.fact = { id, sel, ok } belongs to one read; a re-compare keeps the saved answer.
+function facSel(r){
+  if(!FACV.fact || FACV.fact.id!==r.read_id){
+    const sv=FACV.recomparar===r.read_id && FACV.saved && FACV.saved.detalle;
+    FACV.fact={ id:r.read_id, sel:sv&&sv.fotos?sv.fotos.slice():[], ok:!!sv };
+  }
+  return FACV.fact;
+}
+function facPideFacturas(r){ return !facSel(r).ok && !!facFacturas(r); }
+// null = the whole read (one invoice, or every photo chosen)
+function facFotosDe(r){
+  const s=facSel(r), f=facFacturas(r); if(!f || !s.ok || !s.sel.length) return null;
+  return f.grupos.every(g=>s.sel.includes(g.foto)) ? null : s.sel.slice().sort((a,b)=>a-b);
+}
+function facFilas(r){ return facFilasDe(r, facFotosDe(r)); }
+function facFactura(foto){ const s=FACV.fact; if(!s) return; s.sel=s.sel.includes(foto)?s.sel.filter(x=>x!==foto):s.sel.concat(foto); facBoxRender(); }
+function facFacturasOk(){ const s=FACV.fact; if(!s || !s.sel.length) return; s.ok=true; FACV.picks={}; FACV.compStart=0; facBoxRender(); }
+// Saved review of a read with two folios: ask again which ones count
+function facCambiarFacturas(){
+  const d=FACV.saved && FACV.saved.detalle; if(!d || !d.read_id) return;
+  const sel=(d.fotos||[]).slice();
+  facCambiar(); Object.assign(FACV, { recomparar:d.read_id, picks:Object.assign({}, d.picks||{}), fact:{ id:d.read_id, sel, ok:false } }); facBoxRender();
+}
+function facFacturasHtml(r){
+  const f=facFacturas(r), s=facSel(r), n=s.sel.length, t=f.grupos.length;
+  return `<div class="warn-box"><b>Las fotos traen ${f.folios.length} folios: ${escapeHtml(f.folios.join(' y '))}</b>
+    <div>¿Cuáles fotos son de esta orden? Revisa el folio en la foto. Si es una sola factura de varias páginas, elige todas.</div>
+    ${f.grupos.map(g=>`<button class="choice ${s.sel.includes(g.foto)?'sel':''}" style="display:block;width:100%;text-align:left;margin-top:8px${s.sel.includes(g.foto)?'':';background:var(--c-white)'}" aria-pressed="${s.sel.includes(g.foto)}" onclick="facFactura(${g.foto})">Foto ${g.foto}${g.folio?' · '+escapeHtml(g.folio):''}<br><small>${g.filas} ${g.filas===1?'renglón':'renglones'} · ${fmtQty(g.piezas,'Pz')} ${(r.rows||[]).some(x=>x.packKind==='pack')?'unidades':'pz'}</small></button>`).join('')}
+    ${facFotoLink(r.read_id)}
+    <button class="btn btn-warn btn-block" style="margin-top:10px" ${n?'':'disabled'} onclick="facFacturasOk()">${!n?'Elige las fotos de esta orden':n===t?'Comparar con todas':n===1?'Comparar solo con esa foto':`Comparar con ${n} fotos`}</button></div>`;
+}
 // No question left (no page warning, nobody to identify) → save right away; with questions, the auxiliar saves.
 function facAutoGuardar(){
   if(FACV.saving || (FACV.saved && !FACV.cambiando) || !FACV.lines) return;
   const f=FAC[FACV.info.session_id], r=facLectura(); if(!r || !f || ['fotos','subiendo','pendiente','error'].includes(facEstado(f))) return;
   if(facPideAjena(r)) return;
+  if(facPideFacturas(r)) return;
   if(facAvisos(r) && !FACV.ack) return;
   if(FACV.saved && FACV.saved.detalle && FACV.saved.detalle.read_id===r.read_id && !FACV.cambiando) return;
   if(facComparando()) return;
@@ -4678,9 +4735,9 @@ function facComparando(){
 function facLoaderHtml(t, sub){ return `<div class="fac-load"><div class="spin"></div><div>${t}${sub?`<small>${sub}</small>`:''}</div></div>`; }
 function facDetalle(r, c){
   const sv=FACV.recomparar && FACV.saved && FACV.saved.detalle;
-  const base={ read_id:r.read_id, origen:sv?sv.origen:FACV.elegida?'lista':'sesion', recomparada:sv?true:undefined, reference:r.reference||null, supplier:r.supplier||null, printed_supplier:r.printed_supplier||null,
+  const base={ read_id:r.read_id, origen:sv?sv.origen:FACV.elegida?'lista':'sesion', recomparada:sv?true:undefined, reference:facFolioDe(r, facFotosDe(r)), fotos:facFotosDe(r)||undefined, folios_leidos:facFotosDe(r)?facFolios(r.reference):undefined, supplier:r.supplier||null, printed_supplier:r.printed_supplier||null,
     invoice_date:r.invoice_date||null, totals_ok:r.totals_ok==null?null:r.totals_ok, warnings:(r.warnings||[]).length?r.warnings:undefined, avisos_aceptados:facAvisos(r)||undefined,
-    filas:(r.rows||[]).length, piezas:c.piezas, conteo:c.conteo, limpia:c.limpia, lineas:c.lineas, no_solicitados:c.no_solicitados,
+    filas:facFilas(r).length, piezas:c.piezas, conteo:c.conteo, limpia:c.limpia, lineas:c.lineas, no_solicitados:c.no_solicitados,
     sin_facturar:(c.sin_facturar||[]).length?c.sin_facturar:undefined, picks:Object.keys(FACV.picks).length?FACV.picks:undefined };
   // Factura primero: compared against the OC only (nothing received yet)
   return FACV.inicio ? Object.assign(base, facInicio(c), { sin_facturar:undefined }) : base;
@@ -4776,7 +4833,7 @@ function facBoxInner(){
     const quien=`<div class="muted" style="margin-top:6px">Revisada ${localDateStr(new Date(S0.ts))!==localDateStr()?fechaLarga(localDateStr(new Date(S0.ts)))+' ':''}${localHM(new Date(S0.ts))}${S0.receptor?' · '+escapeHtml(S0.receptor):''}</div>`;
     const nueva=done && done.read_id!==d.read_id && (d.manual || d.origen!=='lista') ? `<div class="warn-box">Hay una lectura más nueva de la factura.<button class="btn btn-secondary btn-block" onclick="facCambiar()">Comparar con la nueva</button></div>`:'';
     if(d.manual) return h+`<div class="info-card"><b>Sin revisión de factura</b><div>${escapeHtml(d.motivo||'')}</div>${quien}</div>${nueva}<button class="link-btn" onclick="facCambiar()">Revisar con la factura</button>`;
-    return h+`<div>${facResultadoHtml(d)}${quien}${d.read_id?facFotoLink(d.read_id):''}</div>${nueva}<button class="link-btn" onclick="facCambiar()">Cambiar factura</button>`;
+    return h+`<div>${facResultadoHtml(d)}${quien}${d.read_id?facFotoLink(d.read_id):''}</div>${nueva}${facFolios((d.folios_leidos||[d.reference]).join(' / ')).length>1&&d.read_id?`<button class="link-btn" onclick="facCambiarFacturas()">Cambiar qué folios son de esta orden</button>`:''}<button class="link-btn" onclick="facCambiar()">Cambiar factura</button>`;
   }
   if(FACV.manual) return h+facManualHtml();
   if(['fotos','subiendo','pendiente','error'].includes(st) || f.preparando) return h+facStripHtml(sid, true)+(st==='error'?`<button class="link-btn" onclick="facManual()">Comparar a mano</button>`:'');
@@ -4785,6 +4842,7 @@ function facBoxInner(){
     if(facPideAjena(r)) return h+`<div class="warn-box"><b>Esta factura parece de otra orden.</b>
       <div>Ninguno de sus ${(r.rows||[]).length} productos está en la orden de ${escapeHtml(I.proveedor||areaName(I.area))}${r.reference?' · folio '+escapeHtml(r.reference):''}.</div>
       ${facFotoLink(r.read_id)}<div class="fac-btns"><button class="btn btn-secondary" onclick="facOtra(${facJs(r.read_id)})">Elegir otra factura</button><button class="btn btn-secondary" onclick="FACV.ajenaOk=${facJs(r.read_id)};FACV.compStart=0;facBoxRender()">Sí es esta: comparar</button></div></div>`;
+    if(facPideFacturas(r)) return h+facFacturasHtml(r);
     if(facAvisos(r) && !FACV.ack) return h+`<div class="warn-box"><b>¿Falta una página de la factura?</b>
       ${r.totals_ok===false?'<div>Los totales de la factura no cuadran con los renglones leídos.</div>':''}${(r.warnings||[]).map(w=>`<div>· ${escapeHtml(w)}</div>`).join('')}
       <div class="fac-btns">${facVigente(sid)?`<button class="btn btn-secondary" onclick="facPick(${J},true)">Tomar todas las páginas</button>`:''}<button class="btn btn-secondary" onclick="FACV.ack=true;FACV.compStart=0;facBoxRender()">Está completa: comparar</button></div></div>`;
@@ -4795,7 +4853,7 @@ function facBoxInner(){
       return `<select class="text-input" onchange="facPickLinea(${n.sourceRow},this.value)"><option value="">Elige el producto de la orden…</option>
         ${sug.length?`<optgroup label="Sugeridos">${sug.map(k=>o(k,name(k))).join('')}</optgroup>`:''}<optgroup label="${sug.length?'Otros de la orden':'Productos de la orden'}">${rest.map(l=>o(l.sku_key,l.producto)).join('')}</optgroup>
         ${o('no_oc','No está en la OC')}</select>`; };
-    const pend=facComparar({ lines:FACV.lines, todas:I.lineas_todas||[], rows:r.rows||[], picks:{} }).no_identificados;
+    const pend=facComparar({ lines:FACV.lines, todas:I.lineas_todas||[], rows:facFilas(r), picks:{} }).no_identificados;
     const faltan=c.no_identificados.length;
     return h+`<div class="note">${pend.length===1?'Un renglón de la factura no se pudo identificar. Elige a qué producto de la orden corresponde.':pend.length+' renglones de la factura no se pudieron identificar. Elige a qué producto de la orden corresponde cada uno.'}</div>`
       +pend.map(n=>`<div class="info-card"><b>${escapeHtml(n.descripcion||'Renglón '+n.sourceRow)}</b><div class="muted">${n.codigos.length?'Código '+escapeHtml(n.codigos.join(', '))+' · ':''}${n.piezas!=null?fmtQty(n.piezas,'Pz')+' pz':'cantidad sin leer'}${n.ambiguo?' · coincide con varios productos':''}</div>${opts(n)}</div>`).join('')
@@ -4866,7 +4924,7 @@ async function facVerFoto(id){
 function facElegir(id){ const r=(FACV.lista||[]).find(x=>x.read_id===id); if(!r) return; FACV.elegida=r; FACV.picks={}; FACV.ack=false; FACV.recomparar=null; FACV.compStart=0; facBoxRender(); }
 function facPickLinea(row, v){ if(v) FACV.picks[row]=v; else delete FACV.picks[row]; facBoxRender(); }
 function facGuardarPicks(){ const r=facLectura(); if(!r) return; const c=facCmp(r); if(c.no_identificados.length) return; facGuardar(r, c); }
-function facCambiar(){ FACV.cambiando=true; FACV.elegida=null; FACV.picks={}; FACV.ack=false; FACV.lista=null; FACV.manual=false; FACV.recomparar=null; FACV.compStart=0; facBoxRender(); }
+function facCambiar(){ FACV.cambiando=true; FACV.elegida=null; FACV.picks={}; FACV.ack=false; FACV.lista=null; FACV.manual=false; FACV.recomparar=null; FACV.compStart=0; FACV.fact=null; facBoxRender(); }
 function facManual(){ FACV.manual=true; FACV.motivo=''; facBoxRender(); }
 const FAC_MOTIVOS=['No trajo factura','La factura no se puede leer','Otro'];
 function facManualHtml(){
@@ -5685,7 +5743,9 @@ function demoGenerar(){
     ordenes.push({ num_oc:oc(), proveedor:prov, fecha_entrega:hoy, comercial:'Ana Prueba', comprador:'Luis Prueba', lineas:ls });
     const pk=(n, k)=>({ packKind:k?'pack':null, packSize:k||null, retoolUnit:k?'paquete':'pieza', piezasSueltas:k?n*k:null });
     const rows=[invRow(1, ls[0], 3, pk(3,12)), invRow(2, ls[1], 61, pk(61,4)), invRow(3, ls[2], 2, pk(2,12)), invRow(4, ls[3], 4, pk(4,0)), invRow(5, ls[4], 24, pk(24,0))];
-    invoices.push({ area:pdArea(prov), read_id:'demo-fac-refrescos', rec:{ supplier:prov, printed_supplier:'REFRESCOS PRUEBA SA DE CV', reference:'R-'+int(10000,99999), totals_ok:true, warnings:[], rows } });
+    // A second invoice (another order's) photographed with this one: 24 more cans on photo 2 (Cumbres, Qualtia 2026-11-24)
+    rows.forEach(x=>x.photo=1); rows.push(Object.assign(invRow(6, ls[4], 24, pk(24,0)), { photo:2 }));
+    invoices.push({ area:pdArea(prov), read_id:'demo-fac-refrescos', rec:{ supplier:prov, printed_supplier:'REFRESCOS PRUEBA SA DE CV', reference:'R-'+int(10000,99999)+' / R-'+int(10000,99999), totals_ok:true, warnings:[], rows } });
     const items=[it({ code:ls[0].codigo, producto:ls[0].producto },{ llego:3, tipo:'ok', nota:'3 paquetes (36 latas)' }),
       it({ code:ls[1].codigo, producto:ls[1].producto },{ llego:61, tipo:'ok', nota:'61 paquetes' }),
       it({ code:ls[2].codigo, producto:ls[2].producto },{ llego:1, tipo:'menos', nota:'Llegó 1 paquete (12 botellas): escríbelo en Piezas' }),
@@ -5695,7 +5755,8 @@ function demoGenerar(){
       `${ls[1].producto}: 61 paquetes (= 244 piezas), sin pregunta`,
       `${ls[2].producto}: 2 paquetes por la factura → Faltante en Piezas: 18 se rechaza (no son paquetes completos), 12 = 1 paquete → la factura cobra 1 paquete que no llegó`,
       `${ls[5].producto}: no viene en la factura; al escanearlo pregunta «¿Qué llegó?» «2 paquetes (12 piezas)» | «12 paquetes (72 piezas)» | «Otra cantidad» → elige 2 paquetes: Completo, llegó sin facturar`,
-      `${ls[3].producto} y ${ls[4].producto}: igual que siempre (sin paquetes)`];
+      `${ls[3].producto} y ${ls[4].producto}: igual que siempre (sin paquetes)`,
+      'La lectura trae dos folios: pregunta cuáles fotos son de esta orden. Solo la Foto 1 → no cobra nada de más; las dos → cobra 24 latas de más'];
     ent.pc={ key:'pc', titulo:prov, prov, items, espera, como:'Inicio → <b>Proveedor directo</b> → cualquier hub → <b>'+prov+'</b> → Empezar recepción → elige su factura de la lista.' };
   }
   /* ── Bimbo / Marinela (2026-11-24): one supplier in the sheet, two OCs, two invoices → received apart ── */
@@ -5735,6 +5796,8 @@ async function demoIr(b){
     return { reads:DEMO.data.invoices.map(v=>Object.assign({ read_id:v.read_id, status:'done', error:null, invoice_date:hoy, external_ref:null, purpose:'captura',
       created_at:t.toISOString(), scanned_by:'Auxiliar de prueba', label:`${v.rec.supplier} · ${v.rec.reference} · ${fechaLarga(hoy)} · ${localHM(t)} · Auxiliar de prueba` }, JSON.parse(JSON.stringify(v.rec)))) }; }
   if(b.action==='photos'){ const d=docs.find(x=>x.id===b.readId), v=d?demoInvDe(d.sid):(DEMO.data.invoices.find(x=>x.read_id===b.readId)||DEMO.data.invoices[0]);
+    const fs=facFacturas(v.rec);
+    if(fs) return { photos:fs.grupos.map(g=>({ page:g.foto, url:demoFacturaUrl({ read_id:v.read_id+'-'+g.foto, rec:Object.assign({}, v.rec, { reference:g.folio||v.rec.reference, rows:facFilasDe(v.rec,[g.foto]) }) }) })) };
     return { photos:[{ page:1, url:demoFacturaUrl(v) }] }; }
   return { error:'acción desconocida' };
 }

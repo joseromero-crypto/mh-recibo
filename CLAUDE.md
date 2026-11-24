@@ -247,6 +247,14 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   order; `facAjena` (no row on the order) asks «Esta factura parece de otra orden» before comparing (any supplier).
   Receptions before this stay under `pd-bimbo`. Modo prueba: «Bimbo» and «Marinela».
 
+- **Two invoices in one read (2026-11-24, Cumbres Qualtia RK 262247 + RK 262246: 30 + 30 = «60 facturadas»)** — when
+  `reference` lists 2+ folios (`facFolios`) and the rows come from 2+ photos (`row.photo`, Invoice Reader ≥ 2026-11-24), the
+  box asks which photos are of this order (`facFacturas`, `facFacturasHtml`, `FACV.fact`; nothing preselected; one invoice
+  of several pages = all). Only those rows are compared (`facFilas`); `factura` saves `fotos` + `folios_leidos`, and
+  `reference` = the chosen folios. A folio is put on a photo by order, only when the counts match. A read used with some
+  photos only isn't hidden from other receptions. «Cambiar qué folios son de esta orden» asks again. Rows without `photo`
+  (older reader) → compared whole as before. Planted case: «Refrescos Prueba».
+
 ## Modo prueba (2026-11-18)
 - `?demo={semilla}` runs the whole app unchanged on fake data; Admin → **Modo prueba** opens it in a new tab (no PIN
   inside a test tab). Nothing reaches production: `demoFetch` (top of the script) replaces `window.fetch` and answers

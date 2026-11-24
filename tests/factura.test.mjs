@@ -10,8 +10,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const html = readFileSync(join(root, 'index.html'), 'utf8');
 const block = html.slice(html.indexOf('/* FACTURA-PURE:BEGIN'), html.indexOf('/* FACTURA-PURE:END */'));
 assert.ok(block.length > 100, 'FACTURA-PURE block not found');
-const { facNormCode, facComparar, facMismoProveedor, facLigadas, facInicio, facObjetivo, facCierre } =
-  new Function(block + '\nreturn { facNormCode, facComparar, facMismoProveedor, facLigadas, facInicio, facObjetivo, facCierre };')();
+const { facNormCode, facComparar, facMismoProveedor, facLigadas, facInicio, facObjetivo, facCierre, facFolios, facFacturas, facFilasDe, facFolioDe } =
+  new Function(block + '\nreturn { facNormCode, facComparar, facMismoProveedor, facLigadas, facInicio, facObjetivo, facCierre, facFolios, facFacturas, facFilasDe, facFolioDe };')();
 
 let n = 0;
 const test = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -163,6 +163,27 @@ test('factura primero: start → targets → close', () => {
   // Same numbers as comparing at the close the old way
   const old = facComparar({ lines: oc, todas, rows: inv });
   assert.deepEqual(f.lineas, old.lineas); assert.deepEqual(f.conteo, old.conteo); assert.deepEqual(f.piezas, old.piezas);
+});
+
+test('two invoices in one upload: only the chosen photos are compared', () => {
+  assert.deepEqual(facFolios('RK 262247 / RK 262246'), ['RK 262247', 'RK 262246']);
+  assert.deepEqual(facFolios('RK/262247'), ['RK/262247']);
+  assert.deepEqual(facFolios(null), []);
+  const row = (sourceRow, photo, piezas) => ({ sourceRow, photo, piezas, quantityOk: true, confident: true, matchKeys: ['777'], productName: 'X', candidates: [], printedCodes: [] });
+  const r = { reference: 'RK 262247 / RK 262246', rows: [row(1, 1, 30), row(2, 2, 30)] };
+  const f = facFacturas(r);
+  assert.deepEqual(f.grupos.map(g => [g.foto, g.folio, g.piezas]), [[1, 'RK 262247', 30], [2, 'RK 262246', 30]]);
+  const lines = [{ sku_key: '777', barcode: '777', producto: 'X', kgpz: 'Pz', esperado: 30 }];
+  assert.equal(facComparar({ lines, rows: facFilasDe(r, null) }).lineas[0].de_mas, 30);   // what Cumbres saw
+  assert.equal(facComparar({ lines, rows: facFilasDe(r, [1]) }).lineas[0].de_mas, 0);
+  assert.equal(facFolioDe(r, [1]), 'RK 262247');
+  assert.equal(facFolioDe(r, null), 'RK 262247 / RK 262246');
+  assert.equal(facFacturas({ reference: 'A 1', rows: r.rows }), null);                      // one folio, two pages
+  assert.equal(facFacturas({ reference: r.reference, rows: [{ ...row(1, 1, 5), photo: undefined }] }), null); // older reader
+  assert.equal(facFacturas({ reference: r.reference, rows: [...r.rows, row(3, 3, 1)] }).grupos[0].folio, null); // 2 folios, 3 photos
+  const e = (d) => [{ session_id: 'a', detalle: { read_id: 'r1', ...d } }];
+  assert.ok(facLigadas(e({}), 'b').has('r1'));
+  assert.ok(!facLigadas(e({ fotos: [1] }), 'b').has('r1'));
 });
 
 console.log(`${n} tests passed`);
