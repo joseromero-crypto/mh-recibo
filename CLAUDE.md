@@ -165,7 +165,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   (`fdrPrep` → `RV.fdrFac`). **Global rule (Jose, 2026-11-24):
   everything charged and not into our system goes on it, whatever the reason.** Per billed OC line `fdrPartes` splits
   facturado − recibido: rechazo (≤ billed; Fecha corta with «Caducidad mínima aceptada», Producto dañado) + «No llegó» + de
-  más above the OC («Excedente» if it arrived, else «Facturado de más»); plus every billed product outside the OC, scanned or
+  más above the OC (arrived: rejected as «Más de lo pedido»; not arrived: «No solicitado», same as a product outside the
+  OC). «No llegó» = ordered, charged, never arrived. Plus every billed product outside the OC, scanned or
   not (full billed quantity). Kg / unread quantity (`a_mano`): nothing received → «No llegó» with Cantidad blank; something
   received → on-screen note to check by hand. Never what the invoice doesn't charge (driver's mistake, no form). No review
   yet → rejections only + a note; a review saved later updates the button (`fdrBtn`, counts products). SKU Proveedor = the OC line's `sku_marca` read from

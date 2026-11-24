@@ -4184,7 +4184,13 @@ function fdrItems(rows, d=fdrFac()){
     const q=Q(r), p=fdrPartes(x, r.rech), hechos=`Facturado: ${q(x.facturado)}, recibido: ${q(x.recibido||0)}`;
     if(p.rechazo>0) out.push({ r, cant:q(p.rechazo), motivo:mot(r), obs:obsR(r) });
     if(p.no_llego>0) out.push({ r, cant:q(p.no_llego), motivo:'No llegó', obs:hechos+(p.rechazo>0?`, rechazado: ${q(p.rechazo)}`:'') });
-    if(p.de_mas>0) out.push({ r, cant:q(p.de_mas), motivo:r.exc>0||r.excFlag?'Excedente':'Facturado de más', obs:`Pedido: ${q(x.pedido)}, facturado: ${q(x.facturado)}` });
+    // Charged above the OC (Jose, 2026-11-24): what arrived is rejected because it's more than ordered; what didn't is «No
+    // solicitado», like a product outside the OC. excFlag (modo botones): it arrived, uncounted → all of it.
+    if(p.de_mas>0){
+      const lleg=r.excFlag?p.de_mas:facR2(Math.min(r.exc||0, p.de_mas)), resto=facR2(p.de_mas-lleg), ob=`Pedido: ${q(x.pedido)}, facturado: ${q(x.facturado)}`;
+      if(lleg>0) out.push({ r, cant:q(lleg), motivo:'Más de lo pedido', obs:ob });
+      if(resto>0) out.push({ r, cant:q(resto), motivo:'No solicitado', obs:ob+'; lo de más no se recibió' });
+    }
     // Quantity not comparable: only certain when nothing came in. Cantidad is written by hand from the invoice.
     if(p.a_mano && !(x.recibido>0) && !(p.rechazo>0)) out.push({ r, cant:'', motivo:'No llegó', obs:'Facturado, no se recibió: escribe la cantidad de la factura' });
   };
