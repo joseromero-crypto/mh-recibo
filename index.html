@@ -4383,13 +4383,23 @@ function facLineKeys(l){
   return out;
 }
 // lines: the envío snapshot's OC lines; todas: cerrar.lineas_todas (pedido / recibido by sku_key); rows: the read's rows;
-// picks: { sourceRow: sku_key | 'no_oc' } for rows the auxiliar identified by hand.
-// → { lineas (every billed OC line), flagged (lines with something to look at), no_solicitados, no_identificados, conteo, ... }
+// picks: { sourceRow: sku_key | 'no_oc' } for rows the auxiliar identified by hand, and { 'q'+sourceRow: n } for a quantity
+// the auxiliar settled (facDudas below), in Retool units.
+// → { lineas (every billed OC line), flagged (lines with something to look at), no_solicitados, no_identificados, dudas, conteo, ... }
+/* Unsure quantity (Avícola, Bachoco Huevo 2026-11-25): Invoice Reader read «40» under «Pieza/Caja» but marked it quantityOk
+   false: its catalog buys by the case, so 40 piezas or 40 cajas (= 800). It can't see the OC; we can. On a Pz line that isn't
+   an N-pack, the read number (or the case reading from its note) that makes the line add up to the OC settles it; anything
+   else, or a number not read, is a duda: the auxiliar answers it from the invoice (piezas, cajas or typed), never skipped. */
+function facAltPz(r){
+  const t=(r.notes||[]).join(' '), m=t.match(/\(=\s*(\d[\d.,]*)\s*pz\)/i), c=t.match(/caja de (\d+)/i);
+  const alt=m?Number(m[1].replace(/,/g,'')):null;
+  return { alt:alt>0?alt:null, caja:c?Number(c[1]):null };
+}
 function facComparar({ lines=[], todas=[], rows=[], picks={} }){
   const oc=lines.map(l=>({ l, keys:facLineKeys(l) }));
   const bySku=new Map(oc.map(o=>[o.l.sku_key, o]));
   const tBy=new Map(todas.map(t=>[t.sku_key, t]));
-  const linked=new Map(), no_solicitados=[], no_identificados=[];
+  const linked=new Map(), no_solicitados=[], no_identificados=[], dudas=[], qRow=new Map();
   const nombre=r=>r.productName || r.printedDescription || ('Renglón '+r.sourceRow);
   for(const r of rows){
     const mk=new Set(r.matchKeys||[]);
@@ -4421,14 +4431,30 @@ function facComparar({ lines=[], todas=[], rows=[], picks={} }){
     // Pack line: piezas come in Retool units (paquetes) from Invoice Reader's record. A row of the newer record shape
     // (it has packKind) that doesn't say paquete (a row picked by hand, nobody sure of the product) can't be compared.
     const kg=(t.kgpz||l.kgpz)==='Kg', pn=packN(l.producto, l.kgpz);
-    const dudosa=rs.some(r=>r.piezas==null || r.quantityOk===false || (pn>0 && 'packKind' in r && r.retoolUnit!=='paquete'));
     const x={ sku_key:sku, producto:l.producto, kgpz:kg?'Kg':'Pz', pedido, recibido, filas:rs.map(r=>r.sourceRow) };
+    const tq=r=>picks['q'+r.sourceRow]!=null && Number(picks['q'+r.sourceRow])>=0 ? Number(picks['q'+r.sourceRow]) : null;
+    let qs=rs.map(r=>tq(r)!=null?tq(r):r.piezas), duda=[];
+    if(!kg && !pn){
+      duda=rs.filter(r=>tq(r)==null && (r.piezas==null || r.quantityOk===false));
+      const tot=a=>a.every(v=>v!=null)?facR2(a.reduce((s,v)=>s+Number(v),0)):null;
+      if(duda.length && pedido>0){
+        if(tot(qs)===pedido){ duda=[]; x.cantidad_oc=true; }
+        else if(duda.length===1){ const i=rs.indexOf(duda[0]), a=facAltPz(duda[0]).alt; const q2=qs.slice(); q2[i]=a;
+          if(a!=null && tot(q2)===pedido){ qs=q2; duda=[]; x.cantidad_oc=true; } }
+      }
+      if(rs.some(r=>tq(r)!=null)) x.cantidad_mano=true;
+      for(const r of duda){ const a=facAltPz(r);
+        dudas.push({ sourceRow:r.sourceRow, sku_key:sku, producto:l.producto, pedido, piezas:r.piezas==null?null:facR2(r.piezas), alt:a.alt, caja:a.caja,
+          nota:(r.notes||[])[0]||null, descripcion:r.printedDescription||'', codigos:(r.printedCodes||[]).map(c=>c.value) }); }
+    }
+    rs.forEach((r,i)=>qRow.set(r.sourceRow, qs[i]));
+    const dudosa=(!kg && !pn) ? duda.length>0 : rs.some(r=>r.piezas==null || r.quantityOk===false || (pn>0 && 'packKind' in r && r.retoolUnit!=='paquete'));
     if(pn){ x.pack_n=pn; const ps=rs.map(r=>r.piezasSueltas); if(ps.every(v=>v!=null)) x.piezas_sueltas=facR2(ps.reduce((s,v)=>s+Number(v),0));
       // pack_retool: every row says it counted paquetes (Invoice Reader ≥ faf84a4). Only then can the invoice settle paquetes vs piezas.
       if(rs.every(r=>r.retoolUnit==='paquete')) x.pack_retool=true; }
-    if(kg || dudosa){ x.revisar=kg?'kg':'cantidad'; x.facturado=dudosa?null:facR2(rs.reduce((s,r)=>s+Number(r.piezas),0)); }
+    if(kg || dudosa){ x.revisar=kg?'kg':'cantidad'; x.facturado=dudosa?null:facR2(qs.reduce((s,v)=>s+Number(v),0)); }
     else{
-      x.facturado=facR2(rs.reduce((s,r)=>s+Number(r.piezas),0));
+      x.facturado=facR2(qs.reduce((s,v)=>s+Number(v),0));
       x.de_mas=Math.max(0, facR2(x.facturado-pedido));
       x.no_fisico=Math.max(0, facR2(Math.min(x.facturado, pedido)-recibido));
     }
@@ -4439,11 +4465,11 @@ function facComparar({ lines=[], todas=[], rows=[], picks={} }){
   const flagged=lineas.filter(x=>x.revisar || x.de_mas>0 || x.no_fisico>0);
   const sin_facturar=facSinFacturar(todas, lineas);
   const sum=(a,k)=>facR2(a.reduce((s,x)=>s+(Number(x[k])||0),0));
-  return { lineas, flagged, no_solicitados, no_identificados, sin_facturar,
+  return { lineas, flagged, no_solicitados, no_identificados, dudas, sin_facturar,
     conteo:{ no_solicitado:no_solicitados.length, de_mas:lineas.filter(x=>x.de_mas>0).length, no_fisico:lineas.filter(x=>x.no_fisico>0).length,
       por_revisar:lineas.filter(x=>x.revisar).length, no_identificado:no_identificados.length, sin_facturar:sin_facturar.length },
     // pieces only: rows billing a Kg line are left out of the total
-    piezas:{ facturadas:sum(rows.filter(r=>r.piezas!=null && !lineas.some(x=>x.kgpz==='Kg' && x.filas.includes(r.sourceRow))),'piezas'), de_mas:sum(lineas,'de_mas'), no_fisico:sum(lineas,'no_fisico'), no_solicitado:sum(no_solicitados,'piezas') },
+    piezas:{ facturadas:sum(rows.map(r=>({ r, v:qRow.has(r.sourceRow)?qRow.get(r.sourceRow):r.piezas })).filter(o=>o.v!=null && !lineas.some(x=>x.kgpz==='Kg' && x.filas.includes(o.r.sourceRow))).map(o=>({ piezas:o.v })),'piezas'), de_mas:sum(lineas,'de_mas'), no_fisico:sum(lineas,'no_fisico'), no_solicitado:sum(no_solicitados,'piezas') },
     limpia:!flagged.length && !no_solicitados.length && !no_identificados.length && !sin_facturar.length };
 }
 // OC lines that a hand pick gave a second, different invoice product (Contry Alpura 2026-11-24: «PQ C4 1L» and «SEMI DESLAC
@@ -4860,6 +4886,36 @@ function facIdHtml(n, r, c){
     ${sug.length?`<div class="fid-q">${sug.length===1?'¿Es este?':'¿Es uno de estos?'}</div>${sug.slice(0,3).map(l=>facIdOpcion(n, l, us.has(l.sku_key))).join('')}`:''}
     <div class="fid-btns"><button class="btn btn-secondary" onclick="facIdAbrir(${J})">${sug.length?'Es otro de la orden':'Buscar en la orden'}</button><button class="btn btn-secondary" onclick="facPickLinea(${J},'no_oc')">No está en la orden</button></div></div>`;
 }
+// ── Unsure quantities (facDudas in FACTURA-PURE): one card per invoice row, answered from the photo. The answer is
+// FACV.picks['q'+sourceRow] (Retool units), saved with the picks. Answered cards stay in place with Cambiar.
+function facDudasTodas(r, c){
+  const sinQ={}; for(const k in FACV.picks) if(!/^q/.test(k)) sinQ[k]=FACV.picks[k];
+  const pend=new Set(c.dudas.map(d=>d.sourceRow));
+  return facComparar({ lines:FACV.lines||[], todas:FACV.info.lineas_todas||[], rows:facFilas(r), picks:sinQ }).dudas
+    .filter(d=>pend.has(d.sourceRow) || FACV.picks['q'+d.sourceRow]!=null);
+}
+function facDudaHtml(d){
+  const l=(FACV.lines||[]).find(y=>y.sku_key===d.sku_key)||{ producto:d.producto }, J=d.sourceRow, q=FACV.picks['q'+J], oc=`OC ${fmtQty(d.pedido,'Pz')} pz`;
+  const fac=`<div class="fid-fac"><div class="fid-main"><div class="fid-lbl">En la factura</div><div class="fid-desc">${escapeHtml(d.descripcion||l.producto||'Renglón '+J)}</div>
+    ${d.codigos.length?`<div class="res-sub">Código ${escapeHtml(d.codigos.join(', '))}</div>`:''}</div>
+    <b class="fid-n">${d.piezas!=null?fmtQty(d.piezas,'Pz'):'¿?'}<small>${d.piezas!=null?'¿piezas o cajas?':'sin leer'}</small></b></div>`;
+  if(q!=null) return `<div class="fid-card done">${fac}<div class="fid-sel"><span class="fid-ok">${FID_OK}</span>${facIdProd(l, `<div class="res-sub">La factura cobra <b>${fmtQty(q,'Pz')} pz</b> · ${oc}</div>`)}
+    <button class="btn btn-secondary" onclick="facDudaQ(${J},null)">Cambiar</button></div></div>`;
+  const opc=[], uno=d.piezas===1;
+  if(d.piezas!=null) opc.push(`<button class="btn btn-secondary btn-block" style="margin-top:6px" onclick="facDudaQ(${J},${d.piezas})">${uno?'Es 1 pieza':`Son ${fmtQty(d.piezas,'Pz')} piezas`}</button>`);
+  if(d.piezas!=null && d.alt!=null) opc.push(`<button class="btn btn-secondary btn-block" style="margin-top:6px" onclick="facDudaQ(${J},${d.alt})">${uno?'Es 1 caja':`Son ${fmtQty(d.piezas,'Pz')} cajas`}${d.caja?' de '+d.caja:''} = ${fmtQty(d.alt,'Pz')} piezas</button>`);
+  return `<div class="fid-card">${fac}${facIdProd(l, `<div class="res-sub">${oc}</div>`)}
+    <div class="fid-q">${d.piezas!=null?'¿Cuántas piezas cobra la factura?':'La cantidad no se leyó: escríbela como viene en la factura'}</div>
+    ${d.nota?`<div class="muted" style="font-size:13px;margin:0 2px 6px">${escapeHtml(d.nota)}</div>`:''}${opc.join('')}
+    <div style="display:flex;gap:6px;margin-top:8px"><input id="fdq-${J}" class="text-input" style="flex:1;min-width:0" type="text" inputmode="numeric" autocomplete="off" placeholder="${d.piezas!=null?'Otra cantidad (piezas)':'Piezas'}">
+    <button class="btn btn-secondary" onclick="facDudaEscribir(${J})">Usar</button></div></div>`;
+}
+function facDudaQ(row, v){ if(!FACV) return; if(v==null) delete FACV.picks['q'+row]; else FACV.picks['q'+row]=v; facBoxRender(); }
+function facDudaEscribir(row){
+  const el=document.getElementById('fdq-'+row), v=Number(String(el&&el.value||'').trim().replace(',','.'));
+  if(!(el && el.value.trim()!=='' && v>=0 && Number.isInteger(v))){ toast('Escribe las piezas que cobra la factura (número entero)'); return; }
+  facDudaQ(row, v);
+}
 function facIdRow(row){
   const r=FACV && facLectura(); if(!r) return null;
   const n=facComparar({ lines:FACV.lines, todas:FACV.info.lineas_todas||[], rows:facFilas(r), picks:{} }).no_identificados.find(x=>x.sourceRow===row);
@@ -4915,7 +4971,7 @@ function facAutoGuardar(){
   if(facAvisos(r) && !FACV.ack) return;
   if(FACV.saved && FACV.saved.detalle && FACV.saved.detalle.read_id===r.read_id && !FACV.cambiando) return;
   if(facComparando()) return;
-  const c=facCmp(r); if(c.no_identificados.length || (Object.keys(FACV.picks).length && !FACV.recomparar)) return;
+  const c=facCmp(r); if(c.no_identificados.length || c.dudas.length || (Object.keys(FACV.picks).length && !FACV.recomparar)) return;
   facGuardar(r, c);
 }
 // «Comparando…» stays up at least FAC_COMP_MS, so the receptor sees the reception being checked against the invoice
@@ -5013,7 +5069,7 @@ function facResultadoHtml(d){
     it(dm, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">factura ${facQ(x.facturado,x,x.piezas_sueltas)} · pedido ${facQ(x.pedido,x)}</small></span><b>${facQ(x.de_mas,x)}</b>`));
   if(sf.length) h+=act(`Reportar: llegaron sin facturar · ${sf.length}`, 'Se recibieron pero la factura no los cobra. Que el proveedor los agregue a la factura.',
     it(sf, x=>`<span>${escapeHtml(x.producto)}</span><b>${fmtQty(x.recibido,x.kgpz)} ${unitOf(x.kgpz)}</b>`));
-  if(rv.length) h+=`<div class="fac-sec">Revisar a mano · ${rv.length}</div>`+it(rv, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">${x.revisar==='kg'?'Se pide en kg: compara a mano':'La cantidad de la factura no se leyó bien'}${x.facturado!=null?' · factura '+facQ(x.facturado,x,x.piezas_sueltas):''} · recibido ${facQ(x.recibido,x)}</small></span><b>revisar</b>`);
+  if(rv.length) h+=`<div class="fac-sec">Revisar a mano · ${rv.length}</div>`+it(rv, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">${x.revisar==='kg'?'Se pide en kg: compara a mano':x.facturado!=null?'No se supo si la factura cobra piezas o paquetes':'La cantidad de la factura no se leyó bien'}${x.facturado!=null?' · factura '+facQ(x.facturado,x,x.piezas_sueltas):''} · recibido ${facQ(x.recibido,x)}</small></span><b>revisar</b>`);
   return h+`<div class="note" style="margin-top:8px">Solo se paga lo pedido <b>y</b> recibido. ¿El proveedor trajo algo que faltaba? Usa «Corregir lo recibido» en el producto.</div>`;
 }
 function facBoxInner(){
@@ -5045,16 +5101,20 @@ function facBoxInner(){
       ${r.totals_ok===false?'<div>Los totales de la factura no cuadran con los renglones leídos.</div>':''}${(r.warnings||[]).map(w=>`<div>· ${escapeHtml(w)}</div>`).join('')}
       <div class="fac-btns">${facVigente(sid)?`<button class="btn btn-secondary" onclick="facPick(${J},true)">Tomar todas las páginas</button><button class="btn btn-secondary" onclick="facPick(${J},false)">Elegir archivos</button>`:''}<button class="btn btn-secondary" onclick="FACV.ack=true;FACV.compStart=0;facBoxRender()">Está completa: comparar</button></div></div>`+volver;
     const c=facCmp(r);
-    if(!c.no_identificados.length && (!Object.keys(FACV.picks).length || FACV.recomparar)) return h+(INI_?facLoaderHtml('Comparando la factura contra la OC…', 'Producto por producto: lo pedido y lo cobrado.'):facLoaderHtml('Comparando la recepción contra la factura…', 'Producto por producto: lo pedido, lo recibido y lo cobrado.'));
+    if(!c.no_identificados.length && !c.dudas.length && (!Object.keys(FACV.picks).length || FACV.recomparar)) return h+(INI_?facLoaderHtml('Comparando la factura contra la OC…', 'Producto por producto: lo pedido y lo cobrado.'):facLoaderHtml('Comparando la recepción contra la factura…', 'Producto por producto: lo pedido, lo recibido y lo cobrado.'));
     const pend=facComparar({ lines:FACV.lines, todas:I.lineas_todas||[], rows:facFilas(r), picks:{} }).no_identificados;
-    const faltan=c.no_identificados.length, reps=facRepPend(r, c);
-    const n=pend.length, listos=n-faltan;
-    return h+`<h2 class="fid-h">${n===1?'¿Qué producto es este renglón?':'¿Qué productos son estos renglones?'}</h2>
-      <div class="muted">${n===1?'La factura lo cobra':'La factura los cobra'}, pero el código no coincide con ${n===1?'un solo producto':'un producto'} de la orden.</div>${facFotoLink(r.read_id)}
-      ${n>1?`<div class="fid-prog"><div class="progress"><div style="width:${Math.round(listos/n*100)}%"></div></div><b>${listos} de ${n}</b></div>`:''}`
+    const faltan=c.no_identificados.length, reps=facRepPend(r, c), dud=facDudasTodas(r, c), qf=c.dudas.length;
+    const n=pend.length, nd=dud.length, tot=n+nd, listos=tot-faltan-qf;
+    const hId=n?`<h2 class="fid-h">${n===1?'¿Qué producto es este renglón?':'¿Qué productos son estos renglones?'}</h2>
+      <div class="muted">${n===1?'La factura lo cobra':'La factura los cobra'}, pero el código no coincide con ${n===1?'un solo producto':'un producto'} de la orden.</div>`:'';
+    const hQ=nd?`<h2 class="fid-h">${nd===1?'¿Cuánto cobra la factura de este producto?':'¿Cuánto cobra la factura de estos productos?'}</h2>
+      <div class="muted">Invoice Reader no está seguro de la cantidad${nd===1?'':'es'}. Revisa la foto de la factura.</div>`:'';
+    return h+(n?hId:hQ)+facFotoLink(r.read_id)
+      +(tot>1?`<div class="fid-prog"><div class="progress"><div style="width:${Math.round(listos/tot*100)}%"></div></div><b>${listos} de ${tot}</b></div>`:'')
       +pend.map(x=>facIdHtml(x, r, c)).join('')
+      +(n?hQ:'')+dud.map(facDudaHtml).join('')
       +reps.map(facRepHtml).join('')
-      +`<button class="btn btn-primary btn-block fid-save" ${faltan||reps.length||FACV.saving?'disabled':''} onclick="facGuardarPicks()">${faltan?(faltan===1?'Falta 1 por elegir':`Faltan ${faltan} por elegir`):reps.length?'Revisa el producto repetido':INI_?'Comparar contra la orden':'Guardar revisión de la factura'}</button>`+facOtraFotoHtml(sid)+volver;
+      +`<button class="btn btn-primary btn-block fid-save" ${faltan||qf||reps.length||FACV.saving?'disabled':''} onclick="facGuardarPicks()">${faltan?(faltan===1?'Falta 1 por elegir':`Faltan ${faltan} por elegir`):qf?(qf===1?'Falta 1 cantidad':`Faltan ${qf} cantidades`):reps.length?'Revisa el producto repetido':INI_?'Comparar contra la orden':'Guardar revisión de la factura'}</button>`+facOtraFotoHtml(sid)+volver;
   }
   if(st==='leyendo' && !FACV.recomparar) return h+facLoaderHtml('Leyendo la factura…', INI_?'Unos 15 segundos. Después se compara contra la OC.':'Unos 15 segundos. Después se compara contra la recepción.')+facOtraFotoHtml(sid)+volver;
   if(st==='fallo' && !FACV.recomparar && !FACV.verLista){
@@ -5128,7 +5188,7 @@ function facPickLinea(row, v){
   if(!FACV) return;
   if(v) FACV.picks[row]=v; else delete FACV.picks[row]; facBoxRender();
 }
-function facGuardarPicks(){ const r=facLectura(); if(!r) return; const c=facCmp(r); if(c.no_identificados.length || facRepPend(r, c).length) return; facGuardar(r, c); }
+function facGuardarPicks(){ const r=facLectura(); if(!r) return; const c=facCmp(r); if(c.no_identificados.length || c.dudas.length || facRepPend(r, c).length) return; facGuardar(r, c); }
 function facCambiar(){ FACV.cambiando=true; FACV.elegida=null; FACV.picks={}; FACV.ack=false; FACV.lista=null; FACV.manual=false; FACV.recomparar=null; FACV.compStart=0; FACV.fact=null; FACV.verLista=false; facBoxRender(); }
 function facManual(){ FACV.manual=true; FACV.motivo=''; facBoxRender(); }
 const FAC_MOTIVOS=['No trajo factura','La factura no se puede leer','Otro'];
@@ -5907,7 +5967,13 @@ function demoGenerar(){
     });
     items.push(it(ns,{ llego:3, tipo:'no_envio', nota:'Facturado sin pedir: se regresa' })); espera.push(`${ns.producto}: la factura lo cobra sin estar en la OC → aviso al empezar y «regrésalo» al escanearlo`);
     // Factura primero: line 0 billed 2 short, lines 6 and 7 not billed (7 arrives anyway)
-    const rows=ls.map((l,i)=>[i,l]).filter(([i])=>i!==6 && i!==7).map(([i,l],k)=>invRow(k+1, l, i===2?l.pedido+2:i===8?4:i===0?l.pedido-2:l.pedido));
+    // Unsure quantities (Avícola, Bachoco 2026-11-25): line 1's case reading adds up to the OC (settled, nothing asked);
+    // line 4's doesn't → «¿Cuántas piezas cobra la factura?»
+    const duda=(n, caja)=>({ quantityOk:false, piezas:n, notes:[`¿${n} piezas o ${n} cajas (= ${n*caja} pz)? El catálogo compra por caja de ${caja}`] });
+    const rows=ls.map((l,i)=>[i,l]).filter(([i])=>i!==6 && i!==7).map(([i,l],k)=>invRow(k+1, l, i===2?l.pedido+2:i===8?4:i===0?l.pedido-2:l.pedido,
+      i===1?duda(1, l.pedido):i===4?duda(1, 24):undefined));
+    espera.push(`${ls[1].producto}: la factura dice «1» (¿pieza o caja?); 1 caja de ${ls[1].pedido} = la OC → se toma sin preguntar`);
+    espera.push(`${ls[4].producto}: la factura dice «1» (¿pieza o caja de 24?) y ninguna cuadra con la OC → pregunta «¿Cuántas piezas cobra la factura?»: escribe ${ls[4].pedido} → cobra ${ls[4].pedido} que no llegaron`);
     rows.push(invRow(rows.length+1, { codigo:ns.code, sku_marca:'SM900', producto:ns.producto }, 3));
     rows.push({ sourceRow:rows.length+1, sku:null, productName:null, matchedBy:null, confident:false, piezas:1, quantityOk:true, printedCodes:[{ header:'CODIGO', value:'EXH-01' }],
       printedDescription:'EXHIBIDOR PROMOCIONAL', printedQuantities:[], printedUnit:'PZ', candidates:[], notes:[], matchKeys:['EXH01'] });

@@ -206,6 +206,13 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - Repeated pick (2026-11-25): `facRepetidos` finds an OC line where a hand pick joined invoice rows with different codes;
   the picks screen shows both rows and won't save until the pick changes or «Sí, son el mismo producto» (`FACV.repOk`, per
   read and set of rows). A warning, not a ban: one product can come under two codes. Automatic re-comparisons never ask.
+- Unsure quantity (2026-11-25, Avícola Bachoco Huevo: «40» under «Pieza/Caja», Invoice Reader `quantityOk:false` because its
+  catalog buys by the case → the line was «Cantidad por revisar» with no way to enter it). On a Pz line that isn't an N-pack
+  (`facComparar`): the read number, or the case reading from the row's note («(= 800 pz)», `facAltPz`), that makes the line
+  add up to the OC settles it (`cantidad_oc`); otherwise, or with no number read, it's a `duda` and the picks screen asks
+  «¿Cuántas piezas cobra la factura?» (`facDudaHtml`: Son n piezas | Son n cajas de c = m piezas | type it). The answer is
+  `FACV.picks['q'+sourceRow]` (saved in `detalle.picks`, line `cantidad_mano`); saving waits for every duda. Kg and pack
+  lines keep «revisar a mano». Planted in «Lácteos Prueba» (one settled by the case reading, one asked).
 - Event `factura` (latest wins; `facGuardarDetalle`, through the outbox): read_id, origen, reference, totals_ok, conteo,
   piezas, `lineas` (every billed OC line), no_solicitados, picks — or `{manual:true, motivo}`. Every other reader filters
   on explicit tipos, so it's ignored there. `facReporte` rewrites the report CSV with «Folio factura», «Facturado»,

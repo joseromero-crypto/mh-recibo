@@ -218,4 +218,33 @@ test('FDR: facturado − recibido, whatever the reason', () => {
   assert.deepEqual(fdrPartes({ revisar: 'kg', facturado: 4 }, 1), { rechazo: 1, no_llego: 0, de_mas: 0, a_mano: true });
 });
 
+test('unsure quantity (Avícola, Bachoco Huevo 2026-11-25): the OC settles it, else the auxiliar does', () => {
+  const L = (k, p, e) => ({ sku_key: k, barcode: k, producto: p, kgpz: 'Pz', esperado: e });
+  const lines = [L('7501101525018', 'Huevo blanco Bachoco caja 18pz', 40), L('7501101525513', 'Huevo blanco Bachoco caja 30pz', 20), L('7501101524202', 'Huevo 12pz', 30)];
+  const R = (sourceRow, k, piezas, note) => ({ sourceRow, matchKeys: [k], piezas, confident: true, quantityOk: false, productName: 'P', printedCodes: [{ value: 'c' + sourceRow }],
+    candidates: [], packKind: 'contenido', retoolUnit: 'pieza', notes: note ? [note] : [] });
+  // real read: 40 and 20 under «Pieza/Caja», both unsure → equal to the OC: settled, nothing asked
+  const real = [R(1, '7501101525018', 40, '¿40 piezas o 40 cajas (= 800 pz)? El catálogo compra por caja de 20'), R(2, '7501101525513', 20, '¿20 piezas o 20 cajas (= 200 pz)? El catálogo compra por caja de 10')];
+  let r = facComparar({ lines, rows: real });
+  assert.equal(r.dudas.length, 0);
+  assert.deepEqual(r.lineas.map(x => [x.facturado, x.revisar, x.cantidad_oc]), [[40, undefined, true], [20, undefined, true]]);
+  assert.equal(r.conteo.por_revisar, 0); assert.equal(r.piezas.facturadas, 60);
+  // the case reading from the note adds up to the OC: 3 cajas de 10 = 30
+  r = facComparar({ lines, rows: [R(3, '7501101524202', 3, '¿3 piezas o 3 cajas (= 30 pz)? El catálogo compra por caja de 10')] });
+  assert.deepEqual([r.lineas[0].facturado, r.dudas.length], [30, 0]);
+  // neither adds up → asked; unread → asked; answered → compared with the typed number
+  const odd = [R(1, '7501101525018', 2, '¿2 piezas o 2 cajas (= 40 pz)? x'), R(2, '7501101525513', 1, '¿1 piezas o 1 cajas (= 10 pz)? El catálogo compra por caja de 10'), R(3, '7501101524202', null)];
+  r = facComparar({ lines, rows: odd });
+  assert.deepEqual(r.dudas.map(d => [d.sourceRow, d.piezas, d.alt, d.caja]), [[2, 1, 10, 10], [3, null, null, null]]);
+  assert.equal(r.lineas[0].facturado, 40);
+  assert.deepEqual(r.lineas.slice(1).map(x => [x.revisar, x.facturado]), [['cantidad', null], ['cantidad', null]]);
+  r = facComparar({ lines, rows: odd, picks: { q2: 10, q3: 30 } });
+  assert.equal(r.dudas.length, 0);
+  assert.deepEqual(r.lineas.slice(1).map(x => [x.facturado, x.de_mas, x.cantidad_mano]), [[10, 0, true], [30, 0, true]]);
+  assert.equal(r.piezas.facturadas, 80);
+  // Kg and pack lines keep «revisar a mano»
+  r = facComparar({ lines: [{ ...lines[0], kgpz: 'Kg' }], rows: [R(1, '7501101525018', 40)] });
+  assert.deepEqual([r.lineas[0].revisar, r.dudas.length], ['kg', 0]);
+});
+
 console.log(`${n} tests passed`);
