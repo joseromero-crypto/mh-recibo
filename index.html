@@ -3583,6 +3583,10 @@ async function rvCorrGuardar(i){
   try{
     await pdCargarSesion(I);
     const sku=rvSkuOf(r), l=S.lines.get(sku); if(!l) throw new Error('el producto ya no está en la orden');
+    // A pack line nobody settled (off the invoice, never answered): the corrected count decides, like «Otra cantidad».
+    // Without it the mark carried no pack data and stayed invalid (Contry, Alpura 4 Pack, 2026-11-24: saved four times).
+    const pk=pdPackInfo(l), en=pk.falta && n>0 && packEnDe(n, l.esperado, pk.n);
+    if(en) pdPackSet(l, en.en, 'conteo', en.exacto); else if(pk.falta) pdPackSet(l, pdPackHeredado()||'piezas', 'supuesto', false);
     const P=pdObjDe(sku), prev=pdMarcas().get(sku), pm=prev&&prev.detalle.marca;
     if(n>=P) pdMarcar(sku, pm==='excedente'?'excedente':'completo', { recibido:P, post_cierre:true });
     else if(pm==='rechazo') pdMarcar(sku, 'rechazo', { recibido:n, rechazadas:round2(P-n), motivo:prev.detalle.motivo, post_cierre:true });

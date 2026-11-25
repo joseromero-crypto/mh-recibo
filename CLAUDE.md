@@ -240,7 +240,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   Reader's rows carry `packKind/packSize/retoolUnit/piezasSueltas` and `piezas` in Retool units; `facComparar` adds
   `pack_n`/`piezas_sueltas` per line and marks a newer-shape row without `retoolUnit:'paquete'` on a pack line «por revisar»
   (old-shape rows compare as before). The start's comparison uses the OC number; `facObjetivo`/`facCierre` redo it with
-  the paquetes Pedido. The blind count flow (receptions before 2026-11-14) is unchanged. Tests: `node tests/pack.test.mjs`
+  the paquetes Pedido. The blind count flow (receptions before 2026-11-14) is unchanged. After-close correction of a line
+  nobody settled (off the invoice): the corrected count decides paquetes vs piezas (`rvCorrGuardar`; Contry Alpura, 2026-11-24). Tests: `node tests/pack.test.mjs`
   (San Nicolás replay from gitignored `fixtures/arca-2026-11-20-*.json`); Modo prueba «Refrescos Prueba».
 
 - **Bimbo / Marinela (2026-11-24, Jose)** — compras writes both under «Bimbo», each with its own OC and invoice, so they are
