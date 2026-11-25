@@ -3181,7 +3181,7 @@ function pdBLineHtml(r){
       :`<div class="pdb-ped">${rf?ocRaw:'<span>Factura</span>'+pb(P)}${rf?'':r.pedido!==P?`<span>· OC ${pkTxt(r.pedido,r)}</span>`:''}${tc}</div>`)
       +(r.deMas>0&&!rf?`<div class="ritem-meta" style="color:var(--c-ink);font-weight:700;margin-top:4px">La factura cobra ${pkTxt(r.fac,r)} y la OC pide ${pkTxt(r.pedido,r)}: recibe ${pkTxt(P,r)}; lo de más se regresa y se quita de la factura.</div>`:'')
       +(r.revisarFac?`<div class="ritem-meta" style="margin-top:4px">Se revisa contra la OC: ${r.revisarFac==='kg'?'se pide en kg':'la cantidad de la factura no se leyó bien'}.</div>`:'')
-      +(r.nofac && !S.closedInfo && (S.pdEdit===r.sku || S.pdFoco===r.sku)?`<div class="pdb-pns"><b>No viene en la factura</b>Recíbelo y pide al proveedor que lo agregue a la factura.</div>`:'');
+      +(r.nofac && !S.closedInfo && (S.pdEdit===r.sku || S.pdFoco===r.sku)?`<div class="pdb-pns"><b>Producto sí pedido, no viene en la factura</b>Acepta ${r.packFalta?'hasta lo pedido':'hasta '+pkTxt(r.pedido,r)} y pide que modifiquen la factura para incluirlo.</div>`:'');
   } else if(!r.pns) h+=`<div class="pdb-ped">${r.packFalta && (r.pend || S.pdEdit===r.sku)?ocRaw:'<span>Pedido</span>'+pb(P)}${tc}</div>`;
   if(!r.pns) h+=(r.cad && (r.pend || S.pdEdit===r.sku || S.pdFoco===r.sku)?`<div class="pdb-cad"><small>Caducidad mínima</small><b>${dmy(r.cad)}</b></div>`:'');
   const codMal=!S.closedInfo && S.pdFoco===r.sku && S.pdCod && S.pdCod.sku===r.sku && !S.pdCod.ci
@@ -3441,7 +3441,7 @@ function pdFinRender(){
   let h='';
   if(OUTBOX.length) h+=`<div class="warn-box">Hay ${OUTBOX.length} registro(s) sin subir. Conéctate a internet para poder cerrar.</div>`;
   if(lista.length){
-    h+=`<div class="section-title">${pend.length?`Sin escanear · ${pend.length}`:'Sin escanear · listo'}</div>`
+    h+=`<div class="section-title">${pdFacMapa()?'La factura lo cobra y no se escaneó':'Sin escanear'} · ${pend.length||'listo'}</div>`
       +lista.map(r=>!r.pend || S.pdEdit===r.sku || (S.pdForm && S.pdForm.sku===r.sku) ? pdBLineHtml(r)
         : `<div class="pdb-row" data-sku="${escapeHtml(r.sku)}"><div class="ritem-row">${imgTag(r.barcode, r.producto, 'thumb')}<div class="ritem-main"><div class="ritem-name">${nameHtml(r.producto)}</div>
           ${r.packFalta?'':`<div class="ritem-meta">${r.facPrimero&&!r.nofac&&!r.revisarFac?'Factura':'Pedido'} ${pkTxt(r.obj,r)}</div>`}</div></div>
