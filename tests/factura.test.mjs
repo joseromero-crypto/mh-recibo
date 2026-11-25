@@ -10,8 +10,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const html = readFileSync(join(root, 'index.html'), 'utf8');
 const block = html.slice(html.indexOf('/* FACTURA-PURE:BEGIN'), html.indexOf('/* FACTURA-PURE:END */'));
 assert.ok(block.length > 100, 'FACTURA-PURE block not found');
-const { facNormCode, facComparar, facMismoProveedor, facLigadas, facInicio, facObjetivo, facCierre, facFolios, facFacturas, facFilasDe, facFolioDe, fdrPartes } =
-  new Function(block + '\nreturn { facNormCode, facComparar, facMismoProveedor, facLigadas, facInicio, facObjetivo, facCierre, facFolios, facFacturas, facFilasDe, facFolioDe, fdrPartes };')();
+const { facNormCode, facComparar, facMismoProveedor, facLigadas, facInicio, facObjetivo, facCierre, facFolios, facFacturas, facFilasDe, facFolioDe, fdrPartes, facRepetidos } =
+  new Function(block + '\nreturn { facNormCode, facComparar, facMismoProveedor, facLigadas, facInicio, facObjetivo, facCierre, facFolios, facFacturas, facFilasDe, facFolioDe, fdrPartes, facRepetidos };')();
 
 let n = 0;
 const test = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -120,6 +120,26 @@ test('synthetic: picks resolve no identificado', () => {
   assert.equal(r.no_solicitados[1].a_mano, true);
   // a pick pointing to a line that isn't in the order is ignored
   assert.equal(facComparar({ lines, todas, rows, picks: { 3: 'nope' } }).no_identificados.length, 2);
+});
+
+test('repeated pick: different invoice products on one OC line ask; one product billed twice does not', () => {
+  const oc = [L('7501055901425', 'Leche deslactosada Alpura 1L', 12), L('7501056215538', 'Leche deslactosada Alpura 1L (4 Pack)', 12)];
+  const row = (n, k, d) => ({ sourceRow: n, matchKeys: k, printedCodes: k.map(value => ({ value })), printedDescription: d, piezas: 12, quantityOk: true, candidates: [] });
+  const run = (rs, picks) => facRepetidos({ lineas: facComparar({ lines: oc, todas: [], rows: rs, picks }).lineas, rows: rs, picks });
+  const rs = [row(7, ['LEES025'], 'LECHE DESL PQ C4 1L'), row(9, ['LEES645'], 'LECHE SEMI DESLAC 1L')];
+  const one = run(rs, { 7: '7501055901425', 9: '7501055901425' });   // Contry, as it happened
+  assert.equal(one.length, 1); assert.deepEqual(one[0].filas.map(f => f.sourceRow), [7, 9]);
+  assert.equal(run(rs, { 7: '7501056215538', 9: '7501055901425' }).length, 0, 'the right picks');
+  assert.equal(run(rs, { 7: '7501055901425' }).length, 0, 'only one picked so far');
+  assert.equal(run(rs, { 7: 'no_oc', 9: 'no_oc' }).length, 0);
+  // one row linked by its code, the other by hand
+  const m = [row(1, ['7501055901425'], 'LECHE A'), rs[0]];
+  assert.equal(run(m, { 7: '7501055901425' }).length, 1);
+  // same code, or no codes and the same text: one product billed twice
+  assert.equal(run([row(1, ['X1'], 'A'), row(2, ['X1'], 'B')], { 1: '7501055901425', 2: '7501055901425' }).length, 0);
+  assert.equal(run([row(1, [], 'Leche  x'), row(2, [], 'LECHE X')], { 1: '7501055901425', 2: '7501055901425' }).length, 0);
+  // both linked by code: nobody picked anything
+  assert.equal(run([row(1, ['7501055901425', 'A'], 'A'), row(2, ['7501055901425'], 'B')], {}).length, 0);
 });
 
 test('synthetic: billed for a line received 0', () => {

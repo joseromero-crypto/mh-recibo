@@ -199,6 +199,13 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - Comparison `facComparar` + `facNormCode` (identical to Invoice Reader's lean/match.ts `normCode`) live in the
   `/* FACTURA-PURE:BEGIN … END */` block, no globals: `node tests/factura.test.mjs` evals it (Arca real fixtures, gitignored,
   skipped when missing; synthetic cases always).
+- Picker of unidentified rows (2026-11-25, Jose; `fid-*`): one card per row (`facIdHtml`): «En la factura» (text, code, quantity) →
+  up to 3 suggestions to tap (photo, name, OC), «Buscar en la orden» / «Es otro de la orden» (sheet `facIdAbrir` with search:
+  Sugeridos / Aún sin cobrar en la factura / Ya están en otro renglón) or «No está en la orden». Picked → teal row with Cambiar.
+  Nothing is preselected. No native `<select>` here. Planted case: «Lácteos Prueba» LP-0778.
+- Repeated pick (2026-11-25): `facRepetidos` finds an OC line where a hand pick joined invoice rows with different codes;
+  the picks screen shows both rows and won't save until the pick changes or «Sí, son el mismo producto» (`FACV.repOk`, per
+  read and set of rows). A warning, not a ban: one product can come under two codes. Automatic re-comparisons never ask.
 - Event `factura` (latest wins; `facGuardarDetalle`, through the outbox): read_id, origen, reference, totals_ok, conteo,
   piezas, `lineas` (every billed OC line), no_solicitados, picks — or `{manual:true, motivo}`. Every other reader filters
   on explicit tipos, so it's ignored there. `facReporte` rewrites the report CSV with «Folio factura», «Facturado»,
@@ -264,6 +271,13 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   `facNuevaFoto`: the saved review stays until the new read replaces it; «Descartar estas fotos» / «Dejar la revisión
   guardada» go back. `facLectura` never compares an older read by itself while a newer one is being read or failed; the
   list shows this reception's own reads so a retake can be undone. Invoice Reader allows 10 reads per reception.
+
+- **Terminar = pop-up, no review page (2026-11-25, Jose)** — modo botones: «Terminar revisión física» (`openResumen` →
+  `pdFinAbrir`) opens a sheet over Recibir (`#pd-fin`, `pdFinRender`): «Sin escanear» (No llegó | Sí llegó per line, one by one,
+  answered lines stay in place), «Antes de finalizar, regresa al proveedor» (`pdRegresar`: rechazo, de más, no solicitados
+  scanned), «Si llegó, también regrésalo» (billed, not on the OC or above it) and the close button. Replaces `pdBRenderResumen`
+  wherever older notes say Resumen for modo botones; the blind-count flow keeps `pdRenderResumen`. The closed view repeats the
+  return list on top (`pdRecepcionHead`) and has «Copiar lista para el sistema». While it's open `pdBListRender` draws nothing (same input ids).
 
 ## Modo prueba (2026-11-18)
 - `?demo={semilla}` runs the whole app unchanged on fake data; Admin → **Modo prueba** opens it in a new tab (no PIN
