@@ -5809,7 +5809,7 @@ async function spvCargar(el, m){
   st.spvApi=api;
   _spvFix=new Map(); for(const f of fix) _spvFix.set(f.clave, f);
   let rows=null, fuente='';
-  if(api && api.rows.length){ rows=api.rows; fuente=`Invoice Reader en vivo${api.generado?' · '+escapeHtml(api.generado):''}`; }
+  if(api && api.rows.length){ rows=api.rows; const g=api.generado?new Date(api.generado):null; fuente=`Invoice Reader en vivo${g&&!isNaN(g)?' · leído '+fechaLarga(localDateStr(g))+', '+localHM(g):''}`; }
   else {
     const f=(files||[]).filter(x=>/\.csv$/.test(x.name)).sort((a,b)=>b.name.localeCompare(a.name))[0];
     if(f){ try{ const p=Papa.parse(stripBOM(await sbFetch(SPV_DIR+f.name)), { header:true, skipEmptyLines:true }); rows=p.data||[];

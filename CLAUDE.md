@@ -353,7 +353,7 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   'barcode' | 'spv'; Admin and Comercial). Invoice rows Invoice Reader couldn't match → Retool needs the supplier code
   under «SKU Proveedor». Source: `spvDesdeApi` = `irPost({action:'sinCoincidencia'})` → `{ rows:[{ proveedor, ciudad, clave,
   codigo_barras, descripcion, motivo, facturas, ultima_vez, hubs:[], articulo_recibo, sku_recibo, sugerencia, sku_sugerido }],
-  generado? }` (asked of Invoice Reader 2026-11-25; until it exists any error → null), else the CSV comercial downloads from
+  generado? }` (live since 2026-11-25: 60 rows → 35 to review + 24 sin clave; any error → null → the uploaded file), else the CSV comercial downloads from
   Invoice Reader and uploads here (`spvSubir`, checks Proveedor + Clave proveedor columns, .xlsx refused) to
   `recibo/comercial/sin-coincidencia/{fecha}__{epochMs}.csv`, newest wins. `spvNorm` reads either shape (file column names in
   `SPV_COLS`). `spvAgrupar`: one row per normName(proveedor)|clave, clave without leading «*» (`spvClave`), invoices added,
