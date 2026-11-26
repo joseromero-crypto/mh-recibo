@@ -364,6 +364,9 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .cal-bar.pd.ok{background:var(--c-teal);color:var(--c-ink);border-color:var(--c-teal)}
 .cal-bar.pd.mal{background:var(--c-danger);color:var(--c-white);border-color:var(--c-danger)}
 .cal-bar.pd.esp{background:var(--c-pend);color:var(--c-ink);border-color:var(--c-pend)}
+.hub-btns{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
+.hub-btns button{min-height:36px;padding:0 14px;border-radius:var(--r-pill);border:1.5px solid var(--c-line);background:var(--c-white);color:var(--c-ink);font-size:13px;font-weight:600;cursor:pointer}
+.hub-btns button.sel{background:var(--c-ink);border-color:var(--c-ink);color:var(--c-white)}
 .cal-sw.pd-ok{background:var(--c-teal)} .cal-sw.pd-mal{background:var(--c-danger)} .cal-sw.pd-esp{background:var(--c-pend)}
 .ent-sec{font-size:12px;font-weight:700;color:var(--c-muted);margin:8px 0 2px}
 .ent-item{font-size:13px;padding:2px 0}
@@ -5407,14 +5410,16 @@ function entComparar(rec, data){
    from «Resumen») is read here and compared with each closed supplier reception (entComparar). Colours the Proveedores
    bars of the calendar and builds the morning list for every hub. Missing table → ENT.sinTabla, bars keep their old colour. ── */
 const ENT={ t:0, rows:{}, sinTabla:false, cerradas:null, tc:0 };
-const ENT_CACHE_MS=60000, ENT_DIAS_LISTA=21;
+const ENT_CACHE_MS=60000;
+// Colours and the list start on Monday 2026-11-23 (Jose): receptions before it are left as they were (no check)
+const ENT_DESDE='2026-11-23';
 async function entLoad(force){
   if(!force && Date.now()-ENT.t<ENT_CACHE_MS) return ENT.rows;
   try{ const rows=await pgSelect('rec_pd_entradas', 'select=hub,data,revisado'); ENT.rows={}; for(const r of rows) ENT.rows[r.hub]=r; ENT.sinTabla=false; }
   catch(e){ if(isNetErr(e)) throw e; ENT.rows={}; ENT.sinTabla=true; }
   ENT.t=Date.now(); return ENT.rows;
 }
-function entDe(info){ if(!isPdArea(info.area) || info.parcial) return null; const r=ENT.rows[info.hub]; return entComparar(info, r && r.data); }
+function entDe(info){ if(!isPdArea(info.area) || info.parcial || String(info.fecha||'')<ENT_DESDE) return null; const r=ENT.rows[info.hub]; return entComparar(info, r && r.data); }
 const ENT_TXT={ verde:'Con entrada en el sistema', rojo:'Entrada con diferencias', amarillo:'Por dar entrada', sin_oc:'Sin número de OC', sin_detalle:'Sin detalle por producto' };
 const ENT_CLS={ verde:'ok', rojo:'mal', amarillo:'esp', sin_oc:'esp' };
 function entRevisado(){ const ts=Object.values(ENT.rows).map(r=>r.revisado).filter(Boolean).sort().pop(); return ts?`«Resumen» leído ${fechaLarga(localDateStr(new Date(ts)))}, ${localHM(new Date(ts))}`:''; }
@@ -5437,21 +5442,43 @@ function entEstadoHtml(e){
   return h;
 }
 // Morning list (all hubs): «Por dar entrada» (closed before today, oldest first) and «Entrada con diferencias»
+// Date range of the list and of «Copiar mensaje para el hub» (session fecha); never before ENT_DESDE
+function entRangoDe(st){
+  const hoy=todayStr();
+  if(!st.entHasta){ st.entHasta=hoy; st.entDesde=ymdAdd(hoy,-20)>ENT_DESDE?ymdAdd(hoy,-20):ENT_DESDE; }
+  return { desde:st.entDesde, hasta:st.entHasta };
+}
+function entRango(k, v, m){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
+  const st=VST(m), hoy=todayStr(); entRangoDe(st);
+  v=v<ENT_DESDE?ENT_DESDE:v>hoy?hoy:v;
+  if(k==='desde') st.entDesde=v; else st.entHasta=v;
+  if(st.entDesde>st.entHasta){ if(k==='desde') st.entHasta=v; else st.entDesde=v; }
+  entMananaPintar(m);
+}
+function entMananaPintar(m){
+  const mn=vEl(m) && vEl(m).querySelector('#ent-manana'); if(!mn) return;
+  entMananaHtml(m).then(x=>{ if(mn.isConnected) mn.innerHTML=x; }).catch(e=>{ if(mn.isConnected) mn.innerHTML=`<div class="note">${isNetErr(e)?'Sin conexión: no se pudo revisar las entradas en el sistema.':'Entradas en el sistema: '+escapeHtml(e.message)}</div>`; });
+}
 async function entMananaHtml(m){
   await entLoad();
   if(ENT.sinTabla) return `<div class="note">Revisión de entradas en el sistema: falta correr <b>sql/pd-entradas.sql</b> en Supabase y activar la lectura de «Resumen» en el Apps Script.</div>`;
-  if(!ENT.cerradas || Date.now()-ENT.tc>ENT_CACHE_MS){ ENT.cerradas=(await listCerradas(null, 'pd', ENT_DIAS_LISTA)).filter(c=>!c.parcial && (c.hub!=='test-hub' || IS_LOCAL)); ENT.tc=Date.now(); }
-  const hoy=todayStr(), por=new Map();
+  const st=VST(m), R=entRangoDe(st), hoy=todayStr(), dias=daysBetween(R.desde, hoy)+1;
+  if(!ENT.cerradas || ENT.dias<dias || Date.now()-ENT.tc>ENT_CACHE_MS){ ENT.cerradas=(await listCerradas(null, 'pd', dias)).filter(c=>!c.parcial && (c.hub!=='test-hub' || IS_LOCAL)); ENT.tc=Date.now(); ENT.dias=dias; }
+  const por=new Map();
   for(const c of ENT.cerradas){
+    if(c.fecha<R.desde || c.fecha>R.hasta) continue;
     const e=entDe(c); if(!e) continue;
     const esp=(e.estado==='amarillo' || e.estado==='sin_oc') && c.fecha<hoy, mal=e.estado==='rojo';
     if(!esp && !mal) continue;
     if(!por.has(c.hub)) por.set(c.hub, { esp:[], mal:[] });
     por.get(c.hub)[mal?'mal':'esp'].push({ c, e });
   }
-  ENT.manana=[...por.entries()].sort((a,b)=>hubName(a[0]).localeCompare(hubName(b[0])));
-  const head=`<div class="section-title" style="margin-top:4px">Entradas en el sistema · todos los hubs</div><div class="muted" style="font-size:12px;margin-bottom:8px">Recepciones de proveedor de los últimos ${ENT_DIAS_LISTA} días contra «Resumen» de compras. ${escapeHtml(entRevisado())}</div>`;
-  if(!ENT.manana.length) return head+`<div class="warn-box ok">Todo lo recibido de proveedores hasta ayer ya tiene entrada en el sistema.</div>`;
+  ENT.manana=[...por.entries()].sort((a,b)=>hubName(a[0]).localeCompare(hubName(b[0]))); ENT.manana.m=m;
+  const M=`'${m}'`, head=`<div class="section-title" style="margin-top:18px">Entradas en el sistema · todos los hubs</div>
+    <div class="adm-field pv-fechas" style="margin:0 0 6px"><span>Recibidas del</span><input type="date" value="${R.desde}" min="${ENT_DESDE}" max="${hoy}" onchange="entRango('desde',this.value,${M})" aria-label="Desde"><span>al</span><input type="date" value="${R.hasta}" min="${ENT_DESDE}" max="${hoy}" onchange="entRango('hasta',this.value,${M})" aria-label="Hasta"></div>
+    <div class="muted" style="font-size:12px;margin-bottom:8px">Recepciones de proveedor contra «Resumen» de compras; el mensaje para el hub usa estas fechas. Se revisa desde el ${fechaLarga(ENT_DESDE)}. ${escapeHtml(entRevisado())}</div>`;
+  if(!ENT.manana.length) return head+`<div class="warn-box ok">En estas fechas todo lo recibido de proveedores ya tiene entrada en el sistema${R.hasta>=hoy?' (lo de hoy aparece cuando lleve un día sin entrada)':''}.</div>`;
   const prov=c=>escapeHtml(c.proveedor||areaName(c.area)), oc=c=>(c.num_oc||[]).length?' · OC '+c.num_oc.map(escapeHtml).join(', '):'';
   return head+ENT.manana.map(([hub, g], hi)=>`<div class="adm-row ent-hub"><b>${escapeHtml(hubName(hub))}</b>
     ${g.esp.length?`<div class="ent-sec">Por dar entrada · ${g.esp.length}</div>`+g.esp.slice().sort((a,b)=>a.c.fecha.localeCompare(b.c.fecha)).map(({c,e})=>`<div class="ent-item">${prov(c)}${oc(c)} · recibido ${escapeHtml(pvFechaCorta(c.fecha))} · hace ${daysBetween(c.fecha, hoy)} día${daysBetween(c.fecha, hoy)===1?'':'s'}${e.estado==='sin_oc'?' · sin número de OC':''}</div>`).join(''):''}
@@ -5459,11 +5486,12 @@ async function entMananaHtml(m){
     <button class="btn btn-secondary btn-block" style="margin-top:8px" onclick="entCopiar(${hi})">Copiar mensaje para el hub</button></div>`).join('');
 }
 async function entCopiar(i){
-  const x=ENT.manana && ENT.manana[i]; if(!x) return;
+  const x=ENT.manana && ENT.manana[i]; if(!x) return; x.m=ENT.manana.m;
   await loadSlackTags();
   const [hub, g]=x, tag=SLACK_HUBS[hub]||'', hoy=todayStr();
   const prov=c=>(c.proveedor||areaName(c.area))+((c.num_oc||[]).length?' · OC '+c.num_oc.join(', '):'');
-  const out=[`*${hubName(hub)} · entradas en el sistema*${tag?' '+tag:''}`];
+  const R=entRangoDe(VST(x.m||'admin')), rango=R.desde===R.hasta?pvFechaCorta(R.desde):`${pvFechaCorta(R.desde)} – ${pvFechaCorta(R.hasta)}`;
+  const out=[`*${hubName(hub)} · entradas en el sistema · recibido ${rango}*${tag?' '+tag:''}`];
   if(g.esp.length){ out.push('', 'Por dar entrada (recibido en la app, sin entrada en el sistema):');
     g.esp.slice().sort((a,b)=>a.c.fecha.localeCompare(b.c.fecha)).forEach(({c})=>out.push(`• ${prov(c)} · recibido ${pvFechaCorta(c.fecha)} (hace ${daysBetween(c.fecha, hoy)} d)`)); }
   if(g.mal.length){ out.push('', 'Entrada con diferencias (corregir en el sistema):');
@@ -5520,7 +5548,7 @@ async function admCalendario(el, m='admin'){
   ses.forEach(r=>{ for(let d=r.desde; d<=r.hasta; d=ymdAdd(d,1)) if(d>=ini && d<=fin) cubre[grp(r)].add(d); });
   const grupos=GRUPOS.filter(a=>a.id!=='pd' || ses.some(r=>grp(r)==='pd'));
   const diasMes=Math.max(0, daysBetween(ini, today<fin?today:fin)+1);
-  let h=`<div id="ent-manana"></div><div class="filters"><select onchange="VST('${m}').hub=this.value;vRender('${m}')" aria-label="Hub">${ADM_HUBS().map(x=>`<option value="${x.slug}" ${st.hub===x.slug?'selected':''}>${escapeHtml(x.name)}</option>`).join('')}</select></div>
+  let h=`<div class="hub-btns" role="group" aria-label="Hub">${ADM_HUBS().map(x=>`<button class="${st.hub===x.slug?'sel':''}" aria-pressed="${st.hub===x.slug}" onclick="VST('${m}').hub='${x.slug}';vRender('${m}')">${escapeHtml(x.name.replace(/^MH /,''))}</button>`).join('')}</div>
     <div class="cal-nav"><button onclick="admCalMes(-1,'${m}')" aria-label="Mes anterior">‹</button><b>${MESES[Number(st.calMes.slice(5))-1]} ${st.calMes.slice(0,4)}</b><button onclick="admCalMes(1,'${m}')" aria-label="Mes siguiente">›</button></div>
     <div class="cal-dow">${['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d=>`<div>${d}</div>`).join('')}</div>`;
   for(let w=gridIni; w<=gridFin; w=ymdAdd(w,7)){
@@ -5548,11 +5576,11 @@ async function admCalendario(el, m='admin'){
   const conPd=grupos.some(a=>a.id==='pd') && !ENT.sinTabla;
   h+=`<div class="cal-legend">${grupos.map(a=>`<span><i class="cal-sw ${a.id}"></i>${a.name}: ${cubre[a.id].size} de ${diasMes} días</span>`).join('')}<span><i class="cal-sw open"></i>abierta / sin cerrar</span></div>
     ${conPd?`<div class="cal-legend" style="margin-top:-4px"><span>Proveedores en el sistema:</span><span><i class="cal-sw pd-ok"></i>con entrada</span><span><i class="cal-sw pd-esp"></i>por dar entrada</span><span><i class="cal-sw pd-mal"></i>con diferencias</span></div>
-    <div class="muted" style="font-size:12px;margin:-4px 0 8px">Solo proveedores: CH no está en «Resumen». ${escapeHtml(entRevisado())}</div>`:''}
-    <div id="cal-detalle"><div class="muted" style="font-size:13px">Toca una barra para ver la recepción.</div></div>`;
+    <div class="muted" style="font-size:12px;margin:-4px 0 8px">Solo proveedores desde el ${fechaLarga(ENT_DESDE)}: CH no está en «Resumen». ${escapeHtml(entRevisado())}</div>`:''}
+    <div id="cal-detalle"><div class="muted" style="font-size:13px">Toca una barra para ver la recepción.</div></div>
+    <div id="ent-manana"></div>`;
   el.innerHTML=h;
-  const mn=el.querySelector('#ent-manana');
-  entMananaHtml(m).then(x=>{ if(mn.isConnected) mn.innerHTML=x; }).catch(e=>{ if(mn.isConnected) mn.innerHTML=`<div class="note">${isNetErr(e)?'Sin conexión: no se pudo revisar las entradas en el sistema.':'Entradas en el sistema: '+escapeHtml(e.message)}</div>`; });
+  entMananaPintar(m);
 }
 function admCalVer(i, m='admin'){
   const r=_admCal[i], c=r.cerrada;

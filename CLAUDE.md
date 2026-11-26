@@ -339,9 +339,12 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   not in Resumen; with 2 OCs a line not found isn't flagged while one is missing) / sin_oc (`{prov}|{fecha}` keys) /
   sin_detalle. Calendar bars: `.pd.ok` teal, `.pd.mal` danger, `.pd.esp` `--c-pend` yellow (the one added hue, because the
   plan asks yellow; only these bars and their tag); legend says CH isn't checked. Bar detail lists the differences in two
-  groups. Above the calendar (Admin and Comercial), `entMananaHtml`: every hub, closes of the last 21 days
-  (`ENT_DIAS_LISTA`), «Por dar entrada» (closed before today, oldest first) and «Entrada con diferencias», per hub with
-  «Copiar mensaje para el hub» (`entCopiar`, tag from `config/slack.json` `hubs` {slug: '@x'}, edited in Admin → Slack as
+  groups. **Nothing before Monday 2026-11-23 is checked** (`ENT_DESDE`, Jose: `entDe` returns null → plain bar, not listed).
+  Calendar first (hub = one button per hub, `.hub-btns`, wrapping), then below it (Admin and Comercial) `entMananaHtml`:
+  every hub, closes with session fecha in the range «Recibidas del … al …» (`st.entDesde/entHasta`, default last 21 days
+  but never before ENT_DESDE, `entRango`; repainted alone by `entMananaPintar`), «Por dar entrada» (closed before today,
+  oldest first) and «Entrada con diferencias», per hub with
+  «Copiar mensaje para el hub» (`entCopiar`, header carries the date range, tag from `config/slack.json` `hubs` {slug: '@x'}, edited in Admin → Slack as
   «Hub = @usuario»). Cache 60 s (`ENT`). Table missing → a setup note, bars as before. Modo prueba: planted once
   (`DEMO.st.entPlantado`: Cremería verde, Botanas rojo, Panadería amarillo at Contry, Botanas sin OC at Cumbres); panel
   tab «Comercial» lists what to expect. CH receptions: pending another source.
