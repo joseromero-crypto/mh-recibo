@@ -42,6 +42,9 @@ b,strong{font-weight:700}
 .wrap{max-width:480px;margin:0 auto;padding:16px 20px 48px}
 .hero{max-width:480px;margin:0 auto;padding:28px 20px 8px;display:flex;flex-direction:column;gap:12px}
 .brand{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}
+.hero-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.com-btn{border:1.5px solid var(--c-line);background:var(--c-white);color:var(--c-ink);border-radius:var(--r-pill);font-size:13px;font-weight:700;padding:0 14px;min-height:36px;cursor:pointer}
+.com-btn:hover{background:var(--c-surface)}
 .brand-mark{width:22px;height:22px;border-radius:7px;background:var(--c-teal)}
 .hero-logo{font-size:34px;font-weight:800;letter-spacing:-.035em;line-height:1}
 .hero-sub{font-size:14px;color:var(--c-muted)}
@@ -444,7 +447,7 @@ textarea.text-input{min-height:110px;font-size:15px;font-weight:500}
 
 <!-- ═══════════ INICIO (§6.1) ═══════════ -->
 <div class="screen active" id="screen-inicio">
-  <div class="hero"><span class="brand"><span class="brand-mark"></span>Calii</span><div class="hero-logo">MH Recibo</div><div class="hero-sub">Recepción de CH Guadalupe y de proveedores</div></div>
+  <div class="hero"><div class="hero-top"><span class="brand"><span class="brand-mark"></span>Calii</span><button class="com-btn" onclick="openComercial()">Comercial</button></div><div class="hero-logo">MH Recibo</div><div class="hero-sub">Recepción de CH Guadalupe y de proveedores</div></div>
   <div class="wrap">
     <div id="clock-warning" style="display:none"></div>
     <div class="status-line"><span class="db-dot" id="db-dot"></span><span id="db-label">Cargando base de imágenes…</span></div>
@@ -515,6 +518,12 @@ textarea.text-input{min-height:110px;font-size:15px;font-weight:500}
 <div class="screen" id="screen-admin">
   <div class="topbar"><button class="back" onclick="goInicio()">← Inicio</button><div class="topbar-title">Admin</div></div>
   <div class="wrap" id="admin-body"></div>
+</div>
+
+<!-- ═══════════ COMERCIAL (comercial-plan §0) — Admin's Calendario / Proveedores / Códigos, view only, no PIN ═══════════ -->
+<div class="screen" id="screen-comercial">
+  <div class="topbar"><button class="back" onclick="goInicio()">← Inicio</button><div class="topbar-title">Comercial</div></div>
+  <div class="wrap" id="com-body"></div>
 </div>
 
 <!-- Sheet: Sin código / Pendientes -->
@@ -3629,7 +3638,9 @@ async function pdCargarSesion(info){
   for(const r of rows) if(r.id>(S.lastId||0)) S.lastId=r.id;
   addEvents(rows); fold(); S.closedInfo=closedState();
 }
-function rvEditable(){ const I=RV&&RV.info; return !!(RV && RV.pd && I && !I.parcial && I.modo==='botones' && I.envio && RV.from!=='admin' && facVigente(I.session_id)); }
+function rvEditable(){ const I=RV&&RV.info; return !!(RV && RV.pd && I && !I.parcial && I.modo==='botones' && I.envio && RV.from!=='admin' && RV.from!=='comercial' && facVigente(I.session_id)); }
+// Comercial opens a closed reception to look only: no Corregir, no invoice review saving (fac box read-only), no Terminar
+function rvSoloVer(){ return !!(RV && RV.from==='comercial'); }
 function rvSkuOf(r){ return skuKeyOf(cleanBC(r.barcode||''), r.producto); }
 function rvCorr(i){ RV.corr=i; renderRecepcionRows(); }
 function rvCorrCancel(){ RV.corr=null; renderRecepcionRows(); }
@@ -4100,8 +4111,8 @@ async function verResumenCerrado(){
 async function openRecepcion(info, from, opts={}){
   const el=document.getElementById('recep-body');
   document.getElementById('recep-title').textContent=`${hubName(info.hub||INI.hub)} · ${areaName(info.area||INI.area)}`;
-  document.getElementById('recep-back').onclick = from==='lista' ? ()=>openRecepciones(_recepPd) : from==='admin' ? openAdmin : recepBack;
-  document.getElementById('recep-back').textContent = from==='lista' ? '← Recepciones' : from==='admin' ? '← Admin' : '← Inicio';
+  document.getElementById('recep-back').onclick = from==='lista' ? ()=>openRecepciones(_recepPd) : from==='admin' ? openAdmin : from==='comercial' ? backComercial : recepBack;
+  document.getElementById('recep-back').textContent = from==='lista' ? '← Recepciones' : from==='admin' ? '← Admin' : from==='comercial' ? '← Comercial' : '← Inicio';
   el.innerHTML='<div class="muted">Cargando reporte…</div>'; showScreen('screen-recepciones');
   let csv=opts.csv; if(csv==null) try{ csv=await sbFetch(info.reporte); }catch(e){ el.innerHTML=`<div class="err-box">${isNetErr(e)?'Sin conexión.':'No se encontró el reporte.'} Intenta de nuevo.</div>`; return; }
   const p=Papa.parse(stripBOM(csv), { header:true, skipEmptyLines:true });
@@ -4121,7 +4132,7 @@ async function openRecepcion(info, from, opts={}){
   RV={ info, rows, csv, ticks, pd:pdRep, from, corr:null, corrBusy:false, f:{ q:'', vista:info.parcial?'todos':pdRep?'llego':rows.some(r=>!r.pns && rvDistinto(r))?'dif':'igual', solo:'', estado:'', kgpz:'', pasillo:'', sort:'archivo' } };
   FACV=null;
   renderRecepcion();
-  if(pdRep && !info.parcial && info.lineas_todas) facBoxLoad(info, opts);
+  if(pdRep && !info.parcial && info.lineas_todas){ if(from==='comercial') facBoxSoloVer(info); else facBoxLoad(info, opts); }
   if(pdRep && !info.parcial) fdrPrep(!!opts.fdr); // just closed (opts.fdr): the return form opens, ready to print
   if(PENDING_UPLOAD && from==='inicio' && info.hub===INI.hub && info.area===INI.area)
     document.getElementById('recep-body').insertAdjacentHTML('afterbegin', `<button class="btn btn-primary btn-block" style="margin-bottom:12px" onclick="resumePendingUpload()">Ahora carga el archivo nuevo (${escapeHtml(PENDING_UPLOAD.file.name)})</button>`);
@@ -4150,7 +4161,7 @@ function renderRecepcion(){
     <div class="info-card">Cerrada ${I.fecha_entrega&&I.fecha_entrega!==I.fecha?'el '+fechaLarga(I.fecha_entrega)+' ':''}a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}<br>
       ${I.productos||0} productos en esta entrega · ${I.recibidas_total||0} de ${I.lineas||0} del envío recibidos hasta aquí
       <div class="muted" style="margin-top:4px">Lo que falta se recibe en la siguiente entrega; las diferencias se revisan al cerrar toda la recepción.</div></div>`
-    :RV.pd?pdRecepcionHead(I)+(I.lineas_todas?`<div id="fac-box">${FACV&&FACV.info.session_id===I.session_id?facBoxInner():''}</div>`:''):`<h2>Recepción del ${fechaLarga(I.fecha)}</h2>
+    :RV.pd?pdRecepcionHead(I)+(I.lineas_todas?`<div id="fac-box">${rvSoloVer()?(RV.facRO||''):FACV&&FACV.info.session_id===I.session_id?facBoxInner():''}</div>`:''):`<h2>Recepción del ${fechaLarga(I.fecha)}</h2>
     <div class="info-card">Cerrada a las ${localHM(new Date(I.ts))} por ${escapeHtml((I.receptores||[I.receptor]).join(', '))}${I.entregas?` · en ${I.entregas} entregas`:''}<br>
       ${I.lineas||0} productos · ${I.diferencias?`<b style="color:var(--orange)">${I.diferencias} con diferencia</b>`:'sin diferencias'}${I.no_esperados?` · ${I.no_esperados} no esperado(s)`:''}${I.fecha_corta?` · <b style="color:var(--orange)">${I.fecha_corta} con fecha corta</b>`:''}${I.danadas?` · <b style="color:var(--orange)">${I.danadas} con dañadas</b>`:''}
       <div>${(I.badges||[]).map(b=>`<span class="badge-warn">${escapeHtml(b)}</span>`).join('')}</div></div>`)+`
@@ -4169,7 +4180,7 @@ function renderRecepcion(){
       <select onchange="rvSet('sort',this.value)"><option value="archivo">${RV.pd?'Orden de la OC':'Orden del archivo'}</option><option value="az">A-Z</option>${RV.pd?'':'<option value="pasillo">Pasillo</option>'}<option value="dif">Diferencia</option></select>
     </div>
     <div class="muted" id="rv-hint"></div><div class="muted" id="rv-count" style="margin-bottom:8px"></div><div id="rv-rows"></div>
-    ${RV.pd&&!P&&RV.from!=='admin'?`<button class="btn btn-primary btn-block" style="margin-top:18px;min-height:56px;font-size:17px" onclick="goInicio()">Terminar e ir al menú principal</button>`:''}`;
+    ${RV.pd&&!P&&RV.from!=='admin'&&RV.from!=='comercial'?`<button class="btn btn-primary btn-block" style="margin-top:18px;min-height:56px;font-size:17px" onclick="goInicio()">Terminar e ir al menú principal</button>`:''}`;
   renderRecepcionRows();
 }
 function renderRecepcionRows(){
@@ -5054,7 +5065,7 @@ function facQ(v, x, sueltas){
   if(!n) return `${fmtQty(v,k)} ${unitOf(k)}`;
   return `${fmtQty(v,'Pz')} paquete${Math.round(Number(v))===1?'':'s'} <span class="pk-nota">= ${fmtQty(sueltas!=null?sueltas:Number(v)*n,'Pz')} piezas</span>`;
 }
-function facResultadoHtml(d){
+function facResultadoHtml(d, soloVer){
   const u='pz', it=(a, fn)=>a.map(x=>`<div class="fac-item">${fn(x)}</div>`).join('');
   const lin=d.lineas||[], dm=lin.filter(x=>x.de_mas>0), nf=lin.filter(x=>x.no_fisico>0), rv=lin.filter(x=>x.revisar), ns=d.no_solicitados||[], sf=d.sin_facturar||[];
   const act=(t, sub, body, cls)=>`<div class="fac-act ${cls||''}"><h3>${t}</h3>${sub?`<div class="fac-act-sub">${sub}</div>`:''}${body||''}</div>`;
@@ -5070,7 +5081,18 @@ function facResultadoHtml(d){
   if(sf.length) h+=act(`Reportar: llegaron sin facturar · ${sf.length}`, 'Se recibieron pero la factura no los cobra. Que el proveedor los agregue a la factura.',
     it(sf, x=>`<span>${escapeHtml(x.producto)}</span><b>${fmtQty(x.recibido,x.kgpz)} ${unitOf(x.kgpz)}</b>`));
   if(rv.length) h+=`<div class="fac-sec">Revisar a mano · ${rv.length}</div>`+it(rv, x=>`<span>${escapeHtml(x.producto)}<br><small class="muted">${x.revisar==='kg'?'Se pide en kg: compara a mano':x.facturado!=null?'No se supo si la factura cobra piezas o paquetes':'La cantidad de la factura no se leyó bien'}${x.facturado!=null?' · factura '+facQ(x.facturado,x,x.piezas_sueltas):''} · recibido ${facQ(x.recibido,x)}</small></span><b>revisar</b>`);
-  return h+`<div class="note" style="margin-top:8px">Solo se paga lo pedido <b>y</b> recibido. ¿El proveedor trajo algo que faltaba? Usa «Corregir lo recibido» en el producto.</div>`;
+  return h+`<div class="note" style="margin-top:8px">Solo se paga lo pedido <b>y</b> recibido.${soloVer?'':' ¿El proveedor trajo algo que faltaba? Usa «Corregir lo recibido» en el producto.'}</div>`;
+}
+// Comercial: the saved invoice review only (latest 'factura' that isn't the start's comparison), nothing to pick or save
+async function facBoxSoloVer(info){
+  const R=RV, sid=info.session_id, put=h=>{ if(RV!==R) return; R.facRO='<div class="section-title" style="margin-top:4px">Factura del proveedor</div>'+h; const el=document.getElementById('fac-box'); if(el) el.innerHTML=R.facRO; };
+  put('<div class="muted">Cargando…</div>');
+  let ev; try{ ev=await pgSelect('rec_events', `session_id=eq.${encodeURIComponent(sid)}&tipo=eq.factura&select=detalle,ts,receptor&order=id.desc&limit=20`); }
+  catch(e){ put(`<div class="err-box">${isNetErr(e)?'Sin conexión: no se pudo cargar la revisión de la factura.':'No se pudo cargar la revisión ('+escapeHtml(e.message)+').'}</div>`); return; }
+  const S0=ev.find(e=>!(e.detalle && e.detalle.fase==='inicio')), d=S0&&S0.detalle;
+  if(!d){ put('<div class="muted">La factura no se revisó en esta recepción.</div>'); return; }
+  const quien=`<div class="muted" style="margin-top:6px">Revisada ${localDateStr(new Date(S0.ts))!==localDateStr()?fechaLarga(localDateStr(new Date(S0.ts)))+' ':''}${localHM(new Date(S0.ts))}${S0.receptor?' · '+escapeHtml(S0.receptor):''}</div>`;
+  put(d.manual?`<div class="info-card"><b>Sin revisión de factura</b><div>${escapeHtml(d.motivo||'')}</div>${quien}</div>`:`<div>${facResultadoHtml(d, true)}${quien}${d.read_id?facFotoLink(d.read_id):''}</div>`);
 }
 function facBoxInner(){
   const I=FACV.info, sid=I.session_id, f=FAC[sid], J=facJs(sid);
@@ -5252,8 +5274,26 @@ async function renderAdmin(){
   const tabs=[['recep','Recepciones'],['cal','Calendario'],['prov','Proveedores'],['resp','Respaldos'],['recept','Receptores'],['codigos','Códigos'],['slack','Slack'],['alert',`Alertas${ADM.alertCount?' ('+ADM.alertCount+')':''}`],['demo','Modo prueba']];
   document.getElementById('admin-body').innerHTML=`<div class="tabs">${tabs.map(([k,n])=>`<button class="choice ${ADM.tab===k?'sel':''}" onclick="admTab('${k}')">${n}</button>`).join('')}</div><div id="adm-tab"><div class="muted">Cargando…</div></div>`;
   admAlertCount();
-  try{ await ({ recep:admRecepciones, cal:admCalendario, prov:admProveedores, resp:admRespaldos, recept:admReceptores, codigos:admCodigos, slack:admSlack, alert:admAlertas, demo:admDemo })[ADM.tab](); }
+  try{ await ({ recep:admRecepciones, cal:admCalendario, prov:admProveedores, resp:admRespaldos, recept:admReceptores, codigos:admCodigos, slack:admSlack, alert:admAlertas, demo:admDemo })[ADM.tab](document.getElementById('adm-tab'), 'admin'); }
   catch(e){ document.getElementById('adm-tab').innerHTML=`<div class="err-box">${isNetErr(e)?'Sin conexión.':'Error: '+escapeHtml(e.message)}</div>`; }
+}
+/* ── Comercial (comercial-plan §0): the same Calendario / Proveedores / Códigos renderers as Admin, called with
+   modo 'comercial' (target #com-tab, state COM). View only, no PIN: nothing here writes (no Reabrir, Descargar respaldo,
+   Restaurar, admin events); «Ver» opens the closed view with from='comercial' (see rvSoloVer). COM is reset every time
+   the screen is opened from Inicio (rule 7); back from «Ver» keeps it. ── */
+const COM_INI=()=>({ tab:'cal', hub:'mh-contry', area:'abarrotes' });
+let COM=COM_INI();
+const VST=m=>m==='comercial'?COM:ADM;
+function vRender(m){ return m==='comercial'?renderComercial():renderAdmin(); }
+function vEl(m){ return document.getElementById(m==='comercial'?'com-tab':'adm-tab'); }
+function openComercial(){ closeSheet(); COM=COM_INI(); showScreen('screen-comercial'); renderComercial(); }
+function backComercial(){ showScreen('screen-comercial'); renderComercial(); }
+function comTab(t){ COM.tab=t; renderComercial(); }
+async function renderComercial(){
+  const tabs=[['cal','Calendario'],['prov','Proveedores'],['codigos','Códigos']];
+  document.getElementById('com-body').innerHTML=`<div class="tabs">${tabs.map(([k,n])=>`<button class="choice ${COM.tab===k?'sel':''}" onclick="comTab('${k}')">${n}</button>`).join('')}</div><div id="com-tab"><div class="muted">Cargando…</div></div>`;
+  try{ await ({ cal:admCalendario, prov:admProveedores, codigos:admCodigos })[COM.tab](document.getElementById('com-tab'), 'comercial'); }
+  catch(e){ const el=document.getElementById('com-tab'); if(el) el.innerHTML=`<div class="err-box">${isNetErr(e)?'Sin conexión.':'Error: '+escapeHtml(e.message)}</div>`; }
 }
 async function admAlertCount(){
   try{
@@ -5306,22 +5346,23 @@ async function admRecepciones(){
 let _admCal=[];
 function ymdAdd(ymd, n){ const d=new Date(Date.parse(ymd+'T12:00:00Z')+n*86400000); return d.toISOString().slice(0,10); }
 function ymdDow(ymd){ return (new Date(Date.parse(ymd+'T12:00:00Z')).getUTCDay()+6)%7; } // 0 = lunes
-function admCalMes(n){ const [y,m]=ADM.calMes.split('-').map(Number), d=new Date(Date.UTC(y,m-1+n,1)); ADM.calMes=d.toISOString().slice(0,7); renderAdmin(); }
-async function admCalendario(){
-  const today=todayStr(); if(!ADM.calMes) ADM.calMes=today.slice(0,7);
-  const ini=ADM.calMes+'-01', fin=ymdAdd(ymdAdd(ini,32).slice(0,7)+'-01',-1);
+function admCalMes(n, modo){ const st=VST(modo), [y,m]=st.calMes.split('-').map(Number), d=new Date(Date.UTC(y,m-1+n,1)); st.calMes=d.toISOString().slice(0,7); vRender(modo); }
+async function admCalendario(el, m='admin'){
+  const st=VST(m);
+  const today=todayStr(); if(!st.calMes) st.calMes=today.slice(0,7);
+  const ini=st.calMes+'-01', fin=ymdAdd(ymdAdd(ini,32).slice(0,7)+'-01',-1);
   const gridIni=ymdAdd(ini,-ymdDow(ini)), gridFin=ymdAdd(fin,6-ymdDow(fin));
   // a session that opened up to 14 days before the grid can still reach into it
-  const evs=await pgSelectAll('rec_events', `hub=eq.${encodeURIComponent(ADM.hub)}&tipo=in.(abrir,reemplazo,cerrar,admin,parcial)&fecha=gte.${ymdAdd(gridIni,-14)}&fecha=lte.${gridFin}&select=id,session_id,area,fecha,tipo,receptor,detalle,ts`);
+  const evs=await pgSelectAll('rec_events', `hub=eq.${encodeURIComponent(st.hub)}&tipo=in.(abrir,reemplazo,cerrar,admin,parcial)&fecha=gte.${ymdAdd(gridIni,-14)}&fecha=lte.${gridFin}&select=id,session_id,area,fecha,tipo,receptor,detalle,ts`);
   const by=new Map();
   for(const e of evs){
     let r=by.get(e.session_id);
-    if(!r){ r={ session_id:e.session_id, hub:ADM.hub, area:e.area, fecha:e.fecha, receptores:new Set(), cerrada:null, borrada:false, parciales:0 }; by.set(e.session_id, r); }
+    if(!r){ r={ session_id:e.session_id, hub:st.hub, area:e.area, fecha:e.fecha, receptores:new Set(), cerrada:null, borrada:false, parciales:0 }; by.set(e.session_id, r); }
     if(e.fecha<r.fecha) r.fecha=e.fecha;
     if(e.receptor && e.receptor!=='Admin') r.receptores.add(e.receptor);
     const d=e.detalle||{};
     if(d.proveedor && isPdArea(e.area)) PD_NAMES[e.area]=d.proveedor;
-    if(e.tipo==='cerrar') r.cerrada=Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub||ADM.hub, area:e.area, receptor:e.receptor, session_id:e.session_id }, d);
+    if(e.tipo==='cerrar') r.cerrada=Object.assign({ ts:e.ts, fecha:e.fecha, hub:e.hub||st.hub, area:e.area, receptor:e.receptor, session_id:e.session_id }, d);
     if(e.tipo==='admin' && d.accion==='reabrir') r.cerrada=null;   // events come in id order: latest wins
     if(e.tipo==='admin' && d.accion==='borrar') r.borrada=true;
     if(e.tipo==='parcial') r.parciales++;
@@ -5342,14 +5383,14 @@ async function admCalendario(){
   ses.forEach(r=>{ for(let d=r.desde; d<=r.hasta; d=ymdAdd(d,1)) if(d>=ini && d<=fin) cubre[grp(r)].add(d); });
   const grupos=GRUPOS.filter(a=>a.id!=='pd' || ses.some(r=>grp(r)==='pd'));
   const diasMes=Math.max(0, daysBetween(ini, today<fin?today:fin)+1);
-  let h=`<div class="filters">${hubSelectHtml('adm-hub', ADM.hub)}</div>
-    <div class="cal-nav"><button onclick="admCalMes(-1)" aria-label="Mes anterior">‹</button><b>${MESES[Number(ADM.calMes.slice(5))-1]} ${ADM.calMes.slice(0,4)}</b><button onclick="admCalMes(1)" aria-label="Mes siguiente">›</button></div>
+  let h=`<div class="filters"><select onchange="VST('${m}').hub=this.value;vRender('${m}')" aria-label="Hub">${ADM_HUBS().map(x=>`<option value="${x.slug}" ${st.hub===x.slug?'selected':''}>${escapeHtml(x.name)}</option>`).join('')}</select></div>
+    <div class="cal-nav"><button onclick="admCalMes(-1,'${m}')" aria-label="Mes anterior">‹</button><b>${MESES[Number(st.calMes.slice(5))-1]} ${st.calMes.slice(0,4)}</b><button onclick="admCalMes(1,'${m}')" aria-label="Mes siguiente">›</button></div>
     <div class="cal-dow">${['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d=>`<div>${d}</div>`).join('')}</div>`;
   for(let w=gridIni; w<=gridFin; w=ymdAdd(w,7)){
     const wEnd=ymdAdd(w,6);
     h+=`<div class="cal-week">`;
     for(let i=0;i<7;i++){ const d=ymdAdd(w,i);
-      h+=`<div class="cal-day${d.slice(0,7)!==ADM.calMes?' out':''}${d>today?' fut':''}${d===today?' today':''}" style="grid-column:${i+1}"><span>${Number(d.slice(8))}</span></div>`; }
+      h+=`<div class="cal-day${d.slice(0,7)!==st.calMes?' out':''}${d>today?' fut':''}${d===today?' today':''}" style="grid-column:${i+1}"><span>${Number(d.slice(8))}</span></div>`; }
     // lanes: Abarrotes first, then Carnes; overlapping receptions of the same área take another lane
     let row=2;
     grupos.forEach(a=>{
@@ -5361,7 +5402,7 @@ async function admCalendario(){
         const c0=daysBetween(w,s)+1, span=daysBetween(s,e)+1;
         const nm=a.id==='pd'?areaName(r.area):a.name;
         const tip=`${nm} · ${r.cerrada?'cerrada':'abierta'} · ${fechaLarga(r.desde)}${r.hasta!==r.desde?' – '+fechaLarga(r.hasta):''}`;
-        h+=`<button class="cal-bar ${a.id}${r.cerrada?'':' open'}${s===r.desde?' s':''}${e===r.hasta?' e':''}" style="grid-row:${row+l};grid-column:${c0} / span ${span}" title="${escapeHtml(tip)}" onclick="admCalVer(${idx})" aria-label="${escapeHtml(tip)}">${span>1||a.id==='pd'?escapeHtml(nm):''}</button>`;
+        h+=`<button class="cal-bar ${a.id}${r.cerrada?'':' open'}${s===r.desde?' s':''}${e===r.hasta?' e':''}" style="grid-row:${row+l};grid-column:${c0} / span ${span}" title="${escapeHtml(tip)}" onclick="admCalVer(${idx},'${m}')" aria-label="${escapeHtml(tip)}">${span>1||a.id==='pd'?escapeHtml(nm):''}</button>`;
       });
       row+=Math.max(1,lanes.length);
     });
@@ -5369,13 +5410,13 @@ async function admCalendario(){
   }
   h+=`<div class="cal-legend">${grupos.map(a=>`<span><i class="cal-sw ${a.id}"></i>${a.name}: ${cubre[a.id].size} de ${diasMes} días</span>`).join('')}<span><i class="cal-sw open"></i>abierta / sin cerrar</span></div>
     <div id="cal-detalle"><div class="muted" style="font-size:13px">Toca una barra para ver la recepción.</div></div>`;
-  document.getElementById('adm-tab').innerHTML=h;
+  el.innerHTML=h;
 }
-function admCalVer(i){
+function admCalVer(i, m='admin'){
   const r=_admCal[i], c=r.cerrada;
-  document.getElementById('cal-detalle').innerHTML=`<div class="adm-row"><b>${escapeHtml(hubName(r.hub))} · ${areaName(r.area)}</b> — ${c?`<span class="tag green">✓ cerrada ${fechaLarga(r.hasta)}, ${localHM(new Date(c.ts))}</span>`:`<span class="tag orange">sin cerrar</span>`}${r.parciales?` <span class="tag orange">${r.parciales} entrega${r.parciales===1?'':'s'} parcial${r.parciales===1?'':'es'}</span>`:''}
+  vEl(m).querySelector('#cal-detalle').innerHTML=`<div class="adm-row"><b>${escapeHtml(hubName(r.hub))} · ${areaName(r.area)}</b> — ${c?`<span class="tag green">✓ cerrada ${fechaLarga(r.hasta)}, ${localHM(new Date(c.ts))}</span>`:`<span class="tag orange">sin cerrar</span>`}${r.parciales?` <span class="tag orange">${r.parciales} entrega${r.parciales===1?'':'s'} parcial${r.parciales===1?'':'es'}</span>`:''}
     <div class="muted" style="font-size:12px">${isPdArea(r.area)?'Proveedor directo · entrega del':'Envío del'} ${fechaLarga(r.desde)} · ${escapeHtml([...r.receptores].join(', ')||'—')}${c?` · ${c.lineas||0} productos · ${c.diferencias||0} con diferencia`:''}</div>
-    ${c?`<div class="btns"><button class="btn btn-secondary" onclick="openRecepcion(_admCal[${i}].cerrada,'admin')">Ver</button></div>`:''}</div>`;
+    ${c?`<div class="btns"><button class="btn btn-secondary" onclick="openRecepcion(_admCal[${i}].cerrada,'${m}')">Ver</button></div>`:''}</div>`;
 }
 async function admDescargar(i){
   const c=_admRecep[i].cerrada;
@@ -5394,8 +5435,9 @@ async function admReabrir(i){
 /* ── Códigos incorrectos: scans the receptor re-assigned by name because the barcode didn't match the product
    ("Código incorrecto en sistema"). Weekly / monthly list, grouped per product + scanned code, for comercial. ── */
 let _admCod=[];
-async function admCodigos(){
-  const dias=ADM.codDias||7, desde=localDateStr(new Date(serverNow().getTime()-dias*86400000));
+async function admCodigos(el, m='admin'){
+  const st=VST(m);
+  const dias=st.codDias||7, desde=localDateStr(new Date(serverNow().getTime()-dias*86400000));
   const evs=await pgSelectAll('rec_events', `tipo=in.(scan,confirmacion)&fecha=gte.${desde}&detalle->codigo_incorrecto=not.is.null&select=hub,area,fecha,producto,receptor,ts,detalle&order=id.desc`);
   const by=new Map();
   for(const e of evs){
@@ -5406,19 +5448,20 @@ async function admCodigos(){
     r.hubs.add(hubName(e.hub)); r.veces++; if(e.fecha>r.ultima) r.ultima=e.fecha;
   }
   _admCod=[...by.values()].sort((a,b)=>b.veces-a.veces || a.producto.localeCompare(b.producto));
-  const sel=`<div class="filters" style="margin-bottom:10px"><select onchange="ADM.codDias=Number(this.value);renderAdmin()">
+  const sel=`<div class="filters" style="margin-bottom:10px"><select onchange="VST('${m}').codDias=Number(this.value);vRender('${m}')">
     <option value="7" ${dias===7?'selected':''}>Últimos 7 días</option><option value="30" ${dias===30?'selected':''}>Últimos 30 días</option></select></div>`;
-  document.getElementById('adm-tab').innerHTML=`<div class="muted" style="margin-bottom:8px">Productos cuyo código escaneado no coincidió con el sistema; el receptor lo buscó por nombre. Para corregir en Retool con comercial.</div>${sel}`
-    +(_admCod.length ? `<button class="btn btn-secondary btn-block" style="margin-bottom:10px" onclick="admCodigosCsv()">Descargar CSV para comercial</button>`
+  el.innerHTML=`<div class="muted" style="margin-bottom:8px">Productos cuyo código escaneado no coincidió con el sistema; el receptor lo buscó por nombre. Para corregir en Retool con comercial.</div>${sel}`
+    +(_admCod.length ? `<button class="btn btn-secondary btn-block" style="margin-bottom:10px" onclick="admCodigosCsv('${m}')">Descargar CSV para comercial</button>`
       +_admCod.map(r=>`<div class="adm-row"><div style="display:flex;gap:10px;align-items:center">${imgTag(r.sistema, r.producto, 'thumb')}<b style="flex:1;min-width:0">${nameHtml(r.producto)}</b></div>
         <div class="muted" style="font-size:13px;margin-top:4px">Escaneado: <b>${escapeHtml(r.escaneado)}</b> · En sistema: <b>${escapeHtml(r.sistema||'sin código')}</b>${r.dice?` · el código escaneado aparece como «${escapeHtml(r.dice)}»`:''}</div>
         <div class="muted" style="font-size:12px">${r.veces} vez${r.veces===1?'':'es'} · ${escapeHtml([...r.hubs].join(', '))} · última ${fechaLarga(r.ultima)}</div></div>`).join('')
       : '<div class="empty-hint">Sin códigos incorrectos en este periodo.</div>');
 }
-function admCodigosCsv(){
+function admCodigosCsv(m='admin'){
+  const st=VST(m);
   const cols=['Producto','Código escaneado','Código en sistema (Retool)','El código escaneado aparece como','Veces','Hubs','Última fecha'];
   const body=_admCod.map(r=>[r.producto, r.escaneado, r.sistema, r.dice, r.veces, [...r.hubs].join(', '), r.ultima].map(csvCell).join(','));
-  downloadText(`codigos-incorrectos_${todayStr()}_${ADM.codDias||7}d.csv`, [cols.map(csvCell).join(',')].concat(body).join('\r\n')+'\r\n');
+  downloadText(`codigos-incorrectos_${todayStr()}_${st.codDias||7}d.csv`, [cols.map(csvCell).join(',')].concat(body).join('\r\n')+'\r\n');
 }
 
 /* ── Proveedores: supplier insights for comercial (view only). Closed pd-* receptions whose session fecha falls in the
@@ -5428,7 +5471,7 @@ function admCodigosCsv(){
    the latest 'factura' event per session. Excedente in modo botones is a flag without a quantity. ── */
 const PV={ data:null, key:'', csv:new Map(), recs:[], prods:[] };
 const PV_MOTIVO_INV={ 'fecha corta':'fecha_corta', 'dañada':'danada' };
-function pvDefaults(){ if(!ADM.pvHasta){ const t=todayStr(); ADM.pvHasta=t; ADM.pvDesde=ymdAdd(t,-27); } if(ADM.pvHub==null) ADM.pvHub=''; }
+function pvDefaults(st){ if(!st.pvHasta){ const t=todayStr(); st.pvHasta=t; st.pvDesde=ymdAdd(t,-27); } if(st.pvHub==null) st.pvHub=''; }
 function pvLinesFromCsv(text){
   const p=Papa.parse(stripBOM(String(text||'')), { header:true, skipEmptyLines:true });
   return (p.data||[]).map(r=>{
@@ -5441,11 +5484,11 @@ function pvLinesFromCsv(text){
       pedido_en:g('Pedido en OC')?'piezas':undefined, _fac:g('Estado')===FAC_ESTADO_SIN_PEDIR };
   }).filter(l=>l.producto && !l._fac).map(({ _fac, ...l })=>l);
 }
-async function pvLoad(){
-  const key=[ADM.pvDesde, ADM.pvHasta, ADM.pvHub].join('|');
+async function pvLoad(st){
+  const key=[st.pvDesde, st.pvHasta, st.pvHub].join('|');
   if(PV.data && PV.key===key) return PV.data;
-  const evs=await pgSelectAll('rec_events', `tipo=in.(cerrar,admin)&area=like.pd-*&fecha=gte.${ADM.pvDesde}&fecha=lte.${ADM.pvHasta}`
-    +`${ADM.pvHub?`&hub=eq.${encodeURIComponent(ADM.pvHub)}`:''}&select=id,session_id,hub,area,fecha,tipo,receptor,detalle,ts&order=id.desc`);
+  const evs=await pgSelectAll('rec_events', `tipo=in.(cerrar,admin)&area=like.pd-*&fecha=gte.${st.pvDesde}&fecha=lte.${st.pvHasta}`
+    +`${st.pvHub?`&hub=eq.${encodeURIComponent(st.pvHub)}`:''}&select=id,session_id,hub,area,fecha,tipo,receptor,detalle,ts&order=id.desc`);
   const seen=new Map();
   for(const e of evs){
     if(seen.has(e.session_id) || (e.hub==='test-hub' && !IS_LOCAL)) continue;
@@ -5459,8 +5502,8 @@ async function pvLoad(){
     r.lines=PV.csv.get(r.info.reporte); if(r.lines) r.fuente='reporte';
   }));
   // Invoice checks (latest 'factura' per session; a manual one compared nothing) → sku_key → pieces billed, not received
-  const fevs=await pgSelectAll('rec_events', `tipo=eq.factura&area=like.pd-*&fecha=gte.${ADM.pvDesde}&fecha=lte.${ADM.pvHasta}`
-    +`${ADM.pvHub?`&hub=eq.${encodeURIComponent(ADM.pvHub)}`:''}&select=session_id,detalle&order=id.asc`);
+  const fevs=await pgSelectAll('rec_events', `tipo=eq.factura&area=like.pd-*&fecha=gte.${st.pvDesde}&fecha=lte.${st.pvHasta}`
+    +`${st.pvHub?`&hub=eq.${encodeURIComponent(st.pvHub)}`:''}&select=session_id,detalle&order=id.asc`);
   const fac=new Map(); for(const e of fevs) fac.set(e.session_id, e.detalle||{});
   for(const r of recs){ const d=fac.get(r.info.session_id);
     if(d && !d.manual && Array.isArray(d.lineas)) r.fac=new Map(d.lineas.filter(x=>x.no_fisico>0).map(x=>[x.sku_key, Number(x.no_fisico)])); }
@@ -5567,63 +5610,66 @@ function pvLineTxt(l, cob){
   if(cob>0) p.push(`la factura cobra ${pkTxt(cob, pk)} que no llegaron`);
   return p.join(' · ');
 }
-function pvFecha(k, v){
+function pvFecha(k, v, m='admin'){
+  const st=VST(m);
   if(!/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
-  if(k==='desde') ADM.pvDesde=v; else ADM.pvHasta=v;
-  if(ADM.pvDesde>ADM.pvHasta){ if(k==='desde') ADM.pvHasta=v; else ADM.pvDesde=v; }
-  renderAdmin();
+  if(k==='desde') st.pvDesde=v; else st.pvHasta=v;
+  if(st.pvDesde>st.pvHasta){ if(k==='desde') st.pvHasta=v; else st.pvDesde=v; }
+  vRender(m);
 }
-function pvRango(v){
+function pvRango(v, m='admin'){
+  const st=VST(m);
   const t=todayStr();
-  if(v==='mes'){ ADM.pvDesde=t.slice(0,7)+'-01'; ADM.pvHasta=t; }
-  else if(v==='mesant'){ const ini=ymdAdd(t.slice(0,7)+'-01',-1).slice(0,7)+'-01'; ADM.pvDesde=ini; ADM.pvHasta=ymdAdd(t.slice(0,7)+'-01',-1); }
-  else if(v){ ADM.pvDesde=ymdAdd(t,-(Number(v)-1)); ADM.pvHasta=t; }
-  renderAdmin();
+  if(v==='mes'){ st.pvDesde=t.slice(0,7)+'-01'; st.pvHasta=t; }
+  else if(v==='mesant'){ const ini=ymdAdd(t.slice(0,7)+'-01',-1).slice(0,7)+'-01'; st.pvDesde=ini; st.pvHasta=ymdAdd(t.slice(0,7)+'-01',-1); }
+  else if(v){ st.pvDesde=ymdAdd(t,-(Number(v)-1)); st.pvHasta=t; }
+  vRender(m);
 }
-function pvVer(i){ ADM.pvSel=PV.provs[i]; renderAdmin(); window.scrollTo(0,0); }
-function pvVolver(){ ADM.pvSel=null; renderAdmin(); }
-async function admProveedores(){
-  pvDefaults();
-  const el=document.getElementById('adm-tab'), t=todayStr();
+function pvVer(i, m='admin'){ VST(m).pvSel=PV.provs[i]; vRender(m); window.scrollTo(0,0); }
+function pvVolver(m='admin'){ VST(m).pvSel=null; vRender(m); }
+async function admProveedores(el, m='admin'){
+  const st=VST(m); pvDefaults(st);
+  const t=todayStr();
   const pre=[['28','Últimas 4 semanas'],['56','Últimas 8 semanas'],['91','Últimas 13 semanas'],['mes','Este mes'],['mesant','Mes pasado']];
-  const preSel=pre.find(([k])=>k==='mes'?ADM.pvDesde===t.slice(0,7)+'-01'&&ADM.pvHasta===t:k==='mesant'?false:ADM.pvHasta===t&&ADM.pvDesde===ymdAdd(t,-(Number(k)-1)));
-  const filtros=`<div class="filters"><select onchange="ADM.pvHub=this.value;renderAdmin()" aria-label="Hub"><option value="">Todos los hubs</option>${ADM_HUBS().map(x=>`<option value="${x.slug}" ${ADM.pvHub===x.slug?'selected':''}>${escapeHtml(x.name)}</option>`).join('')}</select>
-      <select onchange="pvRango(this.value)" aria-label="Periodo"><option value="">${preSel?'Otro periodo':'Periodo elegido'}</option>${pre.map(([k,n])=>`<option value="${k}" ${preSel&&preSel[0]===k?'selected':''}>${n}</option>`).join('')}</select></div>
-    <div class="adm-field pv-fechas" style="margin:0 0 6px"><span>Del</span><input type="date" value="${ADM.pvDesde}" onchange="pvFecha('desde',this.value)" aria-label="Desde"><span>al</span><input type="date" value="${ADM.pvHasta}" onchange="pvFecha('hasta',this.value)" aria-label="Hasta"></div>`;
+  const preSel=pre.find(([k])=>k==='mes'?st.pvDesde===t.slice(0,7)+'-01'&&st.pvHasta===t:k==='mesant'?false:st.pvHasta===t&&st.pvDesde===ymdAdd(t,-(Number(k)-1)));
+  const filtros=`<div class="filters"><select onchange="VST('${m}').pvHub=this.value;vRender('${m}')" aria-label="Hub"><option value="">Todos los hubs</option>${ADM_HUBS().map(x=>`<option value="${x.slug}" ${st.pvHub===x.slug?'selected':''}>${escapeHtml(x.name)}</option>`).join('')}</select>
+      <select onchange="pvRango(this.value,'${m}')" aria-label="Periodo"><option value="">${preSel?'Otro periodo':'Periodo elegido'}</option>${pre.map(([k,n])=>`<option value="${k}" ${preSel&&preSel[0]===k?'selected':''}>${n}</option>`).join('')}</select></div>
+    <div class="adm-field pv-fechas" style="margin:0 0 6px"><span>Del</span><input type="date" value="${st.pvDesde}" onchange="pvFecha('desde',this.value,'${m}')" aria-label="Desde"><span>al</span><input type="date" value="${st.pvHasta}" onchange="pvFecha('hasta',this.value,'${m}')" aria-label="Hasta"></div>`;
   el.innerHTML=filtros+'<div class="muted">Cargando recepciones…</div>';
-  const recs=await pvLoad();
-  if(ADM.tab!=='prov') return;
+  const recs=await pvLoad(st);
+  if(st.tab!=='prov') return;
   const byProv=pvByProv(recs);
   PV.provs=[...byProv.keys()];
-  if(ADM.pvSel && byProv.has(ADM.pvSel)) return pvDetalle(el, filtros, recs.filter(r=>r.prov===ADM.pvSel), byProv.get(ADM.pvSel));
-  ADM.pvSel=null;
+  if(st.pvSel && byProv.has(st.pvSel)) return pvDetalle(el, filtros, recs.filter(r=>r.prov===st.pvSel), byProv.get(st.pvSel), m);
+  st.pvSel=null;
   const tot=pvNew(); recs.forEach(r=>pvAddRec(tot, r));
   let h=filtros;
   if(!recs.length){ el.innerHTML=h+'<div class="empty-hint" style="margin-top:12px">Sin recepciones de proveedor cerradas en este periodo.</div>'; return; }
   h+=`<div class="muted" style="font-size:13px">${pvPl(tot.recs,'recepción','recepciones')} · ${pvPl(byProv.size,'proveedor','proveedores')} · ${pvPl(tot.prods,'producto')} pedidos</div>`+pvKpis(tot);
   if(tot.sinDet) h+=`<div class="warn-box">${pvPl(tot.sinDet,'recepción','recepciones')} sin detalle por producto (no se pudo leer su reporte): no cuentan en los porcentajes.</div>`;
-  h+=`<div class="row2" style="margin-bottom:6px"><button class="btn btn-secondary" onclick="pvCsv('prov')">CSV por proveedor</button><button class="btn btn-secondary" onclick="pvCsv('prod')">CSV por producto</button></div>`;
+  h+=`<div class="row2" style="margin-bottom:6px"><button class="btn btn-secondary" onclick="pvCsv('prov',null,'${m}')">CSV por proveedor</button><button class="btn btn-secondary" onclick="pvCsv('prod',null,'${m}')">CSV por producto</button></div>`;
   const orden=[...byProv.entries()].map(([p,a])=>({ p, a, i:PV.provs.indexOf(p) })).sort((x,y)=>(pvMain(x.a)??2)-(pvMain(y.a)??2) || y.a.recs-x.a.recs || x.p.localeCompare(y.p));
-  h+=`<div class="section-title">Proveedores · peor fill rate primero</div>`+orden.map(({p,a,i})=>`<div class="adm-row pv-row" role="button" tabindex="0" onclick="pvVer(${i})" onkeydown="if(event.key==='Enter')pvVer(${i})">
+  h+=`<div class="section-title">Proveedores · peor fill rate primero</div>`+orden.map(({p,a,i})=>`<div class="adm-row pv-row" role="button" tabindex="0" onclick="pvVer(${i},'${m}')" onkeydown="if(event.key==='Enter')pvVer(${i},'${m}')">
       <div class="pv-head"><b>${escapeHtml(p)}</b><span class="pv-fr">${pvFrTxt(a)}</span></div>${pvBar(a)}
       <div class="muted" style="font-size:12px">${pvPl(a.recs,'recepción','recepciones')} · ${pvPct(a.completas, a.prods)} de productos completos · ${escapeHtml([...a.hubs].map(hubName).join(', '))}</div>
       <div class="pv-chips">${pvChips(a)||'<span class="tag green">Sin incidentes</span>'}</div></div>`).join('');
   el.innerHTML=h;
 }
-function pvDetalle(el, filtros, recs, a){
-  const prov=ADM.pvSel, prods=pvProducts(recs);
+function pvDetalle(el, filtros, recs, a, m='admin'){
+  const st=VST(m);
+  const prov=st.pvSel, prods=pvProducts(recs);
   prods.sort((x,y)=>(pvMain(x)??2)-(pvMain(y)??2) || pvIssues(y)-pvIssues(x) || x.producto.localeCompare(y.producto));
   PV.recs=recs; PV.prods=prods;
   const conFecha=a.recs-a.sinFecha;
-  let h=`<button class="link-btn" style="margin:0 0 4px;padding-left:0" onclick="pvVolver()">← Todos los proveedores</button>${filtros}
-    <h2>${escapeHtml(prov)}</h2><div class="muted" style="font-size:13px">${fechaLarga(ADM.pvDesde)} – ${fechaLarga(ADM.pvHasta)} · ${pvPl(a.recs,'recepción','recepciones')} · ${escapeHtml([...a.hubs].map(hubName).join(', '))}</div>`
+  let h=`<button class="link-btn" style="margin:0 0 4px;padding-left:0" onclick="pvVolver('${m}')">← Todos los proveedores</button>${filtros}
+    <h2>${escapeHtml(prov)}</h2><div class="muted" style="font-size:13px">${fechaLarga(st.pvDesde)} – ${fechaLarga(st.pvHasta)} · ${pvPl(a.recs,'recepción','recepciones')} · ${escapeHtml([...a.hubs].map(hubName).join(', '))}</div>`
     +pvKpis(a)
     +(conFecha?`<div class="muted" style="font-size:12px;margin:-4px 0 8px">Puntualidad: ${a.aTiempo} de ${conFecha} el día programado · ${a.antes} antes · ${a.tarde} tarde${a.tarde?` (promedio ${Math.round(a.diasTarde*10/a.tarde)/10} día${a.diasTarde===a.tarde?'':'s'})`:''}</div>`:'')
     +(a.sinDet?`<div class="warn-box">${pvPl(a.sinDet,'recepción','recepciones')} sin detalle por producto: no cuentan en los porcentajes.</div>`:'');
   // Weekly trend: every week of the range, Monday first
   const wk=new Map(); recs.forEach(r=>{ const w=pvWeek(r.info.fecha); if(!wk.has(w)) wk.set(w, pvNew()); pvAddRec(wk.get(w), r); });
   h+=`<div class="section-title">Fill rate por semana</div>`;
-  for(let w=pvWeek(ADM.pvHasta); w>=pvWeek(ADM.pvDesde); w=ymdAdd(w,-7)){
+  for(let w=pvWeek(st.pvHasta); w>=pvWeek(st.pvDesde); w=ymdAdd(w,-7)){
     const x=wk.get(w);
     h+=`<div class="pv-week"><span>${fechaLarga(w).replace(/ de (\w{3})\w*/,' $1')}</span>${x?pvBar(x):'<div class="pv-bar"></div>'}<b>${x?pvFrTxt(x):''}</b></div>
       <div class="pv-week-sub">${x?pvPl(x.recs,'recepción','recepciones'):'sin entregas'}</div>`;
@@ -5632,9 +5678,9 @@ function pvDetalle(el, filtros, recs, a){
     return `<div class="adm-row"><div class="pv-head"><b>${fechaLarga(r.info.fecha)} · ${escapeHtml(hubName(r.info.hub))}</b><span class="pv-fr">${pvFrTxt(x)}</span></div>
       <div class="muted" style="font-size:12px">${r.info.num_oc&&r.info.num_oc.length?'OC '+r.info.num_oc.map(escapeHtml).join(', ')+' · ':''}${d==null?'sin fecha programada':d===0?'el día programado':d<0?`${-d} día${d===-1?'':'s'} antes`:`${d} día${d===1?'':'s'} tarde`}${!r.lines?' · sin detalle':''}${r.fac?'':' · factura sin revisar'}</div>
       <div class="pv-chips">${pvChips(x)}</div>
-      <div class="btns"><button class="btn btn-secondary" onclick="openRecepcion(PV.recs[${i}].info,'admin')">Ver</button></div></div>`; }).join('');
+      <div class="btns"><button class="btn btn-secondary" onclick="openRecepcion(PV.recs[${i}].info,'${m}')">Ver</button></div></div>`; }).join('');
   h+=`<div class="section-title">Productos · ${prods.length} · peor fill rate primero</div>
-    <button class="btn btn-secondary btn-block" style="margin-bottom:8px" onclick="pvCsv('prod', ${PV.provs.indexOf(prov)})">CSV de productos de ${escapeHtml(prov)}</button>`
+    <button class="btn btn-secondary btn-block" style="margin-bottom:8px" onclick="pvCsv('prod', ${PV.provs.indexOf(prov)},'${m}')">CSV de productos de ${escapeHtml(prov)}</button>`
     +prods.map(p=>{ const u=p.kgpz==='Kg'?p.kg:p.pz, un=unitOf(p.kgpz);
       return `<details class="adm-row pv-prod"><summary><div class="pv-head"><b>${nameHtml(p.producto)}</b><span class="pv-fr">${p.prods?pvFrTxt(p):'—'}</span></div>
       <div class="muted" style="font-size:12px">${p.prods?`${p.prods===1?'1 recepción':p.prods+' recepciones'} · pedido ${fmtQty(u.ped,p.kgpz)} ${un} · recibido ${fmtQty(u.ok,p.kgpz)}`:'No venía en la OC'}</div>
@@ -5642,8 +5688,9 @@ function pvDetalle(el, filtros, recs, a){
       ${p.hist.map(({r,l,cob})=>`<div class="pv-hist"><b>${fechaLarga(r.info.fecha)} · ${escapeHtml(hubName(r.info.hub))}</b> — ${escapeHtml(pvLineTxt(l, cob))}</div>`).join('')}</details>`; }).join('');
   el.innerHTML=h;
 }
-function pvCsv(kind, provIdx){
-  const recs=PV.data||[], rango=`${ADM.pvDesde}_${ADM.pvHasta}`, hub=ADM.pvHub?hubName(ADM.pvHub):'Todos los hubs';
+function pvCsv(kind, provIdx, m='admin'){
+  const st=VST(m);
+  const recs=PV.data||[], rango=`${st.pvDesde}_${st.pvHasta}`, hub=st.pvHub?hubName(st.pvHub):'Todos los hubs';
   const n=v=>v?String(round2(v)):'0', pct=(a,b)=>b?String(Math.round(a*1000/b)/10):'';
   let cols, rows, name;
   if(kind==='prov'){
@@ -5653,7 +5700,7 @@ function pvCsv(kind, provIdx){
       'Incidentes producto no solicitado','Incidentes exceso sobre la OC','Incidentes cobrado y no entregado','Piezas cobradas y no entregadas','Recepciones con factura revisada',
       'Piezas rechazadas dañadas','Piezas faltantes','Kg pedidos','Kg recibidos','Fill rate por kilo %','Kg rechazados fecha corta',
       'Entregas el día programado','Entregas antes','Entregas tarde','Recepciones sin detalle'];
-    rows=[...pvByProv(recs).entries()].sort((x,y)=>x[0].localeCompare(y[0])).map(([p,a])=>[p, [...a.hubs].map(hubName).join(', '), ADM.pvDesde, ADM.pvHasta, a.recs, a.prods,
+    rows=[...pvByProv(recs).entries()].sort((x,y)=>x[0].localeCompare(y[0])).map(([p,a])=>[p, [...a.hubs].map(hubName).join(', '), st.pvDesde, st.pvHasta, a.recs, a.prods,
       n(a.pz.ped), n(a.pz.ok), pct(a.pz.ok,a.pz.ped), a.completas, pct(a.completas,a.prods),
       n(a.pz.fc), pct(a.pz.fc,a.pz.ped), a.fcL, pct(a.fcL,a.prods),
       a.pnsL, a.excL, a.facRecs?a.cobL:'', a.facRecs?n(a.cobPz):'', a.facRecs,
@@ -5668,7 +5715,7 @@ function pvCsv(kind, provIdx){
     rows=pvProducts(prov?recs.filter(r=>r.prov===prov):recs).sort((x,y)=>x.prov.localeCompare(y.prov) || x.producto.localeCompare(y.producto)).map(p=>{ const u=p.kgpz==='Kg'?p.kg:p.pz;
       return [p.prov, p.sku.startsWith('name:')?'':p.sku, p.producto, p.kgpz, p.prods, n(u.ped), n(u.ok), pct(u.ok,u.ped), p.completas,
         p.fcL, n(u.fc), p.danL, n(u.dan), p.faltL, n(u.falt), p.pnsL, p.excL, p.cobL, n(p.cobPz),
-        [...new Set(p.hist.map(x=>hubName(x.r.info.hub)))].join(', '), ADM.pvDesde, ADM.pvHasta]; });
+        [...new Set(p.hist.map(x=>hubName(x.r.info.hub)))].join(', '), st.pvDesde, st.pvHasta]; });
     name=`productos-proveedor_${fileSafe(prov||hub)}_${rango}.csv`;
   }
   downloadText(name, [cols.map(csvCell).join(',')].concat(rows.map(r=>r.map(csvCell).join(','))).join('\r\n')+'\r\n');

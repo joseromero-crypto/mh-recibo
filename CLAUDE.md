@@ -286,6 +286,20 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   wherever older notes say Resumen for modo botones; the blind-count flow keeps `pdRenderResumen`. The closed view repeats the
   return list on top (`pdRecepcionHead`) and has «Copiar lista para el sistema». While it's open `pdBListRender` draws nothing (same input ids).
 
+## Comercial view (comercial-plan.md — phase 1 built 2026-11-25)
+- «Comercial» pill top-right of Inicio (`.com-btn`) → `screen-comercial` (`renderComercial`, body `#com-body`, tabs into
+  `#com-tab`): Calendario (default) / Proveedores / Códigos. No PIN. State `COM`, reset by `openComercial()` every time it's
+  opened from Inicio (rule 7); «← Comercial» from a reception (`backComercial`) keeps it. Admin keeps its own `ADM`.
+- The Admin renderers are shared: `admCalendario(el, modo)`, `admProveedores(el, modo)`, `admCodigos(el, modo)` with
+  `modo` 'admin' | 'comercial'. `VST(modo)` = state, `vRender(modo)` = re-render, `vEl(modo)` = target. Every handler they
+  print passes `'${m}'` (admCalMes, admCalVer, admCodigosCsv, pvFecha, pvRango, pvVer, pvVolver, pvCsv); `pvLoad(st)`/
+  `pvDefaults(st)` take the state. `PV`, `_admCal`, `_admCod` stay shared (one screen shows at a time).
+- **View only**: nothing in comercial mode writes. «Ver» opens `openRecepcion(info, 'comercial')`: `rvSoloVer()` → no
+  «Corregir lo recibido» (`rvEditable`), no «Terminar», and the invoice box is `facBoxSoloVer` (latest non-inicio `factura`
+  review rendered, no list / photos / picks / auto-save; FACV stays null). Slack copy, FDR, CSV and «Copiar lista» stay.
+  CSV downloads (Proveedores, Códigos) stay: they are what comercial uses. A new write control in the closed view must
+  check `rvSoloVer()`.
+
 ## Modo prueba (2026-11-18)
 - `?demo={semilla}` runs the whole app unchanged on fake data; Admin → **Modo prueba** opens it in a new tab (no PIN
   inside a test tab). Nothing reaches production: `demoFetch` (top of the script) replaces `window.fetch` and answers
