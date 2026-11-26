@@ -5606,11 +5606,9 @@ async function admReabrir(i){
 /* ── Códigos incorrectos (comercial-plan §3a): scans the receptor re-assigned by name because the barcode didn't match the
    product ("Código incorrecto en sistema"), grouped per product + scanned code. Each row proposes a Retool fix: SKU Calii
    (Masterview `sku`, through the product's system barcode → pickEntry for the hub's city, else the exact Masterview name)
-   ⇥ the barcode scanned on the physical product. Comercial confirms or discards each row (rule 2: no confirm-all); only
-   confirmed rows go into «Descargar CSV para Retool» (SKU Calii, Código de barras); «Ya lo cargué en Retool» marks the rows in that file. State lives in
-   rec_codigos_fix (append-only, latest per tipo+clave+sku wins; sql/codigos-fix.sql). A row loaded into Retool that is
-   scanned the wrong way again after that comes back as pending. No SKU → «sin SKU», never copied. ── */
-let _admCod=[], _codFix=new Map(), _skuNom=null;
+   ⇥ the barcode scanned on the physical product. «Descargar CSV para Retool» takes every row with a SKU (Jose, 2026-11-26:
+   no confirm / discard step; a warning asks to review the file before loading it). No SKU → «sin SKU», never exported. ── */
+let _admCod=[], _skuNom=null;
 function skuPorNombre(producto){
   if(!_skuNom || _skuNom.db!==S.imgDb){
     const m=new Map(), add=e=>{ if(e && typeof e==='object' && e.sku && e.name){ const k=normName(e.name); if(!m.has(k)) m.set(k, e.sku); } };
@@ -5626,31 +5624,19 @@ function skuCalii(codigoSistema, producto, hub){
   if(e && typeof e==='object' && e.sku && !nameClash(producto, e.name)) return e.sku;
   return skuPorNombre(producto);
 }
-const codKey=(clave, sku)=>'barcode|'+clave+'|'+(sku||'');
-// pendiente | confirmado | cargado | descartado; a cargado row scanned wrong again afterwards is pending again (volvio)
-function codEstado(r){
-  const f=_codFix.get(codKey(r.escaneado, r.sku));
-  if(!f) return { estado:'pendiente' };
-  if(f.estado==='cargado' && r.ultimaTs>f.ts) return { estado:'pendiente', volvio:true, f };
-  return { estado:f.estado, f };
-}
 async function admCodigos(el, m='admin'){
   const st=VST(m);
   if(st.codTipo==='spv') return spvCargar(el, m);
   if(IMGDB_READY) await IMGDB_READY; // SKU Calii comes from Masterview
-  st.codSinTabla=false;
   const dias=st.codDias||7, desde=localDateStr(new Date(serverNow().getTime()-dias*86400000));
-  const [evs, fix]=await Promise.all([
-    pgSelectAll('rec_events', `tipo=in.(scan,confirmacion)&fecha=gte.${desde}&detalle->codigo_incorrecto=not.is.null&select=hub,area,fecha,producto,receptor,ts,detalle&order=id.desc`),
-    pgSelectAll('rec_codigos_fix', 'tipo=eq.barcode&select=*&order=id.asc').catch(e=>{ if(isNetErr(e)) throw e; st.codSinTabla=true; return []; })]);
-  _codFix=new Map(); for(const f of fix) _codFix.set(codKey(f.clave, f.sku), f); // id order: latest wins
+  const evs=await pgSelectAll('rec_events', `tipo=in.(scan,confirmacion)&fecha=gte.${desde}&detalle->codigo_incorrecto=not.is.null&select=hub,area,fecha,producto,receptor,ts,detalle&order=id.desc`);
   const by=new Map();
   for(const e of evs){
     if(e.hub==='test-hub' && !IS_LOCAL) continue;
     const d=e.detalle.codigo_incorrecto, k=e.producto+'|'+d.escaneado;
     let r=by.get(k);
-    if(!r){ r={ producto:e.producto, escaneado:String(d.escaneado||'').trim(), sistema:d.codigo_sistema||'', dice:d.sistema_dice||'', hubs:new Set(), hub:e.hub, veces:0, ultima:e.fecha, ultimaTs:e.ts }; by.set(k, r); }
-    r.hubs.add(hubName(e.hub)); r.veces++; if(e.fecha>r.ultima) r.ultima=e.fecha; if(e.ts>r.ultimaTs) r.ultimaTs=e.ts;
+    if(!r){ r={ producto:e.producto, escaneado:String(d.escaneado||'').trim(), sistema:d.codigo_sistema||'', dice:d.sistema_dice||'', hubs:new Set(), hub:e.hub, veces:0, ultima:e.fecha }; by.set(k, r); }
+    r.hubs.add(hubName(e.hub)); r.veces++; if(e.fecha>r.ultima) r.ultima=e.fecha;
   }
   _admCod=[...by.values()].sort((a,b)=>b.veces-a.veces || a.producto.localeCompare(b.producto));
   _admCod.forEach(r=>{ r.sku=skuCalii(r.sistema, r.producto, r.hub); });
@@ -5659,86 +5645,44 @@ async function admCodigos(el, m='admin'){
 // Códigos: two lists, both ending in a Retool CSV (column B = what changes)
 function codTabsHtml(m){ const t=VST(m).codTipo||'barcode';
   return `<div class="tabs" style="margin-top:0">${[['barcode','Códigos de barras'],['spv','SKU proveedor']].map(([k,n])=>`<button class="choice ${t===k?'sel':''}" onclick="VST('${m}').codTipo='${k}';vRender('${m}')">${n}</button>`).join('')}</div>`; }
+// The warning above every Retool download: nothing was confirmed row by row
+function codAvisoHtml(n, sinSku, dups){
+  return `<div class="warn-box">El CSV trae <b>todo lo que se generó</b> (${n}), sin confirmar uno por uno. Revísalo antes de subirlo a Retool: si un renglón está mal, bórralo del archivo.${sinSku?` ${sinSku} sin SKU no ${sinSku===1?'va':'van'} en el archivo.`:''}${dups.length?'<br>'+dups.join('<br>'):''}</div>`;
+}
 function codRender(el, m){
   const st=VST(m), dias=st.codDias||7, M=`'${m}'`;
   const sel=`<div class="filters" style="margin-bottom:10px"><select onchange="VST(${M}).codDias=Number(this.value);vRender(${M})">
     <option value="7" ${dias===7?'selected':''}>Últimos 7 días</option><option value="30" ${dias===30?'selected':''}>Últimos 30 días</option></select></div>`;
-  let h=codTabsHtml(m)+`<div class="muted" style="margin-bottom:8px">Productos cuyo código escaneado no coincidió con el sistema; el receptor lo buscó por nombre. Confirma cada uno y descarga el CSV para la carga masiva de Retool: <b>SKU Calii</b> y el <b>código del producto físico</b>.</div>${sel}`;
-  if(st.codSinTabla) h+=`<div class="err-box">Falta la tabla de confirmaciones: corre <b>sql/codigos-fix.sql</b> en Supabase. Mientras, la lista se ve pero no se puede confirmar.</div>`;
+  let h=codTabsHtml(m)+`<div class="muted" style="margin-bottom:8px">Productos cuyo código escaneado no coincidió con el sistema; el receptor lo buscó por nombre. El CSV es para la carga masiva de Retool: <b>SKU Calii</b> y el <b>código del producto físico</b>.</div>${sel}`;
   if(!_admCod.length){ el.innerHTML=h+'<div class="empty-hint">Sin códigos incorrectos en este periodo.</div>'; return; }
-  const rows=_admCod.map((r,i)=>Object.assign({ r, i }, codEstado(r)));
-  const G=e=>rows.filter(x=>x.estado===e), conf=G('confirmado');
-  // Retool file: SKU Calii, Código de barras — confirmed rows only. The same scanned code on two SKUs would overwrite in Retool.
-  const dup=new Map(); conf.forEach(x=>{ const a=dup.get(x.r.escaneado)||[]; a.push(x.r.sku); dup.set(x.r.escaneado, a); });
-  const dups=[...dup.entries()].filter(([,a])=>new Set(a).size>1);
-  h+=`<button class="btn btn-primary btn-block" ${conf.length?'':'disabled'} onclick="codRetoolCsv(${M})">Descargar CSV para Retool${conf.length?' · '+conf.length:''}</button>`
-    +(dups.length?`<div class="warn-box">${dups.map(([c,a])=>`El código <b>${escapeHtml(c)}</b> va en ${a.length} SKUs (${a.map(escapeHtml).join(', ')}). Retool guarda un código por artículo: deja confirmado solo el correcto.`).join('<br>')}</div>`:'')
-    +(st.codCopiados&&st.codCopiados.length?`<div class="warn-box">Descargaste ${pvPl(st.codCopiados.length,'código')}. Súbelo en la carga masiva de Retool y después:
-      <button class="btn btn-warn btn-block" onclick="codCargado(${M})">Ya lo cargué en Retool</button><button class="link-btn" onclick="VST(${M}).codCopiados=null;codRender(vEl(${M}),${M})">Todavía no</button></div>`
-      :conf.length?'':`<div class="muted" style="font-size:13px;margin:6px 0 0">Confirma los productos para poder descargarlos.</div>`);
-  const fila=x=>{ const r=x.r, f=x.f, sinSku=!r.sku, quien=f&&f.quien?' · '+escapeHtml(f.quien):'';
-    let est='', btns='';
-    if(x.estado==='pendiente'){
-      est=x.volvio?`<div class="note" style="margin:6px 0 0">Se cargó en Retool${quien} y se volvió a escanear con otro código después. Revísalo otra vez.</div>`:'';
-      btns=sinSku?`<button class="btn btn-secondary" onclick="codMarcar(${x.i},'descartado',${M})">Descartar</button>`
-        :`<button class="btn btn-warn" onclick="codMarcar(${x.i},'confirmado',${M})">Confirmar</button><button class="btn btn-secondary" onclick="codMarcar(${x.i},'descartado',${M})">Descartar</button>`;
-    } else {
-      est=`<div style="margin-top:6px">${x.estado==='confirmado'?`<span class="tag green">Confirmado${quien}</span>`:x.estado==='cargado'?`<span class="tag">Cargado en Retool${quien}</span>`:`<span class="tag">Descartado${quien}</span>`}${f&&f.ts?` <span class="muted" style="font-size:12px">${fechaLarga(localDateStr(new Date(f.ts)))}</span>`:''}</div>`;
-      btns=`<button class="btn btn-secondary" onclick="codMarcar(${x.i},'pendiente',${M})">Deshacer</button>`;
-    }
+  const con=_admCod.filter(r=>r.sku);
+  // The same scanned code on two SKUs would overwrite in Retool
+  const dup=new Map(); con.forEach(r=>{ const a=dup.get(r.escaneado)||[]; a.push(r.sku); dup.set(r.escaneado, a); });
+  const dups=[...dup.entries()].filter(([,a])=>new Set(a).size>1).map(([c,a])=>`El código <b>${escapeHtml(c)}</b> sale en ${a.length} SKUs (${a.map(escapeHtml).join(', ')}). Retool guarda un código por artículo: deja solo el correcto.`);
+  h+=`<button class="btn btn-primary btn-block" ${con.length?'':'disabled'} onclick="codRetoolCsv(${M})">Descargar CSV para Retool${con.length?' · '+con.length:''}</button>`
+    +codAvisoHtml(con.length, _admCod.length-con.length, dups);
+  const fila=r=>{ const sinSku=!r.sku;
     return `<div class="adm-row"><div style="display:flex;gap:10px;align-items:center">${imgTag(r.sistema, r.producto, 'thumb')}<b style="flex:1;min-width:0">${nameHtml(r.producto)}</b></div>
       <div style="font-size:14px;margin-top:6px">SKU Calii: ${sinSku?'<span class="tag orange">sin SKU</span>':`<b>${escapeHtml(r.sku)}</b>`} · Código del producto: <b>${escapeHtml(r.escaneado)}</b></div>
       <div class="muted" style="font-size:13px">En sistema: ${escapeHtml(r.sistema||'sin código')}${r.dice?` · el código escaneado aparece como «${escapeHtml(r.dice)}»`:''}</div>
-      ${sinSku?'<div class="muted" style="font-size:12px">No está en Masterview: búscalo en Retool a mano. No entra en la copia.</div>':''}
-      <div class="muted" style="font-size:12px">${r.veces} vez${r.veces===1?'':'es'} · ${escapeHtml([...r.hubs].join(', '))} · última ${fechaLarga(r.ultima)}</div>
-      ${est}${st.codSinTabla?'':`<div class="btns">${btns}</div>`}</div>`; };
-  const pend=G('pendiente');
-  h+=`<div class="section-title">Por confirmar · ${pend.length}</div>`+(pend.map(fila).join('')||'<div class="muted" style="font-size:13px">Nada por confirmar.</div>');
-  if(conf.length) h+=`<div class="section-title">Confirmados · ${conf.length}</div>`+conf.map(fila).join('');
-  for(const [e,t] of [['cargado','Ya cargados en Retool'],['descartado','Descartados']]){ const a=G(e);
-    if(a.length) h+=`<details class="cod-mas"><summary class="section-title">${t} · ${a.length}</summary>${a.map(fila).join('')}</details>`; }
+      ${sinSku?'<div class="muted" style="font-size:12px">No está en Masterview: búscalo en Retool a mano. No va en el CSV.</div>':''}
+      <div class="muted" style="font-size:12px">${r.veces} vez${r.veces===1?'':'es'} · ${escapeHtml([...r.hubs].join(', '))} · última ${fechaLarga(r.ultima)}</div></div>`; };
+  const sin=_admCod.filter(r=>!r.sku);
+  h+=`<div class="section-title">En el CSV · ${con.length}</div>`+(con.map(fila).join('')||'<div class="muted" style="font-size:13px">Ninguno tiene SKU.</div>');
+  if(sin.length) h+=`<div class="section-title">Sin SKU · ${sin.length}</div>`+sin.map(fila).join('');
   h+=`<button class="btn btn-secondary btn-block" style="margin-top:12px" onclick="admCodigosCsv(${M})">CSV completo (para revisar)</button>`;
   el.innerHTML=h;
 }
-async function codGuardar(rows, m){
-  const st=VST(m); if(st.codBusy) return false; st.codBusy=true;
-  try{ return await codGuardar_(rows, m); } finally{ st.codBusy=false; }
-}
-async function codGuardar_(rows, m){
-  const st=VST(m);
-  const ts=serverNow().toISOString();
-  const out=rows.map(({ r, estado })=>({ tipo:'barcode', clave:r.escaneado, sku:r.sku||'', estado, quien:null, ts,
-    detalle:{ producto:r.producto, codigo_sistema:r.sistema||null, modo:m } }));
-  try{ await pgInsert('rec_codigos_fix', out); }
-  catch(e){ toast(isNetErr(e)?'Sin conexión: no se guardó':'No se guardó: '+e.message, 4000); return false; }
-  for(const o of out) _codFix.set(codKey(o.clave, o.sku), o);
-  return true;
-}
-async function codMarcar(i, estado, m){
-  const r=_admCod[i]; if(!r) return;
-  if(await codGuardar([{ r, estado }], m)){ const st=VST(m); if(st.codCopiados) st.codCopiados=st.codCopiados.filter(k=>k!==codKey(r.escaneado, r.sku)); codRender(vEl(m), m); }
-}
-// Column A = SKU Calii, column B = the new value (barcode here; «SKU Proveedor» once §3b reads Invoice Reader). No BOM:
-// the header has to reach Retool's bulk upload as plain «SKU Calii».
+// Column A = SKU Calii, column B = the new value. No BOM: the header has to reach Retool's bulk upload as plain «SKU Calii».
 function codRetoolCsv(m){
-  const st=VST(m), conf=_admCod.filter(r=>codEstado(r).estado==='confirmado' && r.sku);
-  if(!conf.length) return;
-  const body=[['SKU Calii','Código de barras']].concat(conf.map(r=>[r.sku, r.escaneado])).map(x=>x.map(csvCell).join(',')).join('\r\n')+'\r\n';
+  const con=_admCod.filter(r=>r.sku); if(!con.length) return;
+  const body=[['SKU Calii','Código de barras']].concat(con.map(r=>[r.sku, r.escaneado])).map(x=>x.map(csvCell).join(',')).join('\r\n')+'\r\n';
   downloadText(`retool_codigo-de-barras_${todayStr()}.csv`, body, true);
-  st.codCopiados=conf.map(r=>codKey(r.escaneado, r.sku));
-  codRender(vEl(m), m);
-}
-// Marks exactly the rows that were copied (and are still confirmed), not every confirmed row
-async function codCargado(m){
-  const st=VST(m), ks=new Set(st.codCopiados||[]);
-  const rows=_admCod.filter(r=>ks.has(codKey(r.escaneado, r.sku)) && codEstado(r).estado==='confirmado').map(r=>({ r, estado:'cargado' }));
-  if(!rows.length){ st.codCopiados=null; codRender(vEl(m), m); return; }
-  if(await codGuardar(rows, m)){ st.codCopiados=null; toast(`✓ ${pvPl(rows.length,'código')} marcado${rows.length===1?'':'s'} como cargado${rows.length===1?'':'s'}`); codRender(vEl(m), m); }
 }
 function admCodigosCsv(m='admin'){
-  const st=VST(m), EST={ pendiente:'Por confirmar', confirmado:'Confirmado', cargado:'Cargado en Retool', descartado:'Descartado' };
-  const cols=['SKU Calii','Código del producto (escaneado)','Producto','Código en sistema (Retool)','El código escaneado aparece como','Estado','Veces','Hubs','Última fecha'];
-  const body=_admCod.map(r=>{ const x=codEstado(r); return [r.sku||'sin SKU', r.escaneado, r.producto, r.sistema, r.dice, EST[x.estado], r.veces, [...r.hubs].join(', '), r.ultima].map(csvCell).join(','); });
+  const st=VST(m);
+  const cols=['SKU Calii','Código del producto (escaneado)','Producto','Código en sistema (Retool)','El código escaneado aparece como','Veces','Hubs','Última fecha'];
+  const body=_admCod.map(r=>[r.sku||'sin SKU', r.escaneado, r.producto, r.sistema, r.dice, r.veces, [...r.hubs].join(', '), r.ultima].map(csvCell).join(','));
   downloadText(`codigos-incorrectos_${todayStr()}_${st.codDias||7}d.csv`, [cols.map(csvCell).join(',')].concat(body).join('\r\n')+'\r\n');
 }
 
@@ -5746,16 +5690,15 @@ function admCodigosCsv(m='admin'){
    Retool needs that supplier code under «SKU Proveedor». Source: Invoice Reader's «Sin coincidencia» list — its API
    action `sinCoincidencia` when it exists (spvDesdeApi), else the CSV comercial downloads there and uploads here
    (recibo/comercial/sin-coincidencia/{fecha}__{epochMs}.csv, newest wins). One row per proveedor + clave (leading «*» off:
-   Retool stores «*796» as «796»). «Pruebas de facturas» is left out of Hubs. SKU: what comercial picked here > the saved
-   confirmation > «SKU Calii elegido» (receptor's pick in recibo) > «SKU sugerido» (reader's suggestion). Each row is
-   confirmed one by one (rule 2); only confirmed rows go into the Retool CSV (SKU Calii, SKU Proveedor). State in
-   rec_codigos_fix tipo 'sku_proveedor', clave = normName(proveedor)|clave, latest per clave wins. ── */
+   Retool stores «*796» as «796»). «Pruebas de facturas» is left out of Hubs. SKU: what comercial picked here (this visit
+   only) > «SKU Calii elegido» (receptor's pick in recibo) > «SKU sugerido» (reader's suggestion). The Retool CSV (SKU Calii,
+   SKU Proveedor) takes every row with a SKU (Jose, 2026-11-26: no confirm / discard step; a warning asks to review it). ── */
 const SPV_DIR='comercial/sin-coincidencia/';
 const SPV_COLS={ proveedor:['Proveedor'], ciudad:['Ciudad'], clave:['Clave proveedor','Clave'], codigo_barras:['Código de barras','Codigo de barras'],
   descripcion:['Descripción en factura','Descripcion en factura','Descripción'], motivo:['Motivo'], facturas:['Facturas'], ultima_vez:['Última vez','Ultima vez'],
   hubs:['Hubs'], articulo_recibo:['Artículo elegido en recibo','Articulo elegido en recibo'], sku_recibo:['SKU Calii elegido'],
   sugerencia:['Sugerencia sin confirmar'], sku_sugerido:['SKU sugerido'] };
-let _spv=[], _spvFix=new Map(), _mvSku=null;
+let _spv=[], _mvSku=null;
 const spvClave=c=>String(c==null?'':c).trim().replace(/^\*+/,'').trim();
 function spvYmd(s){
   const t=String(s||'').trim(); let m=t.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return m[1]+'-'+m[2]+'-'+m[3];
@@ -5801,13 +5744,11 @@ async function spvCargar(el, m){
   const st=VST(m);
   if(IMGDB_READY) await IMGDB_READY;
   el.innerHTML=codTabsHtml(m)+'<div class="muted">Cargando…</div>';
-  st.codSinTabla=false; st.spvPick=st.spvPick||{};
-  const [api, fix, files]=await Promise.all([
+  st.spvPick=st.spvPick||{};
+  const [api, files]=await Promise.all([
     st.spvApi!==undefined ? st.spvApi : spvDesdeApi(),
-    pgSelectAll('rec_codigos_fix', 'tipo=eq.sku_proveedor&select=*&order=id.asc').catch(e=>{ if(isNetErr(e)) throw e; st.codSinTabla=true; return []; }),
     sbList(SPV_DIR).catch(()=>[])]);
   st.spvApi=api;
-  _spvFix=new Map(); for(const f of fix) _spvFix.set(f.clave, f);
   let rows=null, fuente='';
   if(api && api.rows.length){ rows=api.rows; const g=api.generado?new Date(api.generado):null; fuente=`Invoice Reader en vivo${g&&!isNaN(g)?' · leído '+fechaLarga(localDateStr(g))+', '+localHM(g):''}`; }
   else {
@@ -5820,59 +5761,36 @@ async function spvCargar(el, m){
   const g=spvAgrupar(rows||[]); _spv=g.filas; st.spvSinClave=g.sinClave; st.spvHay=rows!=null;
   spvRender(el, m);
 }
-function spvSku(r, m){ const p=VST(m).spvPick[r.key], f=_spvFix.get(r.key);
+function spvSku(r, m){ const p=VST(m).spvPick[r.key];
   if(p) return { sku:p.sku, origen:'comercial' };
-  if(f && f.sku) return { sku:f.sku, origen:f.detalle&&f.detalle.origen||'comercial' };
   if(r.sku_recibo) return { sku:r.sku_recibo, origen:'recibo' };
   if(r.sku_sugerido) return { sku:r.sku_sugerido, origen:'sugerencia' };
   return { sku:'', origen:'' };
 }
-function spvEstado(r){
-  const f=_spvFix.get(r.key);
-  if(!f) return { estado:'pendiente' };
-  if(f.estado==='cargado' && r.ultima && r.ultima>localDateStr(new Date(f.ts))) return { estado:'pendiente', volvio:true, f };
-  return { estado:f.estado, f };
-}
 const SPV_ORIGEN={ recibo:'Elegido en recibo', sugerencia:'Sugerencia del lector', comercial:'Elegido aquí' };
 function spvRender(el, m){
   const st=VST(m), M=`'${m}'`;
-  let h=codTabsHtml(m)+`<div class="muted" style="margin-bottom:8px">Renglones de factura que Invoice Reader no pudo ligar a un producto: a Retool le falta la clave del proveedor en <b>SKU Proveedor</b>. Confirma cada uno y descarga el CSV para la carga masiva.</div>`;
+  let h=codTabsHtml(m)+`<div class="muted" style="margin-bottom:8px">Renglones de factura que Invoice Reader no pudo ligar a un producto: a Retool le falta la clave del proveedor en <b>SKU Proveedor</b>. El CSV es para la carga masiva.</div>`;
   h+=`<label class="btn btn-secondary btn-block" style="margin-bottom:6px">Subir archivo «Sin coincidencia» (CSV de Invoice Reader)<input type="file" accept=".csv,text/csv,text/plain" style="display:none" onchange="spvSubir(this, ${M})"></label>`
     +(st.spvFuente?`<div class="muted" style="font-size:12px;margin-bottom:8px">${st.spvFuente}</div>`:'');
-  if(st.codSinTabla) h+=`<div class="err-box">Falta la tabla de confirmaciones: corre <b>sql/codigos-fix.sql</b> en Supabase. Mientras, la lista se ve pero no se puede confirmar.</div>`;
   if(!st.spvHay){ el.innerHTML=h+'<div class="empty-hint">Todavía no hay lista. En Invoice Reader descarga «Sin coincidencia» como CSV y súbela aquí.</div>'; return; }
-  const rows=_spv.map((r,i)=>Object.assign({ r, i }, spvEstado(r), spvSku(r, m)));
-  const G=e=>rows.filter(x=>x.estado===e), conf=G('confirmado').filter(x=>x.sku), pend=G('pendiente');
-  const dup=new Map(); conf.forEach(x=>{ const a=dup.get(x.sku)||[]; a.push(x.r.clave); dup.set(x.sku, a); });
-  const dups=[...dup.entries()].filter(([,a])=>new Set(a).size>1);
-  h+=`<button class="btn btn-primary btn-block" ${conf.length?'':'disabled'} onclick="spvRetoolCsv(${M})">Descargar CSV para Retool${conf.length?' · '+conf.length:''}</button>`
-    +(dups.length?`<div class="warn-box">${dups.map(([s,a])=>`El SKU <b>${escapeHtml(s)}</b> va con ${a.length} claves (${a.map(escapeHtml).join(', ')}). Retool guarda una SKU Proveedor por artículo: deja confirmada solo la correcta.`).join('<br>')}</div>`:'')
-    +(st.spvBajados&&st.spvBajados.length?`<div class="warn-box">Descargaste ${pvPl(st.spvBajados.length,'clave')}. Súbelo en la carga masiva de Retool y después:
-      <button class="btn btn-warn btn-block" onclick="spvCargado(${M})">Ya lo cargué en Retool</button><button class="link-btn" onclick="VST(${M}).spvBajados=null;spvRender(vEl(${M}),${M})">Todavía no</button></div>`
-      :conf.length?'':`<div class="muted" style="font-size:13px;margin:6px 0 0">Confirma los renglones para poder descargarlos.</div>`);
-  const fila=x=>{ const r=x.r, f=x.f, mv=x.sku?mvPorSku(x.sku):null, btns=[];
+  const rows=_spv.map((r,i)=>Object.assign({ r, i }, spvSku(r, m))), con=rows.filter(x=>x.sku), sin=rows.filter(x=>!x.sku);
+  const dup=new Map(); con.forEach(x=>{ const a=dup.get(x.sku)||[]; a.push(x.r.clave); dup.set(x.sku, a); });
+  const dups=[...dup.entries()].filter(([,a])=>new Set(a).size>1).map(([s,a])=>`El SKU <b>${escapeHtml(s)}</b> sale con ${a.length} claves (${a.map(escapeHtml).join(', ')}). Retool guarda una SKU Proveedor por artículo: deja solo la correcta.`);
+  h+=`<button class="btn btn-primary btn-block" ${con.length?'':'disabled'} onclick="spvRetoolCsv(${M})">Descargar CSV para Retool${con.length?' · '+con.length:''}</button>`
+    +codAvisoHtml(con.length, sin.length, dups);
+  const fila=x=>{ const r=x.r, mv=x.sku?mvPorSku(x.sku):null;
     const prod=x.sku?`<div style="display:flex;gap:10px;align-items:center;margin-top:8px">${mv&&mv.url?`<img class="thumb" src="${escapeHtml(mv.url)}" alt="" loading="lazy">`:'<div class="thumb"></div>'}
         <div style="flex:1;min-width:0"><b>${escapeHtml(mv&&mv.name||r.articulo_recibo||r.sugerencia||'Producto')}</b><div style="font-size:13px">SKU Calii <b>${escapeHtml(x.sku)}</b>${mv?'':' <span class="muted">(no está en Masterview)</span>'}</div></div></div>
         <div style="margin-top:4px"><span class="tag${x.origen==='sugerencia'?'':' green'}">${SPV_ORIGEN[x.origen]||''}</span></div>`
-      :`<div class="muted" style="font-size:13px;margin-top:6px">Sin producto: búscalo para poder confirmarlo.</div>`;
-    if(x.estado==='pendiente'){
-      if(x.sku) btns.push(`<button class="btn btn-warn" onclick="spvMarcar(${x.i},'confirmado',${M})">Confirmar</button>`);
-      btns.push(`<button class="btn btn-secondary" onclick="spvBuscar(${x.i},${M})">${x.sku?'Cambiar producto':'Buscar producto'}</button>`,
-        `<button class="btn btn-secondary" onclick="spvMarcar(${x.i},'descartado',${M})">Descartar</button>`);
-    } else btns.push(`<button class="btn btn-secondary" onclick="spvMarcar(${x.i},'pendiente',${M})">Deshacer</button>`);
-    const est=x.estado==='pendiente'?(x.volvio?`<div class="note" style="margin:6px 0 0">Se cargó en Retool y volvió a salir en una factura después. Revísalo otra vez.</div>`:'')
-      :`<div style="margin-top:6px"><span class="tag ${x.estado==='confirmado'?'green':''}">${{ confirmado:'Confirmado', cargado:'Cargado en Retool', descartado:'Descartado' }[x.estado]}</span>${f&&f.ts?` <span class="muted" style="font-size:12px">${fechaLarga(localDateStr(new Date(f.ts)))}</span>`:''}</div>`;
+      :`<div class="muted" style="font-size:13px;margin-top:6px">Sin producto: búscalo para que vaya en el CSV.</div>`;
     return `<div class="adm-row"><div class="muted" style="font-size:12px">${escapeHtml(r.proveedor)}${r.ciudad?' · '+escapeHtml(r.ciudad):''}</div>
       <div style="font-size:14px">En la factura: «<b>${escapeHtml(r.descripcion||'—')}</b>»</div>
       <div style="font-size:14px">Clave del proveedor: <b>${escapeHtml(r.clave)}</b>${[...r.claves].some(c=>c!==r.clave)?` <span class="muted" style="font-size:12px">(en la factura ${[...r.claves].map(escapeHtml).join(', ')})</span>`:''}${r.codigo_barras?` · código ${escapeHtml(r.codigo_barras)}`:''}</div>
       <div class="muted" style="font-size:12px">${pvPl(r.facturas||0,'factura')}${r.hubs.size?' · '+escapeHtml([...r.hubs].join(', ')):''}${r.ultima?' · última '+fechaLarga(r.ultima):r.ultimaTxt?' · última '+escapeHtml(r.ultimaTxt):''}</div>
-      ${prod}${est}${st.codSinTabla?'':`<div class="btns">${btns.join('')}</div>`}</div>`; };
-  const conSku=pend.filter(x=>x.sku), sinSku=pend.filter(x=>!x.sku);
-  h+=`<div class="section-title">Por confirmar · ${conSku.length}</div>`+(conSku.map(fila).join('')||'<div class="muted" style="font-size:13px">Nada por confirmar.</div>');
-  if(sinSku.length) h+=`<div class="section-title">Sin producto · ${sinSku.length}</div>`+sinSku.map(fila).join('');
-  const cf=G('confirmado'); if(cf.length) h+=`<div class="section-title">Confirmados · ${cf.length}</div>`+cf.map(fila).join('');
-  for(const [e,t] of [['cargado','Ya cargados en Retool'],['descartado','Descartados']]){ const a=G(e);
-    if(a.length) h+=`<details class="cod-mas"><summary class="section-title">${t} · ${a.length}</summary>${a.map(fila).join('')}</details>`; }
+      ${prod}<div class="btns"><button class="btn btn-secondary" onclick="spvBuscar(${x.i},${M})">${x.sku?'Cambiar producto':'Buscar producto'}</button></div></div>`; };
+  h+=`<div class="section-title">En el CSV · ${con.length}</div>`+(con.map(fila).join('')||'<div class="muted" style="font-size:13px">Ninguno tiene producto.</div>');
+  if(sin.length) h+=`<div class="section-title">Sin producto · ${sin.length}</div>`+sin.map(fila).join('');
   const sc=st.spvSinClave||[];
   if(sc.length) h+=`<details class="cod-mas"><summary class="section-title">Sin clave en la factura · ${sc.length}</summary><div class="muted" style="font-size:13px;margin-bottom:6px">La factura no trae clave del proveedor: no hay nada que cargar en SKU Proveedor. Es un problema de lectura para Invoice Reader.</div>`
     +sc.map(r=>`<div class="adm-row"><div class="muted" style="font-size:12px">${escapeHtml(r.proveedor)}${r.hubs.length?' · '+escapeHtml(r.hubs.join(', ')):''}${r.ultimaTxt?' · '+escapeHtml(r.ultimaTxt):''}</div><div style="font-size:14px">«${escapeHtml(r.descripcion||'—')}»</div>${r.motivo?`<div class="muted" style="font-size:12px">${escapeHtml(r.motivo)}</div>`:''}</div>`).join('')+`</details>`;
@@ -5889,41 +5807,11 @@ async function spvSubir(input, m){
   toast(`✓ Lista subida · ${pvPl((p.data||[]).length,'renglón','renglones')}`);
   const st=VST(m); st.spvApi=null; spvCargar(vEl(m), m);
 }
-async function spvGuardar(items, m){
-  const st=VST(m); if(st.codBusy) return false; st.codBusy=true; // a second tap while saving would write the row twice
-  try{ return await spvGuardar_(items, m); } finally{ st.codBusy=false; }
-}
-async function spvGuardar_(items, m){
-  const ts=serverNow().toISOString();
-  const out=items.map(({ r, estado, sku, origen })=>({ tipo:'sku_proveedor', clave:r.key, sku:sku||'', estado, quien:null, ts,
-    detalle:{ proveedor:r.proveedor, clave_proveedor:r.clave, descripcion:r.descripcion, origen, modo:m } }));
-  try{ await pgInsert('rec_codigos_fix', out); }
-  catch(e){ toast(isNetErr(e)?'Sin conexión: no se guardó':'No se guardó: '+e.message, 4000); return false; }
-  for(const o of out) _spvFix.set(o.clave, o);
-  return true;
-}
-async function spvMarcar(i, estado, m){
-  const r=_spv[i]; if(!r) return;
-  const st=VST(m), s=spvSku(r, m);
-  if(await spvGuardar([{ r, estado, sku:s.sku, origen:s.origen }], m)){
-    delete st.spvPick[r.key]; if(st.spvBajados) st.spvBajados=st.spvBajados.filter(k=>k!==r.key);
-    spvRender(vEl(m), m);
-  }
-}
 // Retool file: column A SKU Calii, column B SKU Proveedor (no BOM: the header must reach Retool as plain «SKU Calii»)
 function spvRetoolCsv(m){
-  const st=VST(m), conf=_spv.map(r=>({ r, e:spvEstado(r), s:spvSku(r, m) })).filter(x=>x.e.estado==='confirmado' && x.s.sku);
-  if(!conf.length) return;
-  const body=[['SKU Calii','SKU Proveedor']].concat(conf.map(x=>[x.s.sku, x.r.clave])).map(x=>x.map(csvCell).join(',')).join('\r\n')+'\r\n';
+  const con=_spv.map(r=>({ r, s:spvSku(r, m) })).filter(x=>x.s.sku); if(!con.length) return;
+  const body=[['SKU Calii','SKU Proveedor']].concat(con.map(x=>[x.s.sku, x.r.clave])).map(x=>x.map(csvCell).join(',')).join('\r\n')+'\r\n';
   downloadText(`retool_sku-proveedor_${todayStr()}.csv`, body, true);
-  st.spvBajados=conf.map(x=>x.r.key);
-  spvRender(vEl(m), m);
-}
-async function spvCargado(m){
-  const st=VST(m), ks=new Set(st.spvBajados||[]);
-  const items=_spv.filter(r=>ks.has(r.key) && spvEstado(r).estado==='confirmado').map(r=>{ const s=spvSku(r, m); return { r, estado:'cargado', sku:s.sku, origen:s.origen }; });
-  if(!items.length){ st.spvBajados=null; spvRender(vEl(m), m); return; }
-  if(await spvGuardar(items, m)){ st.spvBajados=null; toast(`✓ ${pvPl(items.length,'clave')} marcada${items.length===1?'':'s'} como cargada${items.length===1?'':'s'}`); spvRender(vEl(m), m); }
 }
 // «Buscar producto»: Masterview products with a SKU, by name words (or the SKU itself)
 let _spvBus=null;
@@ -6618,8 +6506,7 @@ function demoGenerar(){
   }
   const contactos={ 'Bimbo':{ comercial:'Ana Prueba', comprador:'Luis Prueba' }, 'Lácteos Prueba':{ comercial:'Ana Prueba', comprador:'Luis Prueba' }, 'Abarrotes Prueba':{ comercial:'Ana Prueba', comprador:'Marta Prueba' }, 'Refrescos Prueba':{ comercial:'Ana Prueba', comprador:'Luis Prueba' } };
   /* ── Comercial → Códigos (comercial-plan §3a): «Código incorrecto en sistema» scans already in the table, planted once per
-     test (DEMO.st.codPlantado). SKU by barcode, SKU by exact name, no SKU, one scanned code on two products, and one row
-     loaded into Retool that was scanned wrong again afterwards. ── */
+     test (DEMO.st.codPlantado). SKU by barcode, SKU by exact name, no SKU, one scanned code on two products, and one more. ── */
   const codigosEspera=[];
   {
     const T=DEMO.st.tables, nuevo=()=>{ let c; do{ c='750'+String(int(1000000000,9999999999)); }while(S.imgDb[bcKey(c)]); return c; };
@@ -6630,22 +6517,19 @@ function demoGenerar(){
       { p:{ producto:'Galletas de prueba sin SKU 200g' }, esc:nuevo(), sis:'', hubs:['mh-guadalupe'], dias:[2] },
       { p:c, esc:dup, sis:c.code, hubs:['mh-contry'], dias:[1] },
       { p:d, esc:dup, sis:d.code, hubs:['mh-cumbres'], dias:[2] },
-      { p:e, esc:nuevo(), sis:e.code, hubs:['mh-contry'], dias:[1], cargado:4 }];
+      { p:e, esc:nuevo(), sis:e.code, hubs:['mh-contry'], dias:[1] }];
     if(!DEMO.st.codPlantado){
       for(const k of casos) k.hubs.forEach((hub,j)=>{ const f=addDaysStr(hoy,-k.dias[j]);
         T.rec_events.push({ id:DEMO.st.nextId++, session_id:'demo-codigos-'+hub, hub, area:'abarrotes', fecha:f, tipo:'scan', sku_key:k.p.code?bcKey(k.p.code):'name:'+normName(k.p.producto),
           producto:k.p.producto, cantidad:1, metodo:'codigo_incorrecto', receptor:'Prueba', device_id:'demo', ts:f+'T15:00:00.000Z',
           detalle:{ uid:'demo-cod-'+DEMO.st.nextId, codigo:k.esc, codigo_incorrecto:{ escaneado:k.esc, codigo_sistema:k.sis, sistema_dice:'', sistema_dice_codigo:null } } }); });
-      const k=casos[5], f=addDaysStr(hoy,-k.cargado);
-      T.rec_codigos_fix.push({ id:DEMO.st.nextId++, tipo:'barcode', clave:k.esc, sku:sku(k.p), estado:'cargado', quien:null, ts:f+'T18:00:00.000Z', detalle:{ producto:k.p.producto, modo:'comercial' } });
       DEMO.st.codPlantado=true; DEMO_SAVE();
     }
     codigosEspera.push(`${a.producto}: SKU ${sku(a)||'¿?'} por su código del sistema · escaneado 3 veces en Contry y Cumbres`,
       `${b.producto}: sin código en el sistema → SKU ${sku(b)||'¿?'} por su nombre exacto`,
-      'Galletas de prueba sin SKU 200g: «sin SKU», solo se puede descartar y no entra en la copia',
-      `${c.producto} y ${d.producto}: el mismo código escaneado ${dup}; si confirmas los dos, avisa que Retool guarda un código por artículo`,
-      `${e.producto}: se cargó en Retool hace 4 días y se volvió a escanear mal ayer → vuelve a «Por confirmar» con aviso`,
-      '«Descargar CSV para Retool» trae solo los confirmados (SKU Calii, Código de barras) · «Ya lo cargué en Retool» los pasa a «Ya cargados»');
+      'Galletas de prueba sin SKU 200g: «Sin SKU», no va en el CSV',
+      `${c.producto} y ${d.producto}: el mismo código escaneado ${dup} → el aviso dice que Retool guarda un código por artículo`,
+      '«Descargar CSV para Retool» trae todos los que tienen SKU (SKU Calii, Código de barras), sin confirmar; el aviso pide revisarlo');
   }
   /* ── Calendario → entradas en el sistema (comercial-plan §1): closed supplier receptions of the last days + what «Resumen»
      shows for them (rec_pd_entradas), planted once per test (DEMO.st.entPlantado). Cremería = verde, Botanas = rojo (both
@@ -6704,10 +6588,10 @@ function demoGenerar(){
     spvEspera.push('Comercial → Códigos → «SKU proveedor»: la lista ya está subida (archivo de ayer)',
       `Arca «*796» y «796» son un solo renglón (4 facturas, MH Contry y MH Cumbres; «Pruebas de facturas» no aparece) → ${a.producto}, «Elegido en recibo»`,
       `LALA LA-1182 → ${b.producto}, «Sugerencia del lector»`,
-      'Bimbo 55021: «Sin producto» → «Buscar producto» y elige uno; después se puede confirmar',
-      `Qualtia Q-10 y Q-11 van al mismo SKU (${c.producto}): si confirmas los dos, avisa que Retool guarda una SKU Proveedor por artículo`,
+      'Bimbo 55021: «Sin producto» → «Buscar producto» y elige uno; pasa a «En el CSV»',
+      `Qualtia Q-10 y Q-11 van al mismo SKU (${c.producto}) → el aviso dice que Retool guarda una SKU Proveedor por artículo`,
       '2 renglones de Arca sin clave: aparte en «Sin clave en la factura», sin botones',
-      '«Descargar CSV para Retool» trae SKU Calii y SKU Proveedor de los confirmados; «Subir archivo» con otro CSV reemplaza la lista');
+      '«Descargar CSV para Retool» trae SKU Calii y SKU Proveedor de todos los que tienen producto; «Subir archivo» con otro CSV reemplaza la lista');
   }
   DEMO.data={ ent, picks:ent.ab.picks, invoices, codigosEspera, entradasEspera, spvEspera, bridge:{ ordenes, catalogo, contactos, proveedores:['Abarrotes Prueba','Bimbo','Lácteos Prueba','Refrescos Prueba','Proveedor Sin Orden'], avisos:[] } };
   DEMO._ready();

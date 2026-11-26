@@ -294,7 +294,7 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   `modo` 'admin' | 'comercial'. `VST(modo)` = state, `vRender(modo)` = re-render, `vEl(modo)` = target. Every handler they
   print passes `'${m}'` (admCalMes, admCalVer, admCodigosCsv, pvFecha, pvRango, pvVer, pvVolver, pvCsv); `pvLoad(st)`/
   `pvDefaults(st)` take the state. `PV`, `_admCal`, `_admCod` stay shared (one screen shows at a time).
-- **View only**, except Códigos (confirmations in `rec_codigos_fix`, the «Sin coincidencia» upload in `recibo/comercial/`): nothing else in comercial mode writes. «Ver» opens `openRecepcion(info, 'comercial')`: `rvSoloVer()` → no
+- **View only**, except Códigos (the «Sin coincidencia» upload in `recibo/comercial/`): nothing else in comercial mode writes. «Ver» opens `openRecepcion(info, 'comercial')`: `rvSoloVer()` → no
   «Corregir lo recibido» (`rvEditable`), no «Terminar», and the invoice box is `facBoxSoloVer` (latest non-inicio `factura`
   review rendered, no list / photos / picks / auto-save; FACV stays null). Slack copy, FDR, CSV and «Copiar lista» stay.
   CSV downloads (Proveedores, Códigos) stay: they are what comercial uses. A new write control in the closed view must
@@ -305,14 +305,10 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   `sku` through `codigo_sistema` → `pickEntry` (hub's city; skipped on `nameClash`), else `skuPorNombre`: Masterview's
   top-level `skuByName` (normName → SKU; asked of Invoice Reader 2026-11-25 for products with no barcode, read as
   `S.skuByName`, empty until it ships), then the exact name of a barcode entry. No SKU → «sin SKU» (most Carnes today):
-  Descartar only, never exported. Confirmar / Descartar / Deshacer one row at a time (rule 2); no name asked (Jose: no
-  login, it only added friction; `quien` stays null). «Descargar CSV para Retool» = confirmed rows, header «SKU Calii»,
-  «Código de barras», no BOM (`downloadText(…, true)`); column B becomes «SKU Proveedor» for §3b. Then «Ya lo cargué en
-  Retool» marks exactly the rows in that file (`st.codCopiados`) `cargado`. Warns when one scanned code is confirmed on 2+
-  SKUs. «CSV completo (para revisar)» keeps every row with Estado. State: `rec_codigos_fix` (`sql/codigos-fix.sql`, Jose
-  runs it; select+insert only, append-only, latest per tipo+clave+sku wins, `estado` confirmado|cargado|descartado|pendiente
-  = undo). A `cargado` row scanned wrong again after its ts is pending again. Table missing → list shown, buttons hidden,
-  err-box. Modo prueba: planted once per test (`DEMO.st.codPlantado`), panel tab «Códigos» lists what to expect.
+  never exported. **No confirm / discard (Jose, 2026-11-26):** «Descargar CSV para Retool» = every row with a SKU, header
+  «SKU Calii», «Código de barras», no BOM (`downloadText(…, true)`), under a warning (`codAvisoHtml`: unconfirmed, review the
+  file, n sin SKU left out, one scanned code on 2+ SKUs). «CSV completo (para revisar)» keeps every row. The table
+  `rec_codigos_fix` (`sql/codigos-fix.sql`) still exists but nothing reads or writes it now. Modo prueba: planted once per test (`DEMO.st.codPlantado`), panel tab «Códigos» lists what to expect.
 
 - **Proveedores · fecha de cada error (phase 3, 2026-11-25; comercial-plan §2)** — shared by Admin and Comercial.
   `pvConDif(l, cob)` = faltante, rechazo, excedente, no solicitado or cobrado y no entregado. Product cards in a supplier's
@@ -353,16 +349,14 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   'barcode' | 'spv'; Admin and Comercial). Invoice rows Invoice Reader couldn't match → Retool needs the supplier code
   under «SKU Proveedor». Source: `spvDesdeApi` = `irPost({action:'sinCoincidencia'})` → `{ rows:[{ proveedor, ciudad, clave,
   codigo_barras, descripcion, motivo, facturas, ultima_vez, hubs:[], articulo_recibo, sku_recibo, sugerencia, sku_sugerido }],
-  generado? }` (live since 2026-11-25: 60 rows → 35 to review + 24 sin clave; any error → null → the uploaded file), else the CSV comercial downloads from
+  generado? }` (live since 2026-11-25: 60 rows → 35 with a SKU + 24 sin clave; any error → null → the uploaded file), else the CSV comercial downloads from
   Invoice Reader and uploads here (`spvSubir`, checks Proveedor + Clave proveedor columns, .xlsx refused) to
   `recibo/comercial/sin-coincidencia/{fecha}__{epochMs}.csv`, newest wins. `spvNorm` reads either shape (file column names in
   `SPV_COLS`). `spvAgrupar`: one row per normName(proveedor)|clave, clave without leading «*» (`spvClave`), invoices added,
   hubs joined minus «Pruebas de facturas»; rows without clave → «Sin clave en la factura» (reader problem, no buttons).
   SKU (`spvSku`): pick here (`st.spvPick`, «Buscar producto»/«Cambiar producto» sheet over Masterview by SKU, `mvPorSku`) >
-  saved confirmation > «SKU Calii elegido» (recibo) > «SKU sugerido» (reader). Confirm / Descartar / Deshacer per row;
-  `rec_codigos_fix` tipo 'sku_proveedor', clave = proveedor|clave, latest per clave wins; a cargado row whose «Última vez»
-  is after it comes back. «Descargar CSV para Retool»: SKU Calii, SKU Proveedor (no BOM) → «Ya lo cargué en Retool» marks the
-  rows in that file. Warns when one SKU is confirmed with 2+ claves. Both lists guard double taps (`st.codBusy`). Modo
+  «SKU Calii elegido» (recibo) > «SKU sugerido» (reader); the pick lives only in this visit. No confirm / discard:
+  «Descargar CSV para Retool» (SKU Calii, SKU Proveedor, no BOM) = every row with a SKU, same warning (one SKU with 2+ claves). Modo
   prueba: a planted «Sin coincidencia» CSV (`DEMO.st.spvPlantado`): *796 + 796 merged, sugerencia, sin producto, two claves on
   one SKU, sin clave.
 
