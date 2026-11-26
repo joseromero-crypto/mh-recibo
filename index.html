@@ -333,6 +333,8 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .pv-sub{font-weight:500;font-size:12px}
 .pv-prod summary::-webkit-details-marker{display:none}
 .pv-hist{font-size:13px;border-top:1px solid var(--c-line);padding-top:6px;margin-top:6px}
+.pv-hist.ok{color:var(--c-muted)}
+.pv-fechas-dif{font-size:12px;margin-top:4px}
 /* Admin → Calendario: one bar per reception, teal = Abarrotes, ink = Carnes (outlined = still open / sin cerrar) */
 .cal-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 8px}
 .cal-nav b{font-size:17px;text-transform:capitalize}
@@ -5701,6 +5703,10 @@ function pvProducts(recs){
   return [...m.values()];
 }
 const pvIssues=p=>p.fcL+p.danL+p.faltL+p.pnsL+p.excL+p.cobL;
+// Something to report on this product in this reception (comercial-plan §2: the date of each error)
+const pvConDif=(l, cob)=>!!(l.no_solicitado || l.faltante || l.rechazadas || l.excedente || cob>0);
+const pvFechaCorta=ymd=>fechaLarga(ymd).replace(/ de (\w{3})\w*/,' $1');
+const pvDifHist=p=>p.hist.filter(x=>pvConDif(x.l, x.cob));
 function pvLineTxt(l, cob){
   const q=v=>fmtQty(v,l.kgpz), pk={ kgpz:l.kgpz, pack:l.pack_n||0 }, p=[];
   if(l.no_solicitado) p.push('No venía en la OC (se regresó)');
@@ -5750,7 +5756,8 @@ async function admProveedores(el, m='admin'){
   if(!recs.length){ el.innerHTML=h+'<div class="empty-hint" style="margin-top:12px">Sin recepciones de proveedor cerradas en este periodo.</div>'; return; }
   h+=`<div class="muted" style="font-size:13px">${pvPl(tot.recs,'recepción','recepciones')} · ${pvPl(byProv.size,'proveedor','proveedores')} · ${pvPl(tot.prods,'producto')} pedidos</div>`+pvKpis(tot);
   if(tot.sinDet) h+=`<div class="warn-box">${pvPl(tot.sinDet,'recepción','recepciones')} sin detalle por producto (no se pudo leer su reporte): no cuentan en los porcentajes.</div>`;
-  h+=`<div class="row2" style="margin-bottom:6px"><button class="btn btn-secondary" onclick="pvCsv('prov',null,'${m}')">CSV por proveedor</button><button class="btn btn-secondary" onclick="pvCsv('prod',null,'${m}')">CSV por producto</button></div>`;
+  h+=`<div class="row2" style="margin-bottom:6px"><button class="btn btn-secondary" onclick="pvCsv('prov',null,'${m}')">CSV por proveedor</button><button class="btn btn-secondary" onclick="pvCsv('prod',null,'${m}')">CSV por producto</button></div>
+    <button class="btn btn-secondary btn-block" style="margin-bottom:6px" onclick="pvCsv('rec',null,'${m}')">CSV detalle por recepción</button>`;
   const orden=[...byProv.entries()].map(([p,a])=>({ p, a, i:PV.provs.indexOf(p) })).sort((x,y)=>(pvMain(x.a)??2)-(pvMain(y.a)??2) || y.a.recs-x.a.recs || x.p.localeCompare(y.p));
   h+=`<div class="section-title">Proveedores · peor fill rate primero</div>`+orden.map(({p,a,i})=>`<div class="adm-row pv-row" role="button" tabindex="0" onclick="pvVer(${i},'${m}')" onkeydown="if(event.key==='Enter')pvVer(${i},'${m}')">
       <div class="pv-head"><b>${escapeHtml(p)}</b><span class="pv-fr">${pvFrTxt(a)}</span></div>${pvBar(a)}
@@ -5783,16 +5790,18 @@ function pvDetalle(el, filtros, recs, a, m='admin'){
       <div class="pv-chips">${pvChips(x)}</div>
       <div class="btns"><button class="btn btn-secondary" onclick="openRecepcion(PV.recs[${i}].info,'${m}')">Ver</button></div></div>`; }).join('');
   h+=`<div class="section-title">Productos · ${prods.length} · peor fill rate primero</div>
-    <button class="btn btn-secondary btn-block" style="margin-bottom:8px" onclick="pvCsv('prod', ${PV.provs.indexOf(prov)},'${m}')">CSV de productos de ${escapeHtml(prov)}</button>`
+    <button class="btn btn-secondary btn-block" style="margin-bottom:8px" onclick="pvCsv('prod', ${PV.provs.indexOf(prov)},'${m}')">CSV de productos de ${escapeHtml(prov)}</button>
+    <button class="btn btn-secondary btn-block" style="margin-bottom:8px" onclick="pvCsv('rec', ${PV.provs.indexOf(prov)},'${m}')">CSV detalle por recepción de ${escapeHtml(prov)}</button>`
     +prods.map(p=>{ const u=p.kgpz==='Kg'?p.kg:p.pz, un=unitOf(p.kgpz);
       return `<details class="adm-row pv-prod"><summary><div class="pv-head"><b>${nameHtml(p.producto)}</b><span class="pv-fr">${p.prods?pvFrTxt(p):'—'}</span></div>
       <div class="muted" style="font-size:12px">${p.prods?`${p.prods===1?'1 recepción':p.prods+' recepciones'} · pedido ${fmtQty(u.ped,p.kgpz)} ${un} · recibido ${fmtQty(u.ok,p.kgpz)}`:'No venía en la OC'}</div>
-      <div class="pv-chips">${pvChips(p, true)}</div></summary>
-      ${p.hist.map(({r,l,cob})=>`<div class="pv-hist"><b>${fechaLarga(r.info.fecha)} · ${escapeHtml(hubName(r.info.hub))}</b> — ${escapeHtml(pvLineTxt(l, cob))}</div>`).join('')}</details>`; }).join('');
+      <div class="pv-chips">${pvChips(p, true)}</div>${(d=>d.length?`<div class="pv-fechas-dif">Con diferencia: <b>${d.map(x=>escapeHtml(pvFechaCorta(x.r.info.fecha)+' · '+hubName(x.r.info.hub))).join(', ')}</b></div>`:'')(pvDifHist(p))}</summary>
+      ${p.hist.map(({r,l,cob})=>`<div class="pv-hist${pvConDif(l, cob)?'':' ok'}"><b>${fechaLarga(r.info.fecha)} · ${escapeHtml(hubName(r.info.hub))}</b> — ${escapeHtml(pvLineTxt(l, cob))}</div>`).join('')}</details>`; }).join('');
   el.innerHTML=h;
 }
-function pvCsv(kind, provIdx, m='admin'){
+async function pvCsv(kind, provIdx, m='admin'){
   const st=VST(m);
+  if(kind==='rec' && IMGDB_READY) await IMGDB_READY; // SKU Calii comes from Masterview
   const recs=PV.data||[], rango=`${st.pvDesde}_${st.pvHasta}`, hub=st.pvHub?hubName(st.pvHub):'Todos los hubs';
   const n=v=>v?String(round2(v)):'0', pct=(a,b)=>b?String(Math.round(a*1000/b)/10):'';
   let cols, rows, name;
@@ -5810,16 +5819,35 @@ function pvCsv(kind, provIdx, m='admin'){
       n(a.pz.dan), n(a.pz.falt), n(a.kg.ped), n(a.kg.ok), pct(a.kg.ok,a.kg.ped), n(a.kg.fc),
       a.aTiempo, a.antes, a.tarde, a.sinDet]);
     name=`proveedores_${fileSafe(hub)}_${rango}.csv`;
-  } else {
+  } else if(kind==='prod'){
     const prov=provIdx==null?null:PV.provs[provIdx];
     cols=['Proveedor','Código','Producto','Und','Recepciones','Pedido','Recibido','Fill rate %','Veces completo',
       'Veces con fecha corta','Rechazadas fecha corta','Veces con dañadas','Rechazadas dañadas','Veces con faltante','Faltante',
-      'Veces no solicitado','Veces con exceso sobre la OC','Veces cobrado y no entregado','Piezas cobradas y no entregadas','Hubs','Desde','Hasta'];
+      'Veces no solicitado','Veces con exceso sobre la OC','Veces cobrado y no entregado','Piezas cobradas y no entregadas','Fechas con diferencia','Hubs','Desde','Hasta'];
     rows=pvProducts(prov?recs.filter(r=>r.prov===prov):recs).sort((x,y)=>x.prov.localeCompare(y.prov) || x.producto.localeCompare(y.producto)).map(p=>{ const u=p.kgpz==='Kg'?p.kg:p.pz;
       return [p.prov, p.sku.startsWith('name:')?'':p.sku, p.producto, p.kgpz, p.prods, n(u.ped), n(u.ok), pct(u.ok,u.ped), p.completas,
         p.fcL, n(u.fc), p.danL, n(u.dan), p.faltL, n(u.falt), p.pnsL, p.excL, p.cobL, n(p.cobPz),
+        [...new Set(pvDifHist(p).map(x=>x.r.info.fecha))].sort().join(', '),
         [...new Set(p.hist.map(x=>hubName(x.r.info.hub)))].join(', '), st.pvDesde, st.pvHasta]; });
     name=`productos-proveedor_${fileSafe(prov||hub)}_${rango}.csv`;
+  } else {
+    // Detalle por recepción: one row per product per reception (the date of every error). A reception whose lines
+    // couldn't be read gets one row that says so. SKU Calii from Masterview (skuCalii), blank when unknown.
+    const prov=provIdx==null?null:PV.provs[provIdx], q=v=>v?String(round2(v)):'';
+    cols=['Fecha','Hub','Proveedor','OC','Código','SKU Calii','Producto','Und','Paquete de','Pedido','Recibido','Faltante','Rechazadas','Motivo rechazo',
+      'Excedente','No solicitado','Cobrado y no entregado','Con diferencia'];
+    rows=[];
+    for(const r of (prov?recs.filter(x=>x.prov===prov):recs)){
+      const I=r.info, base=[I.fecha, hubName(I.hub), r.prov, (I.num_oc||[]).join(', ')];
+      if(!r.lines){ rows.push(base.concat(['', '', '(sin detalle por producto: no se pudo leer el reporte)'], Array(cols.length-7).fill(''))); continue; }
+      for(const l of r.lines){
+        const code=/^name:/.test(l.sku_key||'')?'':(l.sku_key||''), cob=r.fac&&r.fac.get(l.sku_key);
+        rows.push(base.concat([code, skuCalii(code, l.producto, I.hub), l.producto, l.pack_n?'Paquete':(l.kgpz||'Pz'), l.pack_n||'',
+          l.no_solicitado?'0':n(l.pedido), n(l.recibido), q(l.faltante), q(l.rechazadas), l.rechazadas?(PD_MOTIVO[l.motivo]||l.motivo||'fecha corta'):'',
+          l.excedente===true?'Sí':q(l.excedente), l.no_solicitado?'Sí':'', q(cob), pvConDif(l, cob)?'Sí':'']));
+      }
+    }
+    name=`detalle-por-recepcion_${fileSafe(prov||hub)}_${rango}.csv`;
   }
   downloadText(name, [cols.map(csvCell).join(',')].concat(rows.map(r=>r.map(csvCell).join(','))).join('\r\n')+'\r\n');
 }

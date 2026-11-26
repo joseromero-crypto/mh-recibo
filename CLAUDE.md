@@ -314,6 +314,16 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   = undo). A `cargado` row scanned wrong again after its ts is pending again. Table missing → list shown, buttons hidden,
   err-box. Modo prueba: planted once per test (`DEMO.st.codPlantado`), panel tab «Códigos» lists what to expect.
 
+- **Proveedores · fecha de cada error (phase 3, 2026-11-25; comercial-plan §2)** — shared by Admin and Comercial.
+  `pvConDif(l, cob)` = faltante, rechazo, excedente, no solicitado or cobrado y no entregado. Product cards in a supplier's
+  detail show «Con diferencia: 24 nov · MH Contry, …» (`pvDifHist`) without opening them; history rows with nothing to
+  report are muted (`.pv-hist.ok`). `pvCsv('rec', provIdx|null, m)` = «CSV detalle por recepción» (list and supplier
+  detail): one row per product per reception — Fecha, Hub, Proveedor, OC (the reception's, not per line), Código, SKU
+  Calii (`skuCalii`), Producto, Und («Paquete» on pack lines), Paquete de, Pedido, Recibido, Faltante, Rechazadas, Motivo
+  rechazo, Excedente («Sí» in modo botones), No solicitado, Cobrado y no entregado, Con diferencia; a reception without
+  detail gets one row saying so. The by-product CSV adds «Fechas con diferencia». Tested on real data (Modo prueba has no
+  closed supplier receptions). Comercial's list of extra columns is still pending.
+
 ## Modo prueba (2026-11-18)
 - `?demo={semilla}` runs the whole app unchanged on fake data; Admin → **Modo prueba** opens it in a new tab (no PIN
   inside a test tab). Nothing reaches production: `demoFetch` (top of the script) replaces `window.fetch` and answers
