@@ -5469,7 +5469,7 @@ async function entMananaHtml(m){
   for(const c of ENT.cerradas){
     if(c.fecha<R.desde || c.fecha>R.hasta) continue;
     const e=entDe(c); if(!e) continue;
-    const esp=(e.estado==='amarillo' || e.estado==='sin_oc') && c.fecha<hoy, mal=e.estado==='rojo';
+    const esp=e.estado==='amarillo' || e.estado==='sin_oc', mal=e.estado==='rojo';
     if(!esp && !mal) continue;
     if(!por.has(c.hub)) por.set(c.hub, { esp:[], mal:[] });
     por.get(c.hub)[mal?'mal':'esp'].push({ c, e });
@@ -5478,10 +5478,10 @@ async function entMananaHtml(m){
   const M=`'${m}'`, head=`<div class="section-title" style="margin-top:18px">Entradas en el sistema · todos los hubs</div>
     <div class="adm-field pv-fechas" style="margin:0 0 6px"><span>Recibidas del</span><input type="date" value="${R.desde}" min="${ENT_DESDE}" max="${hoy}" onchange="entRango('desde',this.value,${M})" aria-label="Desde"><span>al</span><input type="date" value="${R.hasta}" min="${ENT_DESDE}" max="${hoy}" onchange="entRango('hasta',this.value,${M})" aria-label="Hasta"></div>
     <div class="muted" style="font-size:12px;margin-bottom:8px">Recepciones de proveedor contra «Resumen» de compras; el mensaje para el hub usa estas fechas. Se revisa desde el ${fechaLarga(ENT_DESDE)}. ${escapeHtml(entRevisado())}</div>`;
-  if(!ENT.manana.length) return head+`<div class="warn-box ok">En estas fechas todo lo recibido de proveedores ya tiene entrada en el sistema${R.hasta>=hoy?' (lo de hoy aparece cuando lleve un día sin entrada)':''}.</div>`;
+  if(!ENT.manana.length) return head+`<div class="warn-box ok">En estas fechas todo lo recibido de proveedores ya tiene entrada en el sistema.</div>`;
   const prov=c=>escapeHtml(c.proveedor||areaName(c.area)), oc=c=>(c.num_oc||[]).length?' · OC '+c.num_oc.map(escapeHtml).join(', '):'';
   return head+ENT.manana.map(([hub, g], hi)=>`<div class="adm-row ent-hub"><b>${escapeHtml(hubName(hub))}</b>
-    ${g.esp.length?`<div class="ent-sec">Por dar entrada · ${g.esp.length}</div>`+g.esp.slice().sort((a,b)=>a.c.fecha.localeCompare(b.c.fecha)).map(({c,e})=>`<div class="ent-item">${prov(c)}${oc(c)} · recibido ${escapeHtml(pvFechaCorta(c.fecha))} · hace ${daysBetween(c.fecha, hoy)} día${daysBetween(c.fecha, hoy)===1?'':'s'}${e.estado==='sin_oc'?' · sin número de OC':''}</div>`).join(''):''}
+    ${g.esp.length?`<div class="ent-sec">Por dar entrada · ${g.esp.length}</div>`+g.esp.slice().sort((a,b)=>a.c.fecha.localeCompare(b.c.fecha)).map(({c,e})=>`<div class="ent-item">${prov(c)}${oc(c)} · recibido ${escapeHtml(pvFechaCorta(c.fecha))} · ${c.fecha===hoy?'hoy':`hace ${daysBetween(c.fecha, hoy)} día${daysBetween(c.fecha, hoy)===1?'':'s'}`}${e.estado==='sin_oc'?' · sin número de OC':''}</div>`).join(''):''}
     ${g.mal.length?`<div class="ent-sec">Entrada con diferencias · ${g.mal.length}</div>`+g.mal.map(({c,e})=>`<details class="ent-det"><summary>${prov(c)}${oc(c)} · ${escapeHtml(pvFechaCorta(c.fecha))} · ${e.difs.length} producto${e.difs.length===1?'':'s'}</summary>${entDifsHtml(e)}</details>`).join(''):''}
     <button class="btn btn-secondary btn-block" style="margin-top:8px" onclick="entCopiar(${hi})">Copiar mensaje para el hub</button></div>`).join('');
 }
@@ -5493,7 +5493,7 @@ async function entCopiar(i){
   const R=entRangoDe(VST(x.m||'admin')), rango=R.desde===R.hasta?pvFechaCorta(R.desde):`${pvFechaCorta(R.desde)} – ${pvFechaCorta(R.hasta)}`;
   const out=[`*${hubName(hub)} · entradas en el sistema · recibido ${rango}*${tag?' '+tag:''}`];
   if(g.esp.length){ out.push('', 'Por dar entrada (recibido en la app, sin entrada en el sistema):');
-    g.esp.slice().sort((a,b)=>a.c.fecha.localeCompare(b.c.fecha)).forEach(({c})=>out.push(`• ${prov(c)} · recibido ${pvFechaCorta(c.fecha)} (hace ${daysBetween(c.fecha, hoy)} d)`)); }
+    g.esp.slice().sort((a,b)=>a.c.fecha.localeCompare(b.c.fecha)).forEach(({c})=>out.push(`• ${prov(c)} · recibido ${pvFechaCorta(c.fecha)} (${c.fecha===hoy?'hoy':`hace ${daysBetween(c.fecha, hoy)} d`})`)); }
   if(g.mal.length){ out.push('', 'Entrada con diferencias (corregir en el sistema):');
     g.mal.forEach(({c,e})=>{ out.push(`• ${prov(c)} · ${pvFechaCorta(c.fecha)}`);
       e.difs.forEach(d=>out.push(`   – ${d.producto}: recibido ${entQ(d.recibido,d.kgpz)}, entrada ${entQ(d.entrada,d.kgpz)}${d.dir==='sin_entrada'?' (falta dar entrada)':' (entrada de algo que no llegó)'}`)); }); }

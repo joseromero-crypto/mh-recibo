@@ -342,8 +342,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   groups. **Nothing before Monday 2026-11-23 is checked** (`ENT_DESDE`, Jose: `entDe` returns null → plain bar, not listed).
   Calendar first (hub = one button per hub, `.hub-btns`, wrapping), then below it (Admin and Comercial) `entMananaHtml`:
   every hub, closes with session fecha in the range «Recibidas del … al …» (`st.entDesde/entHasta`, default last 21 days
-  but never before ENT_DESDE, `entRango`; repainted alone by `entMananaPintar`), «Por dar entrada» (closed before today,
-  oldest first) and «Entrada con diferencias», per hub with
+  but never before ENT_DESDE, `entRango`; repainted alone by `entMananaPintar`), «Por dar entrada» (today included, Jose
+  2026-11-25; oldest first) and «Entrada con diferencias», per hub with
   «Copiar mensaje para el hub» (`entCopiar`, header carries the date range, tag from `config/slack.json` `hubs` {slug: '@x'}, edited in Admin → Slack as
   «Hub = @usuario»). Cache 60 s (`ENT`). Table missing → a setup note, bars as before. Modo prueba: planted once
   (`DEMO.st.entPlantado`: Cremería verde, Botanas rojo, Panadería amarillo at Contry, Botanas sin OC at Cumbres); panel
