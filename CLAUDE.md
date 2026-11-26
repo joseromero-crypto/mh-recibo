@@ -301,16 +301,18 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   check `rvSoloVer()`.
 
 - **Códigos (phase 2, 2026-11-25; comercial-plan §3a)** — same in Admin and Comercial (`admCodigos` → `codRender`). Each
-  row (product + scanned code) proposes the Retool fix **SKU Calii ⇥ código del producto físico**. `skuCalii`: Masterview
-  `sku` through `codigo_sistema` → `pickEntry` (hub's city; skipped on `nameClash`), else `skuPorNombre` (exact Masterview
-  name of a barcode entry). Masterview name entries are bare URLs with no SKU, so a product with no barcode in Retool is
-  «sin SKU» (most Carnes): Descartar only, never copied. Confirmar / Descartar / Deshacer one row at a time (rule 2) need «Tu
-  nombre» (`st.quien`, memory only). «Copiar para Retool» = confirmed rows, TSV without header; then «Ya lo cargué en
-  Retool» marks exactly the copied rows (`st.codCopiados`) `cargado`. Warns when one scanned code is confirmed on 2+ SKUs.
-  State: `rec_codigos_fix` (`sql/codigos-fix.sql`, Jose runs it; select+insert only, append-only, latest per
-  tipo+clave+sku wins, `estado` confirmado|cargado|descartado|pendiente = undo). A `cargado` row scanned wrong again after
-  its ts is pending again («se volvió a escanear»). Table missing → list shown, buttons hidden, err-box. CSV adds SKU Calii,
-  Estado, Quién. Modo prueba: planted once per test (`DEMO.st.codPlantado`), panel tab «Códigos» lists what to expect.
+  row (product + scanned code) proposes the Retool fix **SKU Calii → código del producto físico**. `skuCalii`: Masterview
+  `sku` through `codigo_sistema` → `pickEntry` (hub's city; skipped on `nameClash`), else `skuPorNombre`: Masterview's
+  top-level `skuByName` (normName → SKU; asked of Invoice Reader 2026-11-25 for products with no barcode, read as
+  `S.skuByName`, empty until it ships), then the exact name of a barcode entry. No SKU → «sin SKU» (most Carnes today):
+  Descartar only, never exported. Confirmar / Descartar / Deshacer one row at a time (rule 2); no name asked (Jose: no
+  login, it only added friction; `quien` stays null). «Descargar CSV para Retool» = confirmed rows, header «SKU Calii»,
+  «Código de barras», no BOM (`downloadText(…, true)`); column B becomes «SKU Proveedor» for §3b. Then «Ya lo cargué en
+  Retool» marks exactly the rows in that file (`st.codCopiados`) `cargado`. Warns when one scanned code is confirmed on 2+
+  SKUs. «CSV completo (para revisar)» keeps every row with Estado. State: `rec_codigos_fix` (`sql/codigos-fix.sql`, Jose
+  runs it; select+insert only, append-only, latest per tipo+clave+sku wins, `estado` confirmado|cargado|descartado|pendiente
+  = undo). A `cargado` row scanned wrong again after its ts is pending again. Table missing → list shown, buttons hidden,
+  err-box. Modo prueba: planted once per test (`DEMO.st.codPlantado`), panel tab «Códigos» lists what to expect.
 
 ## Modo prueba (2026-11-18)
 - `?demo={semilla}` runs the whole app unchanged on fake data; Admin → **Modo prueba** opens it in a new tab (no PIN

@@ -930,6 +930,7 @@ function applyMasterview(j){
   S.imgDb=normalizeImgDbKeys(j.map);
   S.imgAlt=j.alt||{};
   S.hubCities=j.hubCities||{};
+  S.skuByName=j.skuByName||{}; // normName → SKU Calii, for products without a barcode (Invoice Reader, comercial-plan §3a)
   S.imgCount=j.count||0;
 }
 function imgDbCount(){ return (S.imgCount||Math.round(Object.keys(S.imgDb).length/2)).toLocaleString('es-MX'); }
@@ -5244,8 +5245,8 @@ async function pgUpsert(table, rows, onConflict){
     body:JSON.stringify(rows) });
   if(!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
 }
-function downloadText(name, text){
-  const blob=new Blob(['﻿'+text], { type:'text/csv;charset=utf-8' });
+function downloadText(name, text, sinBom){
+  const blob=new Blob([(sinBom?'':'﻿')+text], { type:'text/csv;charset=utf-8' });
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name;
   document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 500);
 }
@@ -5439,7 +5440,7 @@ async function admReabrir(i){
    product ("Código incorrecto en sistema"), grouped per product + scanned code. Each row proposes a Retool fix: SKU Calii
    (Masterview `sku`, through the product's system barcode → pickEntry for the hub's city, else the exact Masterview name)
    ⇥ the barcode scanned on the physical product. Comercial confirms or discards each row (rule 2: no confirm-all); only
-   confirmed rows go into «Copiar para Retool»; «Ya lo cargué en Retool» marks the rows that were copied. State lives in
+   confirmed rows go into «Descargar CSV para Retool» (SKU Calii, Código de barras); «Ya lo cargué en Retool» marks the rows in that file. State lives in
    rec_codigos_fix (append-only, latest per tipo+clave+sku wins; sql/codigos-fix.sql). A row loaded into Retool that is
    scanned the wrong way again after that comes back as pending. No SKU → «sin SKU», never copied. ── */
 let _admCod=[], _codFix=new Map(), _skuNom=null;
@@ -5450,7 +5451,8 @@ function skuPorNombre(producto){
     for(const k in S.imgAlt||{}) (S.imgAlt[k]||[]).forEach(add);
     _skuNom={ db:S.imgDb, m };
   }
-  return _skuNom.m.get(normName(producto||''))||'';
+  const k=normName(producto||'');
+  return (S.skuByName||{})[k] || _skuNom.m.get(k) || '';
 }
 function skuCalii(codigoSistema, producto, hub){
   const city=(S.hubCities||{})[SORTING_SLUG[hub]||hub], k=codeKey(codigoSistema||''), e=k?pickEntry(k, city):null;
@@ -5490,20 +5492,19 @@ function codRender(el, m){
   const st=VST(m), dias=st.codDias||7, M=`'${m}'`;
   const sel=`<div class="filters" style="margin-bottom:10px"><select onchange="VST(${M}).codDias=Number(this.value);vRender(${M})">
     <option value="7" ${dias===7?'selected':''}>Últimos 7 días</option><option value="30" ${dias===30?'selected':''}>Últimos 30 días</option></select></div>`;
-  let h=`<div class="muted" style="margin-bottom:8px">Productos cuyo código escaneado no coincidió con el sistema; el receptor lo buscó por nombre. Confirma cada uno y cópialo para la carga masiva de Retool: <b>SKU Calii</b> y el <b>código del producto físico</b>.</div>${sel}`;
+  let h=`<div class="muted" style="margin-bottom:8px">Productos cuyo código escaneado no coincidió con el sistema; el receptor lo buscó por nombre. Confirma cada uno y descarga el CSV para la carga masiva de Retool: <b>SKU Calii</b> y el <b>código del producto físico</b>.</div>${sel}`;
   if(st.codSinTabla) h+=`<div class="err-box">Falta la tabla de confirmaciones: corre <b>sql/codigos-fix.sql</b> en Supabase. Mientras, la lista se ve pero no se puede confirmar.</div>`;
   if(!_admCod.length){ el.innerHTML=h+'<div class="empty-hint">Sin códigos incorrectos en este periodo.</div>'; return; }
   const rows=_admCod.map((r,i)=>Object.assign({ r, i }, codEstado(r)));
   const G=e=>rows.filter(x=>x.estado===e), conf=G('confirmado');
-  h+=`<div class="adm-field" style="margin:0 0 10px"><span>Tu nombre</span><input id="cod-quien" class="text-input" autocomplete="off" placeholder="Para registrar quién confirma" value="${escapeHtml(st.quien||'')}" oninput="VST(${M}).quien=this.value.trim()"></div>`;
-  // Copy: SKU Calii ⇥ scanned barcode, confirmed rows only. The same scanned code on two SKUs would overwrite in Retool.
+  // Retool file: SKU Calii, Código de barras — confirmed rows only. The same scanned code on two SKUs would overwrite in Retool.
   const dup=new Map(); conf.forEach(x=>{ const a=dup.get(x.r.escaneado)||[]; a.push(x.r.sku); dup.set(x.r.escaneado, a); });
   const dups=[...dup.entries()].filter(([,a])=>new Set(a).size>1);
-  h+=`<button class="btn btn-primary btn-block" ${conf.length?'':'disabled'} onclick="codCopiar(${M})">Copiar para Retool${conf.length?' · '+conf.length:''}</button>`
+  h+=`<button class="btn btn-primary btn-block" ${conf.length?'':'disabled'} onclick="codRetoolCsv(${M})">Descargar CSV para Retool${conf.length?' · '+conf.length:''}</button>`
     +(dups.length?`<div class="warn-box">${dups.map(([c,a])=>`El código <b>${escapeHtml(c)}</b> va en ${a.length} SKUs (${a.map(escapeHtml).join(', ')}). Retool guarda un código por artículo: deja confirmado solo el correcto.`).join('<br>')}</div>`:'')
-    +(st.codCopiados&&st.codCopiados.length?`<div class="warn-box">Copiaste ${pvPl(st.codCopiados.length,'código')}. Pégalos en la carga masiva de Retool y después:
+    +(st.codCopiados&&st.codCopiados.length?`<div class="warn-box">Descargaste ${pvPl(st.codCopiados.length,'código')}. Súbelo en la carga masiva de Retool y después:
       <button class="btn btn-warn btn-block" onclick="codCargado(${M})">Ya lo cargué en Retool</button><button class="link-btn" onclick="VST(${M}).codCopiados=null;codRender(vEl(${M}),${M})">Todavía no</button></div>`
-      :conf.length?'':`<div class="muted" style="font-size:13px;margin:6px 0 0">Confirma los productos para poder copiarlos.</div>`);
+      :conf.length?'':`<div class="muted" style="font-size:13px;margin:6px 0 0">Confirma los productos para poder descargarlos.</div>`);
   const fila=x=>{ const r=x.r, f=x.f, sinSku=!r.sku, quien=f&&f.quien?' · '+escapeHtml(f.quien):'';
     let est='', btns='';
     if(x.estado==='pendiente'){
@@ -5525,14 +5526,13 @@ function codRender(el, m){
   if(conf.length) h+=`<div class="section-title">Confirmados · ${conf.length}</div>`+conf.map(fila).join('');
   for(const [e,t] of [['cargado','Ya cargados en Retool'],['descartado','Descartados']]){ const a=G(e);
     if(a.length) h+=`<details class="cod-mas"><summary class="section-title">${t} · ${a.length}</summary>${a.map(fila).join('')}</details>`; }
-  h+=`<button class="btn btn-secondary btn-block" style="margin-top:12px" onclick="admCodigosCsv(${M})">Descargar CSV</button>`;
+  h+=`<button class="btn btn-secondary btn-block" style="margin-top:12px" onclick="admCodigosCsv(${M})">CSV completo (para revisar)</button>`;
   el.innerHTML=h;
 }
 async function codGuardar(rows, m){
   const st=VST(m);
-  if(!st.quien){ const i=document.getElementById('cod-quien'); toast('Escribe tu nombre primero'); if(i) i.focus(); return false; }
   const ts=serverNow().toISOString();
-  const out=rows.map(({ r, estado })=>({ tipo:'barcode', clave:r.escaneado, sku:r.sku||'', estado, quien:st.quien, ts,
+  const out=rows.map(({ r, estado })=>({ tipo:'barcode', clave:r.escaneado, sku:r.sku||'', estado, quien:null, ts,
     detalle:{ producto:r.producto, codigo_sistema:r.sistema||null, modo:m } }));
   try{ await pgInsert('rec_codigos_fix', out); }
   catch(e){ toast(isNetErr(e)?'Sin conexión: no se guardó':'No se guardó: '+e.message, 4000); return false; }
@@ -5543,14 +5543,14 @@ async function codMarcar(i, estado, m){
   const r=_admCod[i]; if(!r) return;
   if(await codGuardar([{ r, estado }], m)){ const st=VST(m); if(st.codCopiados) st.codCopiados=st.codCopiados.filter(k=>k!==codKey(r.escaneado, r.sku)); codRender(vEl(m), m); }
 }
-async function codCopiar(m){
+// Column A = SKU Calii, column B = the new value (barcode here; «SKU Proveedor» once §3b reads Invoice Reader). No BOM:
+// the header has to reach Retool's bulk upload as plain «SKU Calii».
+function codRetoolCsv(m){
   const st=VST(m), conf=_admCod.filter(r=>codEstado(r).estado==='confirmado' && r.sku);
   if(!conf.length) return;
-  const txt=conf.map(r=>`${r.sku}\t${r.escaneado}`).join('\n');
-  try{ await navigator.clipboard.writeText(txt); }
-  catch(_){ const t=document.createElement('textarea'); t.value=txt; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  const body=[['SKU Calii','Código de barras']].concat(conf.map(r=>[r.sku, r.escaneado])).map(x=>x.map(csvCell).join(',')).join('\r\n')+'\r\n';
+  downloadText(`retool_codigo-de-barras_${todayStr()}.csv`, body, true);
   st.codCopiados=conf.map(r=>codKey(r.escaneado, r.sku));
-  toast(`✓ ${pvPl(conf.length,'código')} copiado${conf.length===1?'':'s'}: SKU Calii y código`);
   codRender(vEl(m), m);
 }
 // Marks exactly the rows that were copied (and are still confirmed), not every confirmed row
@@ -5562,8 +5562,8 @@ async function codCargado(m){
 }
 function admCodigosCsv(m='admin'){
   const st=VST(m), EST={ pendiente:'Por confirmar', confirmado:'Confirmado', cargado:'Cargado en Retool', descartado:'Descartado' };
-  const cols=['SKU Calii','Código del producto (escaneado)','Producto','Código en sistema (Retool)','El código escaneado aparece como','Estado','Quién','Veces','Hubs','Última fecha'];
-  const body=_admCod.map(r=>{ const x=codEstado(r); return [r.sku||'sin SKU', r.escaneado, r.producto, r.sistema, r.dice, EST[x.estado], x.f&&x.f.quien||'', r.veces, [...r.hubs].join(', '), r.ultima].map(csvCell).join(','); });
+  const cols=['SKU Calii','Código del producto (escaneado)','Producto','Código en sistema (Retool)','El código escaneado aparece como','Estado','Veces','Hubs','Última fecha'];
+  const body=_admCod.map(r=>{ const x=codEstado(r); return [r.sku||'sin SKU', r.escaneado, r.producto, r.sistema, r.dice, EST[x.estado], r.veces, [...r.hubs].join(', '), r.ultima].map(csvCell).join(','); });
   downloadText(`codigos-incorrectos_${todayStr()}_${st.codDias||7}d.csv`, [cols.map(csvCell).join(',')].concat(body).join('\r\n')+'\r\n');
 }
 
@@ -6219,15 +6219,15 @@ function demoGenerar(){
           producto:k.p.producto, cantidad:1, metodo:'codigo_incorrecto', receptor:'Prueba', device_id:'demo', ts:f+'T15:00:00.000Z',
           detalle:{ uid:'demo-cod-'+DEMO.st.nextId, codigo:k.esc, codigo_incorrecto:{ escaneado:k.esc, codigo_sistema:k.sis, sistema_dice:'', sistema_dice_codigo:null } } }); });
       const k=casos[5], f=addDaysStr(hoy,-k.cargado);
-      T.rec_codigos_fix.push({ id:DEMO.st.nextId++, tipo:'barcode', clave:k.esc, sku:sku(k.p), estado:'cargado', quien:'Ana Prueba', ts:f+'T18:00:00.000Z', detalle:{ producto:k.p.producto, modo:'comercial' } });
+      T.rec_codigos_fix.push({ id:DEMO.st.nextId++, tipo:'barcode', clave:k.esc, sku:sku(k.p), estado:'cargado', quien:null, ts:f+'T18:00:00.000Z', detalle:{ producto:k.p.producto, modo:'comercial' } });
       DEMO.st.codPlantado=true; DEMO_SAVE();
     }
     codigosEspera.push(`${a.producto}: SKU ${sku(a)||'¿?'} por su código del sistema · escaneado 3 veces en Contry y Cumbres`,
       `${b.producto}: sin código en el sistema → SKU ${sku(b)||'¿?'} por su nombre exacto`,
       'Galletas de prueba sin SKU 200g: «sin SKU», solo se puede descartar y no entra en la copia',
       `${c.producto} y ${d.producto}: el mismo código escaneado ${dup}; si confirmas los dos, avisa que Retool guarda un código por artículo`,
-      `${e.producto}: se cargó en Retool hace 4 días (Ana Prueba) y se volvió a escanear mal ayer → vuelve a «Por confirmar» con aviso`,
-      'Sin tu nombre no deja confirmar · Copiar para Retool copia solo los confirmados (SKU ⇥ código) · «Ya lo cargué en Retool» los pasa a «Ya cargados»');
+      `${e.producto}: se cargó en Retool hace 4 días y se volvió a escanear mal ayer → vuelve a «Por confirmar» con aviso`,
+      '«Descargar CSV para Retool» trae solo los confirmados (SKU Calii, Código de barras) · «Ya lo cargué en Retool» los pasa a «Ya cargados»');
   }
   DEMO.data={ ent, picks:ent.ab.picks, invoices, codigosEspera, bridge:{ ordenes, catalogo, contactos, proveedores:['Abarrotes Prueba','Bimbo','Lácteos Prueba','Refrescos Prueba','Proveedor Sin Orden'], avisos:[] } };
   DEMO._ready();
