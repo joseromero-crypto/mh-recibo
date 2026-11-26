@@ -294,7 +294,7 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   `modo` 'admin' | 'comercial'. `VST(modo)` = state, `vRender(modo)` = re-render, `vEl(modo)` = target. Every handler they
   print passes `'${m}'` (admCalMes, admCalVer, admCodigosCsv, pvFecha, pvRango, pvVer, pvVolver, pvCsv); `pvLoad(st)`/
   `pvDefaults(st)` take the state. `PV`, `_admCal`, `_admCod` stay shared (one screen shows at a time).
-- **View only**, except Códigos confirmations (below): nothing else in comercial mode writes. «Ver» opens `openRecepcion(info, 'comercial')`: `rvSoloVer()` → no
+- **View only**, except Códigos (confirmations in `rec_codigos_fix`, the «Sin coincidencia» upload in `recibo/comercial/`): nothing else in comercial mode writes. «Ver» opens `openRecepcion(info, 'comercial')`: `rvSoloVer()` → no
   «Corregir lo recibido» (`rvEditable`), no «Terminar», and the invoice box is `facBoxSoloVer` (latest non-inicio `factura`
   review rendered, no list / photos / picks / auto-save; FACV stays null). Slack copy, FDR, CSV and «Copiar lista» stay.
   CSV downloads (Proveedores, Códigos) stay: they are what comercial uses. A new write control in the closed view must
@@ -345,6 +345,23 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   «Hub = @usuario»). Cache 60 s (`ENT`). Table missing → a setup note, bars as before. Modo prueba: planted once
   (`DEMO.st.entPlantado`: Cremería verde, Botanas rojo, Panadería amarillo at Contry, Botanas sin OC at Cumbres); panel
   tab «Comercial» lists what to expect. CH receptions: pending another source.
+
+- **Códigos · SKU proveedor (phase 5, 2026-11-25; comercial-plan §3b)** — second list in Códigos (`codTabsHtml`, `st.codTipo`
+  'barcode' | 'spv'; Admin and Comercial). Invoice rows Invoice Reader couldn't match → Retool needs the supplier code
+  under «SKU Proveedor». Source: `spvDesdeApi` = `irPost({action:'sinCoincidencia'})` → `{ rows:[{ proveedor, ciudad, clave,
+  codigo_barras, descripcion, motivo, facturas, ultima_vez, hubs:[], articulo_recibo, sku_recibo, sugerencia, sku_sugerido }],
+  generado? }` (asked of Invoice Reader 2026-11-25; until it exists any error → null), else the CSV comercial downloads from
+  Invoice Reader and uploads here (`spvSubir`, checks Proveedor + Clave proveedor columns, .xlsx refused) to
+  `recibo/comercial/sin-coincidencia/{fecha}__{epochMs}.csv`, newest wins. `spvNorm` reads either shape (file column names in
+  `SPV_COLS`). `spvAgrupar`: one row per normName(proveedor)|clave, clave without leading «*» (`spvClave`), invoices added,
+  hubs joined minus «Pruebas de facturas»; rows without clave → «Sin clave en la factura» (reader problem, no buttons).
+  SKU (`spvSku`): pick here (`st.spvPick`, «Buscar producto»/«Cambiar producto» sheet over Masterview by SKU, `mvPorSku`) >
+  saved confirmation > «SKU Calii elegido» (recibo) > «SKU sugerido» (reader). Confirm / Descartar / Deshacer per row;
+  `rec_codigos_fix` tipo 'sku_proveedor', clave = proveedor|clave, latest per clave wins; a cargado row whose «Última vez»
+  is after it comes back. «Descargar CSV para Retool»: SKU Calii, SKU Proveedor (no BOM) → «Ya lo cargué en Retool» marks the
+  rows in that file. Warns when one SKU is confirmed with 2+ claves. Both lists guard double taps (`st.codBusy`). Modo
+  prueba: a planted «Sin coincidencia» CSV (`DEMO.st.spvPlantado`): *796 + 796 merged, sugerencia, sin producto, two claves on
+  one SKU, sin clave.
 
 ## Modo prueba (2026-11-18)
 - `?demo={semilla}` runs the whole app unchanged on fake data; Admin → **Modo prueba** opens it in a new tab (no PIN

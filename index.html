@@ -313,6 +313,7 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .tabs .choice{flex-shrink:0;min-height:36px;padding:0 14px;font-size:13px;font-weight:600;border-radius:var(--r-pill);background:transparent;color:var(--c-muted)}
 .tabs .choice.sel{background:var(--c-white);color:var(--c-ink);box-shadow:0 1px 3px rgba(14,26,25,.12)}
 .cod-mas summary{cursor:pointer}
+.spv-res{display:flex;gap:10px;align-items:center;width:100%;border:none;background:var(--c-surface);border-radius:var(--r-md);padding:8px 10px;margin-bottom:6px;cursor:pointer;font:inherit;color:inherit}
 .adm-row{background:var(--c-surface);border-radius:var(--r-lg);padding:12px 14px;margin-bottom:8px;font-size:14px;line-height:1.45}
 .adm-row .btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .adm-row .btns .btn{min-height:36px;padding:0 14px;font-size:13px}
@@ -5607,6 +5608,7 @@ function codEstado(r){
 }
 async function admCodigos(el, m='admin'){
   const st=VST(m);
+  if(st.codTipo==='spv') return spvCargar(el, m);
   if(IMGDB_READY) await IMGDB_READY; // SKU Calii comes from Masterview
   st.codSinTabla=false;
   const dias=st.codDias||7, desde=localDateStr(new Date(serverNow().getTime()-dias*86400000));
@@ -5626,11 +5628,14 @@ async function admCodigos(el, m='admin'){
   _admCod.forEach(r=>{ r.sku=skuCalii(r.sistema, r.producto, r.hub); });
   codRender(el, m);
 }
+// Códigos: two lists, both ending in a Retool CSV (column B = what changes)
+function codTabsHtml(m){ const t=VST(m).codTipo||'barcode';
+  return `<div class="tabs" style="margin-top:0">${[['barcode','Códigos de barras'],['spv','SKU proveedor']].map(([k,n])=>`<button class="choice ${t===k?'sel':''}" onclick="VST('${m}').codTipo='${k}';vRender('${m}')">${n}</button>`).join('')}</div>`; }
 function codRender(el, m){
   const st=VST(m), dias=st.codDias||7, M=`'${m}'`;
   const sel=`<div class="filters" style="margin-bottom:10px"><select onchange="VST(${M}).codDias=Number(this.value);vRender(${M})">
     <option value="7" ${dias===7?'selected':''}>Últimos 7 días</option><option value="30" ${dias===30?'selected':''}>Últimos 30 días</option></select></div>`;
-  let h=`<div class="muted" style="margin-bottom:8px">Productos cuyo código escaneado no coincidió con el sistema; el receptor lo buscó por nombre. Confirma cada uno y descarga el CSV para la carga masiva de Retool: <b>SKU Calii</b> y el <b>código del producto físico</b>.</div>${sel}`;
+  let h=codTabsHtml(m)+`<div class="muted" style="margin-bottom:8px">Productos cuyo código escaneado no coincidió con el sistema; el receptor lo buscó por nombre. Confirma cada uno y descarga el CSV para la carga masiva de Retool: <b>SKU Calii</b> y el <b>código del producto físico</b>.</div>${sel}`;
   if(st.codSinTabla) h+=`<div class="err-box">Falta la tabla de confirmaciones: corre <b>sql/codigos-fix.sql</b> en Supabase. Mientras, la lista se ve pero no se puede confirmar.</div>`;
   if(!_admCod.length){ el.innerHTML=h+'<div class="empty-hint">Sin códigos incorrectos en este periodo.</div>'; return; }
   const rows=_admCod.map((r,i)=>Object.assign({ r, i }, codEstado(r)));
@@ -5668,6 +5673,10 @@ function codRender(el, m){
   el.innerHTML=h;
 }
 async function codGuardar(rows, m){
+  const st=VST(m); if(st.codBusy) return false; st.codBusy=true;
+  try{ return await codGuardar_(rows, m); } finally{ st.codBusy=false; }
+}
+async function codGuardar_(rows, m){
   const st=VST(m);
   const ts=serverNow().toISOString();
   const out=rows.map(({ r, estado })=>({ tipo:'barcode', clave:r.escaneado, sku:r.sku||'', estado, quien:null, ts,
@@ -5703,6 +5712,213 @@ function admCodigosCsv(m='admin'){
   const cols=['SKU Calii','Código del producto (escaneado)','Producto','Código en sistema (Retool)','El código escaneado aparece como','Estado','Veces','Hubs','Última fecha'];
   const body=_admCod.map(r=>{ const x=codEstado(r); return [r.sku||'sin SKU', r.escaneado, r.producto, r.sistema, r.dice, EST[x.estado], r.veces, [...r.hubs].join(', '), r.ultima].map(csvCell).join(','); });
   downloadText(`codigos-incorrectos_${todayStr()}_${st.codDias||7}d.csv`, [cols.map(csvCell).join(',')].concat(body).join('\r\n')+'\r\n');
+}
+
+/* ── Códigos · SKU proveedor (comercial-plan §3b, phase 5): invoice rows Invoice Reader couldn't match to a product, so
+   Retool needs that supplier code under «SKU Proveedor». Source: Invoice Reader's «Sin coincidencia» list — its API
+   action `sinCoincidencia` when it exists (spvDesdeApi), else the CSV comercial downloads there and uploads here
+   (recibo/comercial/sin-coincidencia/{fecha}__{epochMs}.csv, newest wins). One row per proveedor + clave (leading «*» off:
+   Retool stores «*796» as «796»). «Pruebas de facturas» is left out of Hubs. SKU: what comercial picked here > the saved
+   confirmation > «SKU Calii elegido» (receptor's pick in recibo) > «SKU sugerido» (reader's suggestion). Each row is
+   confirmed one by one (rule 2); only confirmed rows go into the Retool CSV (SKU Calii, SKU Proveedor). State in
+   rec_codigos_fix tipo 'sku_proveedor', clave = normName(proveedor)|clave, latest per clave wins. ── */
+const SPV_DIR='comercial/sin-coincidencia/';
+const SPV_COLS={ proveedor:['Proveedor'], ciudad:['Ciudad'], clave:['Clave proveedor','Clave'], codigo_barras:['Código de barras','Codigo de barras'],
+  descripcion:['Descripción en factura','Descripcion en factura','Descripción'], motivo:['Motivo'], facturas:['Facturas'], ultima_vez:['Última vez','Ultima vez'],
+  hubs:['Hubs'], articulo_recibo:['Artículo elegido en recibo','Articulo elegido en recibo'], sku_recibo:['SKU Calii elegido'],
+  sugerencia:['Sugerencia sin confirmar'], sku_sugerido:['SKU sugerido'] };
+let _spv=[], _spvFix=new Map(), _mvSku=null;
+const spvClave=c=>String(c==null?'':c).trim().replace(/^\*+/,'').trim();
+function spvYmd(s){
+  const t=String(s||'').trim(); let m=t.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return m[1]+'-'+m[2]+'-'+m[3];
+  m=t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/); if(m){ const y=m[3].length===2?'20'+m[3]:m[3]; return y+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0'); }
+  return '';
+}
+// Any row shape (file row with the list's column names, or the API's snake_case keys) → one internal row
+function spvNorm(o){
+  const g=k=>{ if(o[k]!=null && typeof o[k]!=='object') return String(o[k]).trim(); const v=pickCol(o, ...SPV_COLS[k]); return v==null?'':String(v).trim(); };
+  const hubs=(Array.isArray(o.hubs)?o.hubs:g('hubs').split(/\s*[,;|]\s*/)).map(x=>String(x).trim()).filter(x=>x && !/^pruebas? de facturas?$/i.test(x));
+  const fac=Array.isArray(o.facturas)?o.facturas.length:g('facturas'), n=Number(String(fac).replace(/[^\d.]/g,''));
+  return { proveedor:g('proveedor'), ciudad:g('ciudad'), claveRaw:g('clave'), clave:spvClave(g('clave')), codigo_barras:g('codigo_barras'), descripcion:g('descripcion'),
+    motivo:g('motivo'), facturas:/^\d+(\.\d+)?$/.test(String(fac).trim())?n:String(fac).split(/\s*[,;]\s*/).filter(Boolean).length, ultimaTxt:g('ultima_vez'), ultima:spvYmd(g('ultima_vez')),
+    hubs, articulo_recibo:g('articulo_recibo'), sku_recibo:g('sku_recibo'), sugerencia:g('sugerencia'), sku_sugerido:g('sku_sugerido') };
+}
+// Rows of the same supplier + clave are one fix: invoices added up, hubs joined, the latest date kept
+function spvAgrupar(rows){
+  const by=new Map(), sinClave=[];
+  for(const r of rows.map(spvNorm)){
+    if(!r.proveedor && !r.descripcion) continue;
+    if(!r.clave){ sinClave.push(r); continue; }
+    const k=normName(r.proveedor)+'|'+r.clave, x=by.get(k);
+    if(!x){ by.set(k, Object.assign(r, { key:k, hubs:new Set(r.hubs), claves:new Set([r.claveRaw]) })); continue; }
+    x.facturas+=r.facturas; r.hubs.forEach(h=>x.hubs.add(h)); x.claves.add(r.claveRaw);
+    if(r.ultima>x.ultima){ x.ultima=r.ultima; x.ultimaTxt=r.ultimaTxt; }
+    for(const f of ['ciudad','codigo_barras','descripcion','articulo_recibo','sku_recibo','sugerencia','sku_sugerido']) if(!x[f] && r[f]) x[f]=r[f];
+  }
+  return { filas:[...by.values()].sort((a,b)=>b.facturas-a.facturas || a.proveedor.localeCompare(b.proveedor)), sinClave };
+}
+// Masterview by SKU Calii (barcode entries carry it; name entries don't)
+function mvPorSku(sku){
+  if(!_mvSku || _mvSku.db!==S.imgDb){
+    const m=new Map(), add=e=>{ if(e && typeof e==='object' && e.sku && !m.has(e.sku)) m.set(e.sku, { sku:e.sku, name:e.name||'', url:imgUrl(e) }); };
+    for(const k in S.imgDb) add(S.imgDb[k]); for(const k in S.imgAlt||{}) (S.imgAlt[k]||[]).forEach(add);
+    _mvSku={ db:S.imgDb, m };
+  }
+  return sku ? _mvSku.m.get(sku)||null : _mvSku.m;
+}
+async function spvDesdeApi(){
+  try{ const j=await irPost({ action:'sinCoincidencia' }); return j && Array.isArray(j.rows) ? j : null; }catch(_){ return null; }
+}
+async function spvCargar(el, m){
+  const st=VST(m);
+  if(IMGDB_READY) await IMGDB_READY;
+  el.innerHTML=codTabsHtml(m)+'<div class="muted">Cargando…</div>';
+  st.codSinTabla=false; st.spvPick=st.spvPick||{};
+  const [api, fix, files]=await Promise.all([
+    st.spvApi!==undefined ? st.spvApi : spvDesdeApi(),
+    pgSelectAll('rec_codigos_fix', 'tipo=eq.sku_proveedor&select=*&order=id.asc').catch(e=>{ if(isNetErr(e)) throw e; st.codSinTabla=true; return []; }),
+    sbList(SPV_DIR).catch(()=>[])]);
+  st.spvApi=api;
+  _spvFix=new Map(); for(const f of fix) _spvFix.set(f.clave, f);
+  let rows=null, fuente='';
+  if(api && api.rows.length){ rows=api.rows; fuente=`Invoice Reader en vivo${api.generado?' · '+escapeHtml(api.generado):''}`; }
+  else {
+    const f=(files||[]).filter(x=>/\.csv$/.test(x.name)).sort((a,b)=>b.name.localeCompare(a.name))[0];
+    if(f){ try{ const p=Papa.parse(stripBOM(await sbFetch(SPV_DIR+f.name)), { header:true, skipEmptyLines:true }); rows=p.data||[];
+      const ms=Number((f.name.match(/__(\d+)\./)||[])[1]); fuente=`Archivo subido ${ms?fechaLarga(localDateStr(new Date(ms)))+', '+localHM(new Date(ms)):f.name}`; }
+      catch(e){ if(isNetErr(e)) throw e; } }
+  }
+  st.spvFuente=fuente;
+  const g=spvAgrupar(rows||[]); _spv=g.filas; st.spvSinClave=g.sinClave; st.spvHay=rows!=null;
+  spvRender(el, m);
+}
+function spvSku(r, m){ const p=VST(m).spvPick[r.key], f=_spvFix.get(r.key);
+  if(p) return { sku:p.sku, origen:'comercial' };
+  if(f && f.sku) return { sku:f.sku, origen:f.detalle&&f.detalle.origen||'comercial' };
+  if(r.sku_recibo) return { sku:r.sku_recibo, origen:'recibo' };
+  if(r.sku_sugerido) return { sku:r.sku_sugerido, origen:'sugerencia' };
+  return { sku:'', origen:'' };
+}
+function spvEstado(r){
+  const f=_spvFix.get(r.key);
+  if(!f) return { estado:'pendiente' };
+  if(f.estado==='cargado' && r.ultima && r.ultima>localDateStr(new Date(f.ts))) return { estado:'pendiente', volvio:true, f };
+  return { estado:f.estado, f };
+}
+const SPV_ORIGEN={ recibo:'Elegido en recibo', sugerencia:'Sugerencia del lector', comercial:'Elegido aquí' };
+function spvRender(el, m){
+  const st=VST(m), M=`'${m}'`;
+  let h=codTabsHtml(m)+`<div class="muted" style="margin-bottom:8px">Renglones de factura que Invoice Reader no pudo ligar a un producto: a Retool le falta la clave del proveedor en <b>SKU Proveedor</b>. Confirma cada uno y descarga el CSV para la carga masiva.</div>`;
+  h+=`<label class="btn btn-secondary btn-block" style="margin-bottom:6px">Subir archivo «Sin coincidencia» (CSV de Invoice Reader)<input type="file" accept=".csv,text/csv,text/plain" style="display:none" onchange="spvSubir(this, ${M})"></label>`
+    +(st.spvFuente?`<div class="muted" style="font-size:12px;margin-bottom:8px">${st.spvFuente}</div>`:'');
+  if(st.codSinTabla) h+=`<div class="err-box">Falta la tabla de confirmaciones: corre <b>sql/codigos-fix.sql</b> en Supabase. Mientras, la lista se ve pero no se puede confirmar.</div>`;
+  if(!st.spvHay){ el.innerHTML=h+'<div class="empty-hint">Todavía no hay lista. En Invoice Reader descarga «Sin coincidencia» como CSV y súbela aquí.</div>'; return; }
+  const rows=_spv.map((r,i)=>Object.assign({ r, i }, spvEstado(r), spvSku(r, m)));
+  const G=e=>rows.filter(x=>x.estado===e), conf=G('confirmado').filter(x=>x.sku), pend=G('pendiente');
+  const dup=new Map(); conf.forEach(x=>{ const a=dup.get(x.sku)||[]; a.push(x.r.clave); dup.set(x.sku, a); });
+  const dups=[...dup.entries()].filter(([,a])=>new Set(a).size>1);
+  h+=`<button class="btn btn-primary btn-block" ${conf.length?'':'disabled'} onclick="spvRetoolCsv(${M})">Descargar CSV para Retool${conf.length?' · '+conf.length:''}</button>`
+    +(dups.length?`<div class="warn-box">${dups.map(([s,a])=>`El SKU <b>${escapeHtml(s)}</b> va con ${a.length} claves (${a.map(escapeHtml).join(', ')}). Retool guarda una SKU Proveedor por artículo: deja confirmada solo la correcta.`).join('<br>')}</div>`:'')
+    +(st.spvBajados&&st.spvBajados.length?`<div class="warn-box">Descargaste ${pvPl(st.spvBajados.length,'clave')}. Súbelo en la carga masiva de Retool y después:
+      <button class="btn btn-warn btn-block" onclick="spvCargado(${M})">Ya lo cargué en Retool</button><button class="link-btn" onclick="VST(${M}).spvBajados=null;spvRender(vEl(${M}),${M})">Todavía no</button></div>`
+      :conf.length?'':`<div class="muted" style="font-size:13px;margin:6px 0 0">Confirma los renglones para poder descargarlos.</div>`);
+  const fila=x=>{ const r=x.r, f=x.f, mv=x.sku?mvPorSku(x.sku):null, btns=[];
+    const prod=x.sku?`<div style="display:flex;gap:10px;align-items:center;margin-top:8px">${mv&&mv.url?`<img class="thumb" src="${escapeHtml(mv.url)}" alt="" loading="lazy">`:'<div class="thumb"></div>'}
+        <div style="flex:1;min-width:0"><b>${escapeHtml(mv&&mv.name||r.articulo_recibo||r.sugerencia||'Producto')}</b><div style="font-size:13px">SKU Calii <b>${escapeHtml(x.sku)}</b>${mv?'':' <span class="muted">(no está en Masterview)</span>'}</div></div></div>
+        <div style="margin-top:4px"><span class="tag${x.origen==='sugerencia'?'':' green'}">${SPV_ORIGEN[x.origen]||''}</span></div>`
+      :`<div class="muted" style="font-size:13px;margin-top:6px">Sin producto: búscalo para poder confirmarlo.</div>`;
+    if(x.estado==='pendiente'){
+      if(x.sku) btns.push(`<button class="btn btn-warn" onclick="spvMarcar(${x.i},'confirmado',${M})">Confirmar</button>`);
+      btns.push(`<button class="btn btn-secondary" onclick="spvBuscar(${x.i},${M})">${x.sku?'Cambiar producto':'Buscar producto'}</button>`,
+        `<button class="btn btn-secondary" onclick="spvMarcar(${x.i},'descartado',${M})">Descartar</button>`);
+    } else btns.push(`<button class="btn btn-secondary" onclick="spvMarcar(${x.i},'pendiente',${M})">Deshacer</button>`);
+    const est=x.estado==='pendiente'?(x.volvio?`<div class="note" style="margin:6px 0 0">Se cargó en Retool y volvió a salir en una factura después. Revísalo otra vez.</div>`:'')
+      :`<div style="margin-top:6px"><span class="tag ${x.estado==='confirmado'?'green':''}">${{ confirmado:'Confirmado', cargado:'Cargado en Retool', descartado:'Descartado' }[x.estado]}</span>${f&&f.ts?` <span class="muted" style="font-size:12px">${fechaLarga(localDateStr(new Date(f.ts)))}</span>`:''}</div>`;
+    return `<div class="adm-row"><div class="muted" style="font-size:12px">${escapeHtml(r.proveedor)}${r.ciudad?' · '+escapeHtml(r.ciudad):''}</div>
+      <div style="font-size:14px">En la factura: «<b>${escapeHtml(r.descripcion||'—')}</b>»</div>
+      <div style="font-size:14px">Clave del proveedor: <b>${escapeHtml(r.clave)}</b>${[...r.claves].some(c=>c!==r.clave)?` <span class="muted" style="font-size:12px">(en la factura ${[...r.claves].map(escapeHtml).join(', ')})</span>`:''}${r.codigo_barras?` · código ${escapeHtml(r.codigo_barras)}`:''}</div>
+      <div class="muted" style="font-size:12px">${pvPl(r.facturas||0,'factura')}${r.hubs.size?' · '+escapeHtml([...r.hubs].join(', ')):''}${r.ultima?' · última '+fechaLarga(r.ultima):r.ultimaTxt?' · última '+escapeHtml(r.ultimaTxt):''}</div>
+      ${prod}${est}${st.codSinTabla?'':`<div class="btns">${btns.join('')}</div>`}</div>`; };
+  const conSku=pend.filter(x=>x.sku), sinSku=pend.filter(x=>!x.sku);
+  h+=`<div class="section-title">Por confirmar · ${conSku.length}</div>`+(conSku.map(fila).join('')||'<div class="muted" style="font-size:13px">Nada por confirmar.</div>');
+  if(sinSku.length) h+=`<div class="section-title">Sin producto · ${sinSku.length}</div>`+sinSku.map(fila).join('');
+  const cf=G('confirmado'); if(cf.length) h+=`<div class="section-title">Confirmados · ${cf.length}</div>`+cf.map(fila).join('');
+  for(const [e,t] of [['cargado','Ya cargados en Retool'],['descartado','Descartados']]){ const a=G(e);
+    if(a.length) h+=`<details class="cod-mas"><summary class="section-title">${t} · ${a.length}</summary>${a.map(fila).join('')}</details>`; }
+  const sc=st.spvSinClave||[];
+  if(sc.length) h+=`<details class="cod-mas"><summary class="section-title">Sin clave en la factura · ${sc.length}</summary><div class="muted" style="font-size:13px;margin-bottom:6px">La factura no trae clave del proveedor: no hay nada que cargar en SKU Proveedor. Es un problema de lectura para Invoice Reader.</div>`
+    +sc.map(r=>`<div class="adm-row"><div class="muted" style="font-size:12px">${escapeHtml(r.proveedor)}${r.hubs.length?' · '+escapeHtml(r.hubs.join(', ')):''}${r.ultimaTxt?' · '+escapeHtml(r.ultimaTxt):''}</div><div style="font-size:14px">«${escapeHtml(r.descripcion||'—')}»</div>${r.motivo?`<div class="muted" style="font-size:12px">${escapeHtml(r.motivo)}</div>`:''}</div>`).join('')+`</details>`;
+  el.innerHTML=h;
+}
+async function spvSubir(input, m){
+  const f=input.files && input.files[0]; input.value=''; if(!f) return;
+  if(/\.xlsx?$/i.test(f.name)){ toast('Descárgalo como CSV en Invoice Reader y súbelo otra vez', 4500); return; }
+  const text=await f.text(), p=Papa.parse(stripBOM(text), { header:true, skipEmptyLines:true });
+  const campos=(p.meta.fields||[]).map(normHeader);
+  if(!['proveedor','clave proveedor'].every(c=>campos.includes(c))){ toast('No parece la lista «Sin coincidencia»: le faltan las columnas Proveedor y Clave proveedor', 5000); return; }
+  try{ await sbUpload(`${SPV_DIR}${todayStr()}__${Date.now()}.csv`, text, 'text/csv; charset=utf-8'); }
+  catch(e){ toast(isNetErr(e)?'Sin conexión: no se subió':'No se subió: '+e.message, 4000); return; }
+  toast(`✓ Lista subida · ${pvPl((p.data||[]).length,'renglón','renglones')}`);
+  const st=VST(m); st.spvApi=null; spvCargar(vEl(m), m);
+}
+async function spvGuardar(items, m){
+  const st=VST(m); if(st.codBusy) return false; st.codBusy=true; // a second tap while saving would write the row twice
+  try{ return await spvGuardar_(items, m); } finally{ st.codBusy=false; }
+}
+async function spvGuardar_(items, m){
+  const ts=serverNow().toISOString();
+  const out=items.map(({ r, estado, sku, origen })=>({ tipo:'sku_proveedor', clave:r.key, sku:sku||'', estado, quien:null, ts,
+    detalle:{ proveedor:r.proveedor, clave_proveedor:r.clave, descripcion:r.descripcion, origen, modo:m } }));
+  try{ await pgInsert('rec_codigos_fix', out); }
+  catch(e){ toast(isNetErr(e)?'Sin conexión: no se guardó':'No se guardó: '+e.message, 4000); return false; }
+  for(const o of out) _spvFix.set(o.clave, o);
+  return true;
+}
+async function spvMarcar(i, estado, m){
+  const r=_spv[i]; if(!r) return;
+  const st=VST(m), s=spvSku(r, m);
+  if(await spvGuardar([{ r, estado, sku:s.sku, origen:s.origen }], m)){
+    delete st.spvPick[r.key]; if(st.spvBajados) st.spvBajados=st.spvBajados.filter(k=>k!==r.key);
+    spvRender(vEl(m), m);
+  }
+}
+// Retool file: column A SKU Calii, column B SKU Proveedor (no BOM: the header must reach Retool as plain «SKU Calii»)
+function spvRetoolCsv(m){
+  const st=VST(m), conf=_spv.map(r=>({ r, e:spvEstado(r), s:spvSku(r, m) })).filter(x=>x.e.estado==='confirmado' && x.s.sku);
+  if(!conf.length) return;
+  const body=[['SKU Calii','SKU Proveedor']].concat(conf.map(x=>[x.s.sku, x.r.clave])).map(x=>x.map(csvCell).join(',')).join('\r\n')+'\r\n';
+  downloadText(`retool_sku-proveedor_${todayStr()}.csv`, body, true);
+  st.spvBajados=conf.map(x=>x.r.key);
+  spvRender(vEl(m), m);
+}
+async function spvCargado(m){
+  const st=VST(m), ks=new Set(st.spvBajados||[]);
+  const items=_spv.filter(r=>ks.has(r.key) && spvEstado(r).estado==='confirmado').map(r=>{ const s=spvSku(r, m); return { r, estado:'cargado', sku:s.sku, origen:s.origen }; });
+  if(!items.length){ st.spvBajados=null; spvRender(vEl(m), m); return; }
+  if(await spvGuardar(items, m)){ st.spvBajados=null; toast(`✓ ${pvPl(items.length,'clave')} marcada${items.length===1?'':'s'} como cargada${items.length===1?'':'s'}`); spvRender(vEl(m), m); }
+}
+// «Buscar producto»: Masterview products with a SKU, by name words (or the SKU itself)
+let _spvBus=null;
+function spvBuscar(i, m){
+  const r=_spv[i]; if(!r) return; _spvBus={ i, m };
+  openSheet('Buscar producto', `<div class="note" style="margin-bottom:10px">En la factura: «<b>${escapeHtml(r.descripcion||'—')}</b>» · ${escapeHtml(r.proveedor)} · clave ${escapeHtml(r.clave)}</div>
+    <input id="spv-q" class="text-input" placeholder="Nombre del producto o SKU" autocomplete="off" oninput="spvBuscarRes(this.value)">
+    <div id="spv-res" style="margin-top:10px"></div>`);
+  const q=(r.articulo_recibo||r.sugerencia||r.descripcion||'').split(/\s+/).slice(0,2).join(' ');
+  const inp=document.getElementById('spv-q'); inp.value=q; spvBuscarRes(q); setTimeout(()=>inp.focus(), 60);
+}
+function spvBuscarRes(q){
+  const el=document.getElementById('spv-res'); if(!el) return;
+  const ws=normName(q).split(' ').filter(Boolean), Q=String(q||'').trim().toUpperCase();
+  if(!ws.length){ el.innerHTML='<div class="muted">Escribe parte del nombre.</div>'; return; }
+  const out=[]; for(const p of mvPorSku().values()){ const n=normName(p.name); if(p.sku===Q || ws.every(w=>n.includes(w))){ out.push(p); if(out.length>=40) break; } }
+  el.innerHTML=out.map(p=>`<button class="ritem spv-res" onclick="spvElegir(${facJs(p.sku)})">${p.url?`<img class="thumb" src="${escapeHtml(p.url)}" alt="" loading="lazy">`:'<div class="thumb"></div>'}
+    <span style="flex:1;min-width:0;text-align:left"><b>${escapeHtml(p.name)}</b><br><span class="muted" style="font-size:12px">SKU ${escapeHtml(p.sku)}</span></span></button>`).join('')
+    ||'<div class="muted">Nada coincide. Prueba con otra palabra.</div>';
+}
+function spvElegir(sku){
+  if(!_spvBus) return; const { i, m }=_spvBus, r=_spv[i], st=VST(m);
+  st.spvPick[r.key]={ sku }; _spvBus=null; closeSheet(); spvRender(vEl(m), m);
 }
 
 /* ── Proveedores: supplier insights for comercial (view only). Closed pd-* receptions whose session fecha falls in the
@@ -6441,7 +6657,31 @@ function demoGenerar(){
       '«Copiar mensaje para el hub» arma el mensaje con la etiqueta del hub de Admin → Slack (sin ella, avisa)',
       'Una recepción de proveedor que cierres aquí aparece amarilla (nadie le ha dado entrada)');
   }
-  DEMO.data={ ent, picks:ent.ab.picks, invoices, codigosEspera, entradasEspera, bridge:{ ordenes, catalogo, contactos, proveedores:['Abarrotes Prueba','Bimbo','Lácteos Prueba','Refrescos Prueba','Proveedor Sin Orden'], avisos:[] } };
+  /* ── Códigos → SKU proveedor (comercial-plan §3b): a «Sin coincidencia» CSV as Invoice Reader downloads it, planted once ── */
+  const spvEspera=[];
+  {
+    const [a,b,c]=take(3), sk=p=>{ const e=S.imgDb[bcKey(p.code)]; return e&&e.sku||''; };
+    const H=['Proveedor','Ciudad','Clave proveedor','Código de barras','Descripción en factura','Motivo','Facturas','Última vez','Hubs','Artículo elegido en recibo','SKU Calii elegido','Sugerencia sin confirmar','SKU sugerido'];
+    const d=n=>addDaysStr(hoy,-n), rows=[
+      ['Arca Continental','Mty','*796','','CIEL AGUA PURIF 600 ML NR PET','Sin coincidencia','3',d(2),'MH Cumbres, Pruebas de facturas',a.producto,sk(a),'',''],
+      ['Arca Continental','Mty','796','','CIEL AGUA PURIF 600ML','Sin coincidencia','1',d(1),'MH Contry',a.producto,sk(a),'',''],
+      ['LALA','Mty','LA-1182','','LECHE LALA DESLAC 1LT','Sin coincidencia','2',d(3),'MH Contry','','',b.producto,sk(b)],
+      ['Bimbo','Mty','55021','','PAN BCO GDE 680G','Sin coincidencia','4',d(1),'MH San Nicolás, MH Cumbres','','','',''],
+      ['Qualtia','Mty','Q-10','','JAMON PAVO REB 250G','Sin coincidencia','1',d(5),'MH Cumbres',c.producto,sk(c),'',''],
+      ['Qualtia','Mty','Q-11','','JAMON PAVO REB 250 G VP','Sin coincidencia','1',d(4),'MH Cumbres',c.producto,sk(c),'',''],
+      ['Arca Continental','Mty','','','COCA COLA 355 ML LATA','Sin código en la factura','6',d(14),'MH Cumbres','','','',''],
+      ['Arca Continental','Mty','','','FANTA NARANJA 600 ML','Sin código en la factura','2',d(14),'Pruebas de facturas','','','','']];
+    const path=SPV_DIR+addDaysStr(hoy,-1)+'__'+(Date.parse(addDaysStr(hoy,-1)+'T15:00:00Z'))+'.csv';
+    if(!DEMO.st.spvPlantado){ DEMO.st.files[path]={ text:[H].concat(rows).map(r=>r.map(csvCell).join(',')).join('\r\n')+'\r\n', type:'text/csv; charset=utf-8', t:addDaysStr(hoy,-1)+'T15:00:00.000Z' }; DEMO.st.spvPlantado=true; DEMO_SAVE(); }
+    spvEspera.push('Comercial → Códigos → «SKU proveedor»: la lista ya está subida (archivo de ayer)',
+      `Arca «*796» y «796» son un solo renglón (4 facturas, MH Contry y MH Cumbres; «Pruebas de facturas» no aparece) → ${a.producto}, «Elegido en recibo»`,
+      `LALA LA-1182 → ${b.producto}, «Sugerencia del lector»`,
+      'Bimbo 55021: «Sin producto» → «Buscar producto» y elige uno; después se puede confirmar',
+      `Qualtia Q-10 y Q-11 van al mismo SKU (${c.producto}): si confirmas los dos, avisa que Retool guarda una SKU Proveedor por artículo`,
+      '2 renglones de Arca sin clave: aparte en «Sin clave en la factura», sin botones',
+      '«Descargar CSV para Retool» trae SKU Calii y SKU Proveedor de los confirmados; «Subir archivo» con otro CSV reemplaza la lista');
+  }
+  DEMO.data={ ent, picks:ent.ab.picks, invoices, codigosEspera, entradasEspera, spvEspera, bridge:{ ordenes, catalogo, contactos, proveedores:['Abarrotes Prueba','Bimbo','Lácteos Prueba','Refrescos Prueba','Proveedor Sin Orden'], avisos:[] } };
   DEMO._ready();
 }
 // The order bridge (proveedor/apps-script.gs) answers {leido, ordenes, contactos, proveedores, catalogo, avisos}
@@ -6552,6 +6792,7 @@ function demoRender(){
   } else if(DUI.tab==='codigos'){
     h+=`<div class="info-card" style="font-size:14px">Inicio → <b>Comercial</b> → <b>Códigos</b> (o Admin → Códigos). Ya hay escaneos con «Código incorrecto en sistema» en los últimos días.</div>
       <div class="demo-sec">Lo que la app debería marcar</div><ul class="demo-espera">${(DEMO.data.codigosEspera||[]).map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ul>
+      <div class="demo-sec">Códigos · SKU proveedor</div><ul class="demo-espera">${(DEMO.data.spvEspera||[]).map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ul>
       <div class="demo-sec">Calendario · entradas en el sistema</div><ul class="demo-espera">${(DEMO.data.entradasEspera||[]).map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ul>`;
   } else if(DUI.tab==='archivos'){
     for(const k of ['ab','ca']){ const e=E[k];
