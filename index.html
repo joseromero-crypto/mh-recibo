@@ -1319,9 +1319,12 @@ async function findActiveEnvio(slug, area){
   if(!names.length) return {none:true};
   const path=`envios/${slug}/${area}/${names[0]}`;
   const data=JSON.parse(await sbFetch(path)); data._path=path;
-  // Borrar envío: after a delete, an older file must not come back as active — show nothing until a new upload
-  const del=await pgSelect('rec_events', `hub=eq.${encodeURIComponent(slug)}&area=eq.${area}&tipo=eq.admin&detalle->>accion=eq.borrar&select=ts&order=id.desc&limit=1`);
-  if(del.length && Date.parse(del[0].ts)>Date.parse(data.uploadedAt)) return {none:true};
+  // Borrar envío: after a delete, an older file must not come back as active — show nothing until a new upload.
+  // By file name ({fecha}__{epochMs}), not by time: Admin → Calendario can delete an old abandoned reception while a newer
+  // one is open, and that one must stay active.
+  const del=await pgSelect('rec_events', `hub=eq.${encodeURIComponent(slug)}&area=eq.${area}&tipo=eq.admin&detalle->>accion=eq.borrar&select=ts,detalle&order=id.desc&limit=20`);
+  const base=x=>String(x||'').split('/').pop().replace(/\.(json|csv)$/,'');
+  if(del.some(e=>{ const p=e.detalle&&e.detalle.envio; return p ? base(p)>=base(names[0]) : Date.parse(e.ts)>Date.parse(data.uploadedAt); })) return {none:true};
   const closed=await sessionClosedAt(data.session_id);
   return { path, data, closed, parciales: closed ? [] : await sessionParciales(data.session_id) };
 }
@@ -5592,26 +5595,38 @@ function admCalVer(i, m='admin'){
     <div class="muted" style="font-size:12px">${isPdArea(r.area)?'Proveedor directo · entrega del':'Envío del'} ${fechaLarga(r.desde)} · ${escapeHtml([...r.receptores].join(', ')||'—')}${c?` · ${c.lineas||0} productos · ${c.diferencias||0} con diferencia`:''}</div>
     ${r.ent?`<div style="margin-top:6px">${entEstadoHtml(r.ent)}</div>${r.ent.estado==='rojo'?entDifsHtml(r.ent):''}`:''}
     ${c?`<div class="btns"><button class="btn btn-secondary" onclick="openRecepcion(_admCal[${i}].cerrada,'${m}')">Ver</button></div>`
-      :m==='admin'&&r.envio?`<div class="btns"><button class="btn btn-primary" id="cal-cerrar" onclick="admCalCerrar(${i})">Cerrar recepción</button></div>`:''}</div>`;
+      :m==='admin'?`<div class="btns"><button class="btn btn-danger" id="cal-borrar" onclick="admCalBorrar(${i})">Borrar recepción</button></div>`:''}</div>`;
 }
-/* Admin closes an open reception: it opens that reception's own Resumen y cierre (as «Admin»), so every difference is still
-   answered one by one (rule 2) and the close writes the same report and cerrar as a receptor's. Never a forced close. */
-async function admCalCerrar(i){
-  const r=_admCal[i], b=document.getElementById('cal-cerrar'); if(!r || !r.envio || (b && b.disabled)) return;
-  if(b){ b.disabled=true; b.textContent='Abriendo…'; }
+/* Admin deletes an open reception started by mistake (Jose, 2026-11-26: misclicks left open for days). Same as Inicio's
+   «Borrar este envío»: typed "borrar" confirms, an admin 'borrar' event ends it (events stay, append-only; every reader
+   already hides borrar sessions), and its envío .json/.csv are removed. Never closes or reports anything. */
+async function admCalBorrar(i){
+  const r=_admCal[i]; if(!r || r.cerrada) return;
+  let scans=0, closed=null;
   try{
-    if(await sessionClosedAt(r.session_id)){ toast('Esta recepción ya se cerró'); vRender('admin'); return; }
-    const data=JSON.parse(await sbFetch(r.envio)); data._path=r.envio;
-    if(data.session_id!==r.session_id) throw new Error('el archivo del envío es de otra recepción');
-    if(data.sinArchivo){ toast('Esta recepción no tiene archivo del envío: no se puede cerrar', 3500); if(b){ b.disabled=false; b.textContent='Cerrar recepción'; } return; }
-    INI.hub=r.hub; INI.area=r.area; INI.receptor='Admin';
-    openRecibir(data, { parciales:r.parciales, noStale:true });
-    await syncServerEvents(); // the whole session before Resumen freezes its order
-    openResumen();
-  }catch(e){
-    if(b){ b.disabled=false; b.textContent='Cerrar recepción'; }
-    toast(isNetErr(e)?'Sin conexión':'No se pudo abrir la recepción ('+e.message+')', 4000);
-  }
+    scans=(await pgSelect('rec_events', `session_id=eq.${encodeURIComponent(r.session_id)}&tipo=eq.scan&select=id`)).length;
+    closed=await sessionClosedAt(r.session_id);
+  }catch(e){ toast('Sin conexión: conéctate para borrar'); return; }
+  if(closed){ toast('Esta recepción ya se cerró o se borró'); vRender('admin'); return; }
+  let d=null; if(r.envio){ try{ d=JSON.parse(await sbFetch(r.envio)); }catch(_){} } // already gone → only the event
+  const pd=isPdArea(r.area), o=(d&&d.orden)||{}, ocs=[].concat(o.num_oc||[]).filter(Boolean);
+  const v=await showModal({ title:`¿Borrar ${hubName(r.hub)} · ${isPdArea(r.area)?'Proveedor ':''}${areaName(r.area)} del ${fechaLarga(r.desde)}?`,
+    html:`<p>${pd&&ocs.length?'OC '+escapeHtml(ocs.join(', '))+' · ':''}${escapeHtml([...r.receptores].join(', ')||'Sin receptor')}</p>`
+      +(scans?`<p style="color:var(--c-ink);font-weight:700">Tiene ${scans} escaneo${scans===1?'':'s'}: se descartan.</p>`:'<p>No tiene escaneos.</p>')
+      +`<p>No se cierra ni se genera reporte: desaparece del calendario y de Inicio.${pd?' La orden sigue cargada: se puede empezar de nuevo.':''} Escribe <b>borrar</b> para confirmar.</p>`
+      +`<input id="del-confirm" class="text-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="escribe aquí">`,
+    buttons:[{label:'Borrar recepción', value:'del', kind:'danger'}], cancel:true });
+  if(v!=='del') return;
+  const typed=(document.getElementById('del-confirm')||{}).value||'';
+  if(typed.trim().toLowerCase()!=='borrar'){ toast('No se borró: escribe «borrar» para confirmar', 3500); return; }
+  const paths=d ? [r.envio].concat(d.csvPath?[d.csvPath]:[]) : [];
+  try{
+    await adminEvent({ session_id:r.session_id, hub:r.hub, area:r.area, fecha:r.fecha },
+      { accion:'borrar', envio:r.envio||null, csv:(d&&d.csvPath)||null, archivo:(d&&d.sourceFile)||'', escaneos:scans, desde:'calendario' });
+    if(paths.length) await sbDeleteEnvio(paths);
+    toast('✓ Recepción borrada');
+  }catch(e){ toast(isNetErr(e)?'Sin conexión: no se borró. Intenta de nuevo.':'No se pudo borrar ('+e.message+')', 4500); }
+  vRender('admin');
 }
 async function admDescargar(i){
   const c=_admRecep[i].cerrada;

@@ -464,8 +464,10 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - Admin → Calendario (view only): one hub, one month; each reception is a bar from session `fecha` to the Monterrey date
   of its `cerrar` (teal Abarrotes, ink Carnes; dashed = sin cerrar, reaching today only for that área's newest session;
   `borrar` sessions hidden). Legend counts the days of the month each área had a reception. An open bar (Admin only, not Comercial) has
-  «Cerrar recepción» (`admCalCerrar`, 2026-11-26): loads the session's latest envío snapshot (`abrir`/`reemplazo`
-  `detalle.envio`) as receptor «Admin» and opens its normal Resumen / Terminar sheet — never a forced close (rule 2).
+  «Borrar recepción» (`admCalBorrar`, 2026-11-26, misclicked receptions left open for days): same as Inicio's Borrar envío
+  (typed «borrar», admin `borrar` event with `desde:'calendario'`, the session's latest envío .json/.csv deleted), never a
+  close. `findActiveEnvio` hides a file only when a `borrar` deleted a file named ≥ it (by name, not time), so deleting an
+  old abandoned reception doesn't hide the newer open one.
 - Admin (§6.8/6.9): PIN in memory only; writes `rec_events` (admin), `config/receptores.json`, `config/slack.json`, envío copies
   (restore), `rec_alert_config` (upsert via `pgUpsert`, `on_conflict=hub,area`). Alerts are written only by the
   Apps Script through the RPCs.
