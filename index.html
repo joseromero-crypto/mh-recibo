@@ -5532,6 +5532,7 @@ async function admCalendario(el, m='admin'){
     if(e.tipo==='admin' && d.accion==='reabrir') r.cerrada=null;   // events come in id order: latest wins
     if(e.tipo==='admin' && d.accion==='borrar') r.borrada=true;
     if(e.tipo==='parcial') r.parciales++;
+    if((e.tipo==='abrir' || e.tipo==='reemplazo') && d.envio) r.envio=d.envio; // latest snapshot: «Cerrar recepción» opens it
   }
   try{ await entLoad(); }catch(_){ ENT.sinTabla=true; } // entradas en el sistema: never blocks the calendar
   // Proveedor directo: one group for every supplier área (teal-light bars labelled with the supplier)
@@ -5590,7 +5591,27 @@ function admCalVer(i, m='admin'){
   vEl(m).querySelector('#cal-detalle').innerHTML=`<div class="adm-row"><b>${escapeHtml(hubName(r.hub))} · ${areaName(r.area)}</b> — ${c?`<span class="tag green">✓ cerrada ${fechaLarga(r.hasta)}, ${localHM(new Date(c.ts))}</span>`:`<span class="tag orange">sin cerrar</span>`}${r.parciales?` <span class="tag orange">${r.parciales} entrega${r.parciales===1?'':'s'} parcial${r.parciales===1?'':'es'}</span>`:''}
     <div class="muted" style="font-size:12px">${isPdArea(r.area)?'Proveedor directo · entrega del':'Envío del'} ${fechaLarga(r.desde)} · ${escapeHtml([...r.receptores].join(', ')||'—')}${c?` · ${c.lineas||0} productos · ${c.diferencias||0} con diferencia`:''}</div>
     ${r.ent?`<div style="margin-top:6px">${entEstadoHtml(r.ent)}</div>${r.ent.estado==='rojo'?entDifsHtml(r.ent):''}`:''}
-    ${c?`<div class="btns"><button class="btn btn-secondary" onclick="openRecepcion(_admCal[${i}].cerrada,'${m}')">Ver</button></div>`:''}</div>`;
+    ${c?`<div class="btns"><button class="btn btn-secondary" onclick="openRecepcion(_admCal[${i}].cerrada,'${m}')">Ver</button></div>`
+      :m==='admin'&&r.envio?`<div class="btns"><button class="btn btn-primary" id="cal-cerrar" onclick="admCalCerrar(${i})">Cerrar recepción</button></div>`:''}</div>`;
+}
+/* Admin closes an open reception: it opens that reception's own Resumen y cierre (as «Admin»), so every difference is still
+   answered one by one (rule 2) and the close writes the same report and cerrar as a receptor's. Never a forced close. */
+async function admCalCerrar(i){
+  const r=_admCal[i], b=document.getElementById('cal-cerrar'); if(!r || !r.envio || (b && b.disabled)) return;
+  if(b){ b.disabled=true; b.textContent='Abriendo…'; }
+  try{
+    if(await sessionClosedAt(r.session_id)){ toast('Esta recepción ya se cerró'); vRender('admin'); return; }
+    const data=JSON.parse(await sbFetch(r.envio)); data._path=r.envio;
+    if(data.session_id!==r.session_id) throw new Error('el archivo del envío es de otra recepción');
+    if(data.sinArchivo){ toast('Esta recepción no tiene archivo del envío: no se puede cerrar', 3500); if(b){ b.disabled=false; b.textContent='Cerrar recepción'; } return; }
+    INI.hub=r.hub; INI.area=r.area; INI.receptor='Admin';
+    openRecibir(data, { parciales:r.parciales, noStale:true });
+    await syncServerEvents(); // the whole session before Resumen freezes its order
+    openResumen();
+  }catch(e){
+    if(b){ b.disabled=false; b.textContent='Cerrar recepción'; }
+    toast(isNetErr(e)?'Sin conexión':'No se pudo abrir la recepción ('+e.message+')', 4000);
+  }
 }
 async function admDescargar(i){
   const c=_admRecep[i].cerrada;
