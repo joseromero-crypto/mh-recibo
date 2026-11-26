@@ -20,6 +20,7 @@
   --c-teal:#00C3B3; --c-teal-dark:#006B62; --c-teal-light:#E0F7F5;
   --c-ink:#0E1A19; --c-muted:#5B6B69; --c-faint:#8A9997;
   --c-surface:#F2F5F5; --c-surface-hover:#E8EEED; --c-line:#E3E9E8; --c-white:#FFFFFF; --c-danger:#C62828;
+  --c-pend:#F5C84C; /* only for «Por dar entrada» supplier bars (comercial-plan §1 asks yellow) */
   --r-xl:28px; --r-lg:22px; --r-md:16px; --r-sm:12px; --r-xs:8px; --r-pill:999px;
   --font:'Plus Jakarta Sans',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
   --shadow-pop:0 12px 40px rgba(14,26,25,.18);
@@ -359,6 +360,15 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .cal-bar.pd{background:var(--c-teal-light);color:var(--c-teal-dark);border-color:var(--c-teal-light)}
 .cal-bar.open.pd{background:var(--c-white);color:var(--c-teal-dark);border-style:dashed;border-color:var(--c-teal-dark)}
 .cal-sw.pd{background:var(--c-teal-light)}
+.cal-bar.pd.ok{background:var(--c-teal);color:var(--c-ink);border-color:var(--c-teal)}
+.cal-bar.pd.mal{background:var(--c-danger);color:var(--c-white);border-color:var(--c-danger)}
+.cal-bar.pd.esp{background:var(--c-pend);color:var(--c-ink);border-color:var(--c-pend)}
+.cal-sw.pd-ok{background:var(--c-teal)} .cal-sw.pd-mal{background:var(--c-danger)} .cal-sw.pd-esp{background:var(--c-pend)}
+.ent-sec{font-size:12px;font-weight:700;color:var(--c-muted);margin:8px 0 2px}
+.ent-item{font-size:13px;padding:2px 0}
+.ent-dif{display:flex;justify-content:space-between;flex-wrap:wrap;gap:2px 8px;font-size:13px;border-top:1px solid var(--c-line);padding:4px 0}
+.ent-det summary{cursor:pointer;font-size:13px;padding:3px 0;font-weight:600}
+.tag.orange.pend{background:var(--c-pend);color:var(--c-ink);border-color:var(--c-pend)}
 .day-chk{display:inline-flex;align-items:center;gap:3px;font-size:13px;margin-right:8px}
 .adm-field{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:14px;flex-wrap:wrap}
 .adm-field input[type=time],.adm-field input[type=date],.adm-field input[type=number],.adm-field select{height:40px;padding:0 10px;font-size:14px;border:2px solid var(--c-line);border-radius:var(--r-sm);background:var(--c-white)}
@@ -580,8 +590,9 @@ const DEMO=(()=>{
   const seed=m[1], key='mr_demo_'+seed;
   let ss=null; try{ ss=window.sessionStorage; }catch(_){}
   let st=null; try{ st=JSON.parse(ss&&ss.getItem(key)||'null'); }catch(_){}
-  if(!st || st.v!==1) st={ v:1, nextId:1, tables:{ rec_events:[], rec_alert_config:[], rec_alerts:[], rec_codigos_fix:[] }, files:{}, ls:{}, hechos:{} };
+  if(!st || st.v!==1) st={ v:1, nextId:1, tables:{ rec_events:[], rec_alert_config:[], rec_alerts:[], rec_codigos_fix:[], rec_pd_entradas:[] }, files:{}, ls:{}, hechos:{} };
   if(!st.tables.rec_codigos_fix) st.tables.rec_codigos_fix=[]; // state saved before Comercial → Códigos
+  if(!st.tables.rec_pd_entradas) st.tables.rec_pd_entradas=[]; // … and before Calendario → entradas
   // localStorage → memory. Methods live on the prototype so Object.keys(localStorage) lists only the items, as on a real Storage.
   function MemStorage(){}
   MemStorage.prototype.getItem=function(k){ return Object.prototype.hasOwnProperty.call(this,k)?this[k]:null; };
@@ -3935,10 +3946,10 @@ function origenTexto(o){ return o ? [ORIGEN[o.cat], o.nota].filter(Boolean).join
 // People tagged at the start of paragraph 2: recibo/config/slack.json { tags:[…] }, edited in Admin → Slack. Use the Slack
 // @username (or a first name that's unique in Slack): a pasted "@Alberto Mendoza" tagged @alberto and left "Mendoza" as text.
 const SLACK_TAGS_DEFAULT=['@alberto']; // the hub coordinator and Jose are added by hand by the aux
-let SLACK_TAGS=null, SLACK_PERSONAS={}; // personas: { "<nombre como viene en la hoja>": "@usuario" } — Comercial / Comprador (proveedor directo)
+let SLACK_TAGS=null, SLACK_PERSONAS={}, SLACK_HUBS={}; // hubs: { slug: '@usuario' } — «Copiar mensaje para el hub» (Calendario, entradas) // personas: { "<nombre como viene en la hoja>": "@usuario" } — Comercial / Comprador (proveedor directo)
 async function loadSlackTags(){
   try{ const j=JSON.parse(await sbFetch('config/slack.json')); SLACK_TAGS=Array.isArray(j.tags)?j.tags:SLACK_TAGS_DEFAULT;
-    SLACK_PERSONAS=j.personas&&typeof j.personas==='object'?j.personas:{}; }
+    SLACK_PERSONAS=j.personas&&typeof j.personas==='object'?j.personas:{}; SLACK_HUBS=j.hubs&&typeof j.hubs==='object'?j.hubs:{}; }
   catch(_){ if(!SLACK_TAGS) SLACK_TAGS=SLACK_TAGS_DEFAULT; }
   return SLACK_TAGS;
 }
@@ -5346,6 +5357,123 @@ async function admRecepciones(){
   });
   document.getElementById('adm-tab').innerHTML=h||'<div class="empty-hint">Sin recepciones.</div>';
 }
+/* ENTRADAS-PURE:BEGIN — closed supplier reception vs what Retool shows as entered (comercial-plan §1). No DOM, no globals:
+   tests/entradas.test.mjs evals this block. `data` = rec_pd_entradas.data of the hub: { ocs: { "<Num Oc>": { p, f,
+   l:[[codigo, item, entrada, 'Kg'|'Pz'], …] } } }. Match: Num Oc = the reception's num_oc, then the line by barcode (leading
+   zeros off, like codeKey), else the exact name (normName). Units: Retool's, like the OC — a pack line ordered in piezas
+   (pedido_en 'piezas') compares recibido × pack_n. Compared against our Recibido, never Pedido. Kg: CH tolerance. */
+function entCodigo(c){ const s=String(c==null?'':c).replace(/\s+/g,'').replace(/\.0+$/,''); return /^\d+$/.test(s) ? (s.replace(/^0+/,'')||s) : s.toUpperCase(); }
+function entNombre(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim(); }
+const entR2=n=>Math.round(Number(n)*100)/100;
+// Recibido in the OC's unit
+function entRecibidoOC(l){ const r=Number(l.recibido)||0; return l.pack_n>0 && l.pedido_en==='piezas' ? entR2(r*l.pack_n) : r; }
+/* rec: the cerrar detalle ({ num_oc, lineas_todas }). → { estado, ocs, faltan, difs }
+     estado 'verde' every OC in Resumen and every line equal · 'rojo' at least one line differs · 'amarillo' an OC isn't in
+     Resumen yet (no difference found in the ones that are) · 'sin_oc' no Num Oc to match · 'sin_detalle' no lineas_todas.
+     difs: { producto, codigo, kgpz, recibido, entrada, dir:'sin_entrada' (app > Retool: stock not in the system) |
+     'sin_recibir' (Retool > app: entered, maybe paid, never received) }. While one of two OCs is missing, a line not
+     found in Resumen may belong to it, so it isn't flagged. */
+function entComparar(rec, data){
+  const ocs=[...new Set((rec && rec.num_oc || []).map(x=>String(x||'').trim()).filter(Boolean))];
+  if(!ocs.length) return { estado:'sin_oc', ocs, faltan:[], difs:[] };
+  if(!Array.isArray(rec.lineas_todas)) return { estado:'sin_detalle', ocs, faltan:[], difs:[] };
+  const D=(data && data.ocs) || {}, hay=ocs.filter(o=>D[o]), faltan=ocs.filter(o=>!D[o]);
+  if(!hay.length) return { estado:'amarillo', ocs, faltan, difs:[] };
+  const rt=[], byCode=new Map(), byName=new Map();
+  for(const o of hay) for(const [codigo, item, entrada, ud] of D[o].l||[]){
+    const k=entCodigo(codigo), n=entNombre(item);
+    let x=(k && byCode.get(k)) || (!k && byName.get(n));
+    if(!x){ x={ codigo:k, item, kgpz:ud==='Kg'?'Kg':'Pz', entrada:0, usado:false }; rt.push(x); if(k) byCode.set(k, x); if(n && !byName.has(n)) byName.set(n, x); }
+    x.entrada=entR2(x.entrada+(Number(entrada)||0));
+  }
+  const difs=[], tol=(kgpz, q)=>kgpz==='Kg' ? Math.max(0.05*q, 0.10) : 0;
+  for(const l of rec.lineas_todas){
+    if(l.no_solicitado) continue;
+    const sk=String(l.sku_key||''), k=/^name:/.test(sk)?'':entCodigo(sk), n=entNombre(l.producto);
+    const x=(k && byCode.get(k)) || byName.get(n) || null;
+    const rec_=entRecibidoOC(l);
+    if(!x){ if(!faltan.length && rec_>0) difs.push({ producto:l.producto, codigo:k, kgpz:l.kgpz||'Pz', recibido:rec_, entrada:0, dir:'sin_entrada' }); continue; }
+    x.usado=true;
+    const d=entR2(rec_-x.entrada);
+    if(Math.abs(d)>tol(l.kgpz, Math.max(rec_, x.entrada))+1e-9) difs.push({ producto:l.producto, codigo:k, kgpz:l.kgpz||'Pz', recibido:rec_, entrada:x.entrada, dir:d>0?'sin_entrada':'sin_recibir' });
+  }
+  for(const x of rt) if(!x.usado && x.entrada>0) difs.push({ producto:x.item, codigo:x.codigo, kgpz:x.kgpz, recibido:0, entrada:x.entrada, dir:'sin_recibir' });
+  return { estado:difs.length?'rojo':faltan.length?'amarillo':'verde', ocs, faltan, difs };
+}
+/* ENTRADAS-PURE:END */
+
+/* ── Entradas en el sistema (comercial-plan §1, phase 4): rec_pd_entradas (one row per hub, written hourly by the Apps Script
+   from «Resumen») is read here and compared with each closed supplier reception (entComparar). Colours the Proveedores
+   bars of the calendar and builds the morning list for every hub. Missing table → ENT.sinTabla, bars keep their old colour. ── */
+const ENT={ t:0, rows:{}, sinTabla:false, cerradas:null, tc:0 };
+const ENT_CACHE_MS=60000, ENT_DIAS_LISTA=21;
+async function entLoad(force){
+  if(!force && Date.now()-ENT.t<ENT_CACHE_MS) return ENT.rows;
+  try{ const rows=await pgSelect('rec_pd_entradas', 'select=hub,data,revisado'); ENT.rows={}; for(const r of rows) ENT.rows[r.hub]=r; ENT.sinTabla=false; }
+  catch(e){ if(isNetErr(e)) throw e; ENT.rows={}; ENT.sinTabla=true; }
+  ENT.t=Date.now(); return ENT.rows;
+}
+function entDe(info){ if(!isPdArea(info.area) || info.parcial) return null; const r=ENT.rows[info.hub]; return entComparar(info, r && r.data); }
+const ENT_TXT={ verde:'Con entrada en el sistema', rojo:'Entrada con diferencias', amarillo:'Por dar entrada', sin_oc:'Sin número de OC', sin_detalle:'Sin detalle por producto' };
+const ENT_CLS={ verde:'ok', rojo:'mal', amarillo:'esp', sin_oc:'esp' };
+function entRevisado(){ const ts=Object.values(ENT.rows).map(r=>r.revisado).filter(Boolean).sort().pop(); return ts?`«Resumen» leído ${fechaLarga(localDateStr(new Date(ts)))}, ${localHM(new Date(ts))}`:''; }
+function entQ(v, kgpz){ return fmtQty(v, kgpz)+(kgpz==='Kg'?' kg':''); }
+function entDifsHtml(e){
+  const g=(dir, t, sub)=>{ const a=e.difs.filter(x=>x.dir===dir); if(!a.length) return '';
+    return `<div class="ent-sec">${t} · ${a.length}</div><div class="muted" style="font-size:12px;margin-bottom:4px">${sub}</div>`
+      +a.map(x=>`<div class="ent-dif"><span>${escapeHtml(x.producto)}</span><span>app <b>${entQ(x.recibido,x.kgpz)}</b> · sistema <b>${entQ(x.entrada,x.kgpz)}</b></span></div>`).join(''); };
+  return g('sin_entrada','Recibido sin entrada','Llegó y está en la app, pero el sistema tiene menos: inventario que no está en el sistema.')
+    +g('sin_recibir','Entrada sin recibir','El sistema tiene más de lo que se recibió: entrada (y quizá pago) de algo que no llegó.');
+}
+// One line for the bar detail / the morning list
+function entEstadoHtml(e){
+  if(!e) return '';
+  if(ENT.sinTabla) return '';
+  const cls={ verde:'green', rojo:'red', amarillo:'orange pend', sin_oc:'orange pend' }[e.estado]||'';
+  let h=`<span class="tag ${cls}">${ENT_TXT[e.estado]}</span>`;
+  if(e.estado==='sin_oc') h+=` <span class="muted" style="font-size:12px">no se puede revisar contra el sistema</span>`;
+  if(e.estado==='amarillo' && e.faltan.length && e.faltan.length<e.ocs.length) h+=` <span class="muted" style="font-size:12px">falta la OC ${e.faltan.map(escapeHtml).join(', ')}</span>`;
+  return h;
+}
+// Morning list (all hubs): «Por dar entrada» (closed before today, oldest first) and «Entrada con diferencias»
+async function entMananaHtml(m){
+  await entLoad();
+  if(ENT.sinTabla) return `<div class="note">Revisión de entradas en el sistema: falta correr <b>sql/pd-entradas.sql</b> en Supabase y activar la lectura de «Resumen» en el Apps Script.</div>`;
+  if(!ENT.cerradas || Date.now()-ENT.tc>ENT_CACHE_MS){ ENT.cerradas=(await listCerradas(null, 'pd', ENT_DIAS_LISTA)).filter(c=>!c.parcial && (c.hub!=='test-hub' || IS_LOCAL)); ENT.tc=Date.now(); }
+  const hoy=todayStr(), por=new Map();
+  for(const c of ENT.cerradas){
+    const e=entDe(c); if(!e) continue;
+    const esp=(e.estado==='amarillo' || e.estado==='sin_oc') && c.fecha<hoy, mal=e.estado==='rojo';
+    if(!esp && !mal) continue;
+    if(!por.has(c.hub)) por.set(c.hub, { esp:[], mal:[] });
+    por.get(c.hub)[mal?'mal':'esp'].push({ c, e });
+  }
+  ENT.manana=[...por.entries()].sort((a,b)=>hubName(a[0]).localeCompare(hubName(b[0])));
+  const head=`<div class="section-title" style="margin-top:4px">Entradas en el sistema · todos los hubs</div><div class="muted" style="font-size:12px;margin-bottom:8px">Recepciones de proveedor de los últimos ${ENT_DIAS_LISTA} días contra «Resumen» de compras. ${escapeHtml(entRevisado())}</div>`;
+  if(!ENT.manana.length) return head+`<div class="warn-box ok">Todo lo recibido de proveedores hasta ayer ya tiene entrada en el sistema.</div>`;
+  const prov=c=>escapeHtml(c.proveedor||areaName(c.area)), oc=c=>(c.num_oc||[]).length?' · OC '+c.num_oc.map(escapeHtml).join(', '):'';
+  return head+ENT.manana.map(([hub, g], hi)=>`<div class="adm-row ent-hub"><b>${escapeHtml(hubName(hub))}</b>
+    ${g.esp.length?`<div class="ent-sec">Por dar entrada · ${g.esp.length}</div>`+g.esp.slice().sort((a,b)=>a.c.fecha.localeCompare(b.c.fecha)).map(({c,e})=>`<div class="ent-item">${prov(c)}${oc(c)} · recibido ${escapeHtml(pvFechaCorta(c.fecha))} · hace ${daysBetween(c.fecha, hoy)} día${daysBetween(c.fecha, hoy)===1?'':'s'}${e.estado==='sin_oc'?' · sin número de OC':''}</div>`).join(''):''}
+    ${g.mal.length?`<div class="ent-sec">Entrada con diferencias · ${g.mal.length}</div>`+g.mal.map(({c,e})=>`<details class="ent-det"><summary>${prov(c)}${oc(c)} · ${escapeHtml(pvFechaCorta(c.fecha))} · ${e.difs.length} producto${e.difs.length===1?'':'s'}</summary>${entDifsHtml(e)}</details>`).join(''):''}
+    <button class="btn btn-secondary btn-block" style="margin-top:8px" onclick="entCopiar(${hi})">Copiar mensaje para el hub</button></div>`).join('');
+}
+async function entCopiar(i){
+  const x=ENT.manana && ENT.manana[i]; if(!x) return;
+  await loadSlackTags();
+  const [hub, g]=x, tag=SLACK_HUBS[hub]||'', hoy=todayStr();
+  const prov=c=>(c.proveedor||areaName(c.area))+((c.num_oc||[]).length?' · OC '+c.num_oc.join(', '):'');
+  const out=[`*${hubName(hub)} · entradas en el sistema*${tag?' '+tag:''}`];
+  if(g.esp.length){ out.push('', 'Por dar entrada (recibido en la app, sin entrada en el sistema):');
+    g.esp.slice().sort((a,b)=>a.c.fecha.localeCompare(b.c.fecha)).forEach(({c})=>out.push(`• ${prov(c)} · recibido ${pvFechaCorta(c.fecha)} (hace ${daysBetween(c.fecha, hoy)} d)`)); }
+  if(g.mal.length){ out.push('', 'Entrada con diferencias (corregir en el sistema):');
+    g.mal.forEach(({c,e})=>{ out.push(`• ${prov(c)} · ${pvFechaCorta(c.fecha)}`);
+      e.difs.forEach(d=>out.push(`   – ${d.producto}: recibido ${entQ(d.recibido,d.kgpz)}, entrada ${entQ(d.entrada,d.kgpz)}${d.dir==='sin_entrada'?' (falta dar entrada)':' (entrada de algo que no llegó)'}`)); }); }
+  const txt=out.join('\n');
+  try{ await navigator.clipboard.writeText(txt); }
+  catch(_){ const t=document.createElement('textarea'); t.value=txt; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  toast('✓ Mensaje copiado'+(tag?'':' · sin etiqueta del hub (Admin → Slack)'));
+}
+
 /* ── Calendario: view only. One hub, one month; every reception is a bar from the day it opened (session fecha) to
    the day it closed (Monterrey date of the cerrar). Still open: dashed, up to today if it's that área's newest
    session, else only its first day (abandoned). Borrar → not shown (it wasn't a reception). ── */
@@ -5373,6 +5501,7 @@ async function admCalendario(el, m='admin'){
     if(e.tipo==='admin' && d.accion==='borrar') r.borrada=true;
     if(e.tipo==='parcial') r.parciales++;
   }
+  try{ await entLoad(); }catch(_){ ENT.sinTabla=true; } // entradas en el sistema: never blocks the calendar
   // Proveedor directo: one group for every supplier área (teal-light bars labelled with the supplier)
   const GRUPOS=AREAS.concat([{ id:'pd', name:'Proveedores' }]), grp=r=>isPdArea(r.area)?'pd':r.area, gi=r=>GRUPOS.findIndex(x=>x.id===grp(r));
   const ses=[...by.values()].filter(r=>!r.borrada && gi(r)>=0);
@@ -5381,6 +5510,7 @@ async function admCalendario(el, m='admin'){
     r.desde=r.fecha;
     r.hasta=r.cerrada ? localDateStr(new Date(r.cerrada.ts)) : (newest[r.area]===r.session_id ? today : r.fecha);
     if(r.hasta<r.desde) r.hasta=r.desde;
+    r.ent=r.cerrada && isPdArea(r.area) && !ENT.sinTabla ? entDe(r.cerrada) : null;
   });
   ses.sort((a,b)=>gi(a)-gi(b) || a.desde.localeCompare(b.desde));
   _admCal=ses;
@@ -5389,7 +5519,7 @@ async function admCalendario(el, m='admin'){
   ses.forEach(r=>{ for(let d=r.desde; d<=r.hasta; d=ymdAdd(d,1)) if(d>=ini && d<=fin) cubre[grp(r)].add(d); });
   const grupos=GRUPOS.filter(a=>a.id!=='pd' || ses.some(r=>grp(r)==='pd'));
   const diasMes=Math.max(0, daysBetween(ini, today<fin?today:fin)+1);
-  let h=`<div class="filters"><select onchange="VST('${m}').hub=this.value;vRender('${m}')" aria-label="Hub">${ADM_HUBS().map(x=>`<option value="${x.slug}" ${st.hub===x.slug?'selected':''}>${escapeHtml(x.name)}</option>`).join('')}</select></div>
+  let h=`<div id="ent-manana"></div><div class="filters"><select onchange="VST('${m}').hub=this.value;vRender('${m}')" aria-label="Hub">${ADM_HUBS().map(x=>`<option value="${x.slug}" ${st.hub===x.slug?'selected':''}>${escapeHtml(x.name)}</option>`).join('')}</select></div>
     <div class="cal-nav"><button onclick="admCalMes(-1,'${m}')" aria-label="Mes anterior">‹</button><b>${MESES[Number(st.calMes.slice(5))-1]} ${st.calMes.slice(0,4)}</b><button onclick="admCalMes(1,'${m}')" aria-label="Mes siguiente">›</button></div>
     <div class="cal-dow">${['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d=>`<div>${d}</div>`).join('')}</div>`;
   for(let w=gridIni; w<=gridFin; w=ymdAdd(w,7)){
@@ -5407,21 +5537,27 @@ async function admCalendario(el, m='admin'){
         let l=lanes.findIndex(end=>end<s); if(l<0){ l=lanes.length; lanes.push(e); } else lanes[l]=e;
         const c0=daysBetween(w,s)+1, span=daysBetween(s,e)+1;
         const nm=a.id==='pd'?areaName(r.area):a.name;
-        const tip=`${nm} · ${r.cerrada?'cerrada':'abierta'} · ${fechaLarga(r.desde)}${r.hasta!==r.desde?' – '+fechaLarga(r.hasta):''}`;
-        h+=`<button class="cal-bar ${a.id}${r.cerrada?'':' open'}${s===r.desde?' s':''}${e===r.hasta?' e':''}" style="grid-row:${row+l};grid-column:${c0} / span ${span}" title="${escapeHtml(tip)}" onclick="admCalVer(${idx},'${m}')" aria-label="${escapeHtml(tip)}">${span>1||a.id==='pd'?escapeHtml(nm):''}</button>`;
+        const tip=`${nm} · ${r.cerrada?'cerrada':'abierta'}${r.ent?' · '+ENT_TXT[r.ent.estado].toLowerCase():''} · ${fechaLarga(r.desde)}${r.hasta!==r.desde?' – '+fechaLarga(r.hasta):''}`;
+        h+=`<button class="cal-bar ${a.id}${r.cerrada?'':' open'}${r.ent&&ENT_CLS[r.ent.estado]?' '+ENT_CLS[r.ent.estado]:''}${s===r.desde?' s':''}${e===r.hasta?' e':''}" style="grid-row:${row+l};grid-column:${c0} / span ${span}" title="${escapeHtml(tip)}" onclick="admCalVer(${idx},'${m}')" aria-label="${escapeHtml(tip)}">${span>1||a.id==='pd'?escapeHtml(nm):''}</button>`;
       });
       row+=Math.max(1,lanes.length);
     });
     h+=`</div>`;
   }
+  const conPd=grupos.some(a=>a.id==='pd') && !ENT.sinTabla;
   h+=`<div class="cal-legend">${grupos.map(a=>`<span><i class="cal-sw ${a.id}"></i>${a.name}: ${cubre[a.id].size} de ${diasMes} días</span>`).join('')}<span><i class="cal-sw open"></i>abierta / sin cerrar</span></div>
+    ${conPd?`<div class="cal-legend" style="margin-top:-4px"><span>Proveedores en el sistema:</span><span><i class="cal-sw pd-ok"></i>con entrada</span><span><i class="cal-sw pd-esp"></i>por dar entrada</span><span><i class="cal-sw pd-mal"></i>con diferencias</span></div>
+    <div class="muted" style="font-size:12px;margin:-4px 0 8px">Solo proveedores: CH no está en «Resumen». ${escapeHtml(entRevisado())}</div>`:''}
     <div id="cal-detalle"><div class="muted" style="font-size:13px">Toca una barra para ver la recepción.</div></div>`;
   el.innerHTML=h;
+  const mn=el.querySelector('#ent-manana');
+  entMananaHtml(m).then(x=>{ if(mn.isConnected) mn.innerHTML=x; }).catch(e=>{ if(mn.isConnected) mn.innerHTML=`<div class="note">${isNetErr(e)?'Sin conexión: no se pudo revisar las entradas en el sistema.':'Entradas en el sistema: '+escapeHtml(e.message)}</div>`; });
 }
 function admCalVer(i, m='admin'){
   const r=_admCal[i], c=r.cerrada;
   vEl(m).querySelector('#cal-detalle').innerHTML=`<div class="adm-row"><b>${escapeHtml(hubName(r.hub))} · ${areaName(r.area)}</b> — ${c?`<span class="tag green">✓ cerrada ${fechaLarga(r.hasta)}, ${localHM(new Date(c.ts))}</span>`:`<span class="tag orange">sin cerrar</span>`}${r.parciales?` <span class="tag orange">${r.parciales} entrega${r.parciales===1?'':'s'} parcial${r.parciales===1?'':'es'}</span>`:''}
     <div class="muted" style="font-size:12px">${isPdArea(r.area)?'Proveedor directo · entrega del':'Envío del'} ${fechaLarga(r.desde)} · ${escapeHtml([...r.receptores].join(', ')||'—')}${c?` · ${c.lineas||0} productos · ${c.diferencias||0} con diferencia`:''}</div>
+    ${r.ent?`<div style="margin-top:6px">${entEstadoHtml(r.ent)}</div>${r.ent.estado==='rojo'?entDifsHtml(r.ent):''}`:''}
     ${c?`<div class="btns"><button class="btn btn-secondary" onclick="openRecepcion(_admCal[${i}].cerrada,'${m}')">Ver</button></div>`:''}</div>`;
 }
 async function admDescargar(i){
@@ -5904,6 +6040,9 @@ async function admSlack(){
     <div class="section-title" style="margin-top:18px">Proveedor directo: comercial y compras</div>
     <div class="muted" style="margin-bottom:10px">Un renglón por persona: <b>Nombre = @usuario</b>, con el nombre como viene en la hoja de compras (Comercial o Comprador). Se etiquetan al final del mensaje de cada recepción de proveedor; quien no esté aquí aparece con su nombre.</div>
     <textarea class="text-input" id="adm-slack-personas" rows="6" placeholder="Mariana López = @mariana">${escapeHtml(Object.entries(SLACK_PERSONAS).map(([n,t])=>n+' = '+t).join('\n'))}</textarea>
+    <div class="section-title" style="margin-top:18px">Hubs: entradas en el sistema</div>
+    <div class="muted" style="margin-bottom:10px">Un renglón por hub: <b>Hub = @usuario</b> (o @canal). Se etiqueta en «Copiar mensaje para el hub» del Calendario.</div>
+    <textarea class="text-input" id="adm-slack-hubs" rows="5" placeholder="MH Contry = @coordinador-contry">${escapeHtml(Object.entries(SLACK_HUBS).map(([s,t])=>hubName(s)+' = '+t).join('\n'))}</textarea>
     <button class="btn btn-primary btn-block" style="margin-top:14px" onclick="admGuardarSlack()">Guardar etiquetas</button>`;
 }
 async function admGuardarSlack(){
@@ -5914,8 +6053,15 @@ async function admGuardarSlack(){
     const m=t.match(/^(.+?)\s*=\s*@?(\S{2,})$/); if(!m){ malas.push(t); continue; }
     personas[m[1].trim()]='@'+m[2].replace(/^@/,'');
   }
-  if(malas.length){ toast('Revisa estos renglones (Nombre = @usuario): '+malas.join(' · '), 5000); return; }
-  try{ await sbUpload('config/slack.json', JSON.stringify({ tags, personas }, null, 1), 'application/json'); SLACK_TAGS=tags; SLACK_PERSONAS=personas; toast('✓ Etiquetas guardadas'); }
+  const hubs={};
+  for(const line of document.getElementById('adm-slack-hubs').value.split('\n')){
+    const t=line.trim(); if(!t) continue;
+    const m=t.match(/^(.+?)\s*=\s*@?(\S{2,})$/), h=m && HUBS.find(x=>normName(x.name)===normName(m[1]) || x.slug===m[1].trim());
+    if(!h){ malas.push(t); continue; }
+    hubs[h.slug]='@'+m[2].replace(/^@/,'');
+  }
+  if(malas.length){ toast('Revisa estos renglones (Nombre = @usuario, el hub como aparece en la app): '+malas.join(' · '), 5000); return; }
+  try{ await sbUpload('config/slack.json', JSON.stringify({ tags, personas, hubs }, null, 1), 'application/json'); SLACK_TAGS=tags; SLACK_PERSONAS=personas; SLACK_HUBS=hubs; toast('✓ Etiquetas guardadas'); }
   catch(e){ toast('No se pudo guardar: '+e.message); }
 }
 
@@ -6257,7 +6403,45 @@ function demoGenerar(){
       `${e.producto}: se cargó en Retool hace 4 días y se volvió a escanear mal ayer → vuelve a «Por confirmar» con aviso`,
       '«Descargar CSV para Retool» trae solo los confirmados (SKU Calii, Código de barras) · «Ya lo cargué en Retool» los pasa a «Ya cargados»');
   }
-  DEMO.data={ ent, picks:ent.ab.picks, invoices, codigosEspera, bridge:{ ordenes, catalogo, contactos, proveedores:['Abarrotes Prueba','Bimbo','Lácteos Prueba','Refrescos Prueba','Proveedor Sin Orden'], avisos:[] } };
+  /* ── Calendario → entradas en el sistema (comercial-plan §1): closed supplier receptions of the last days + what «Resumen»
+     shows for them (rec_pd_entradas), planted once per test (DEMO.st.entPlantado). Cremería = verde, Botanas = rojo (both
+     directions), Panadería = amarillo (no entry yet), Botanas at Cumbres = sin número de OC. ── */
+  const entradasEspera=[];
+  {
+    const T=DEMO.st.tables, ps=take(14), pr=['Cremería Prueba','Botanas Prueba','Panadería Prueba'];
+    const casos=[
+      { hub:'mh-contry', prov:pr[0], dias:3, oc:'C9'+int(100000,999999), ls:ps.slice(0,4).map((p,i)=>({ p, ped:[6,12,4,8][i], rec:[6,12,4,5][i] })) },
+      { hub:'mh-contry', prov:pr[1], dias:2, oc:'C9'+int(100000,999999), ls:ps.slice(4,8).map((p,i)=>({ p, ped:[10,6,8,3][i], rec:[10,6,8,0][i] })) },
+      { hub:'mh-contry', prov:pr[2], dias:1, oc:'C9'+int(100000,999999), ls:ps.slice(8,11).map((p,i)=>({ p, ped:[5,7,2][i], rec:[5,7,2][i] })) },
+      { hub:'mh-cumbres', prov:pr[1], dias:2, oc:'', ls:ps.slice(11,14).map((p,i)=>({ p, ped:[4,4,4][i], rec:[4,4,4][i] })) }];
+    if(!DEMO.st.entPlantado){
+      const ocs={};
+      casos.forEach((k,ci)=>{
+        const f=addDaysStr(hoy,-k.dias), area=pdArea(k.prov), sid=`${k.hub}_${area}_${f}_demo${ci}`, rep=`reportes/${k.hub}/${area}/${f}_18-00_Prueba.csv`;
+        const lt=k.ls.map(x=>Object.assign({ sku_key:bcKey(x.p.code), producto:x.p.producto, kgpz:'Pz', pedido:x.ped, contado:x.rec, recibido:x.rec }, x.rec<x.ped?{ faltante:x.ped-x.rec }:{}));
+        const csv=[PD_REPORT_COLS.map(csvCell).join(',')].concat(lt.map(l=>[hubName(k.hub), k.prov, k.oc, f, 'Prueba', l.sku_key, l.producto, 'Pz', l.pedido, l.recibido, '', '', '', l.faltante||'', l.recibido, '', '', l.faltante?'Faltante':'Completo', '', '', ''].map(csvCell).join(','))).join('\r\n')+'\r\n';
+        DEMO.st.files[rep]={ text:csv, type:'text/csv; charset=utf-8', t:f+'T18:00:00.000Z' };
+        const dif=lt.filter(l=>l.faltante).length;
+        T.rec_events.push({ id:DEMO.st.nextId++, session_id:sid, hub:k.hub, area, fecha:f, tipo:'abrir', receptor:'Prueba', device_id:'demo', ts:f+'T16:00:00.000Z', detalle:{ uid:'demo-ent-a'+ci, proveedor:k.prov } },
+          { id:DEMO.st.nextId++, session_id:sid, hub:k.hub, area, fecha:f, tipo:'cerrar', receptor:'Prueba', device_id:'demo', ts:f+'T18:00:00.000Z',
+            detalle:{ uid:'demo-ent-c'+ci, origen:'proveedor', modo:'botones', proveedor:k.prov, ocs:[k.oc||pdArea(k.prov).slice(3)+'|'+f], num_oc:k.oc?[k.oc]:[], fechas_entrega:[f],
+              reporte:rep, lineas:lt.length, diferencias:dif, faltantes:dif, receptores:['Prueba'], lineas_todas:lt } });
+        if(!k.oc || ci===2) return;  // Panadería: not entered yet · Cumbres: no OC number
+        const l=lt.map(x=>[x.sku_key, x.producto, x.recibido, 'Pz']);
+        if(ci===1){ l[0][2]=7; l[3][2]=3; }  // Botanas: 10 received, 7 entered · 0 received, 3 entered
+        (ocs[k.hub]=ocs[k.hub]||{})[k.oc]={ p:k.prov, f, l };
+      });
+      for(const [hub, o] of Object.entries(ocs)) T.rec_pd_entradas.push({ hub, data:{ desde:addDaysStr(hoy,-30), ocs:o }, hash:'demo', leido:serverNow().toISOString(), revisado:serverNow().toISOString(), ms:0 });
+      DEMO.st.entPlantado=true; DEMO_SAVE();
+    }
+    entradasEspera.push(`Admin o Comercial → Calendario → MH Contry: ${pr[0]} verde (en el sistema igual a lo recibido)`,
+      `${pr[1]} rojo: «Recibido sin entrada» ${casos[1].ls[0].p.producto} (app 10, sistema 7) y «Entrada sin recibir» ${casos[1].ls[3].p.producto} (app 0, sistema 3)`,
+      `${pr[2]} amarillo: cerrada ayer, su OC no está en «Resumen»`,
+      `Arriba del calendario, todos los hubs: Contry con 1 por dar entrada y 1 con diferencias; Cumbres con ${pr[1]} «sin número de OC»`,
+      '«Copiar mensaje para el hub» arma el mensaje con la etiqueta del hub de Admin → Slack (sin ella, avisa)',
+      'Una recepción de proveedor que cierres aquí aparece amarilla (nadie le ha dado entrada)');
+  }
+  DEMO.data={ ent, picks:ent.ab.picks, invoices, codigosEspera, entradasEspera, bridge:{ ordenes, catalogo, contactos, proveedores:['Abarrotes Prueba','Bimbo','Lácteos Prueba','Refrescos Prueba','Proveedor Sin Orden'], avisos:[] } };
   DEMO._ready();
 }
 // The order bridge (proveedor/apps-script.gs) answers {leido, ordenes, contactos, proveedores, catalogo, avisos}
@@ -6349,7 +6533,7 @@ function demoCerrar(){ DUI.open=false; document.getElementById('demo-panel').cla
 function demoRender(){
   const el=document.getElementById('demo-body'); if(!el) return;
   if(!DEMO.data){ el.innerHTML='<div class="muted">Preparando los datos de prueba…</div>'; DEMO.ready.then(()=>{ if(DUI.open) demoRender(); }); return; }
-  const tabs=[['llego','Qué llegó'],['archivos','Archivos y factura'],['codigos','Códigos'],['ajustes','Ajustes']];
+  const tabs=[['llego','Qué llegó'],['archivos','Archivos y factura'],['codigos','Comercial'],['ajustes','Ajustes']];
   let h=`<div class="tabs">${tabs.map(([k,n])=>`<button class="choice ${DUI.tab===k?'sel':''}" onclick="DUI.tab='${k}';demoRender()">${n}</button>`).join('')}</div>`;
   const E=DEMO.data.ent;
   if(DUI.tab==='llego'){
@@ -6367,7 +6551,8 @@ function demoRender(){
     h+=`<div class="demo-sec">Lo que la app debería marcar</div><ul class="demo-espera">${e.espera.map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ul>`;
   } else if(DUI.tab==='codigos'){
     h+=`<div class="info-card" style="font-size:14px">Inicio → <b>Comercial</b> → <b>Códigos</b> (o Admin → Códigos). Ya hay escaneos con «Código incorrecto en sistema» en los últimos días.</div>
-      <div class="demo-sec">Lo que la app debería marcar</div><ul class="demo-espera">${(DEMO.data.codigosEspera||[]).map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ul>`;
+      <div class="demo-sec">Lo que la app debería marcar</div><ul class="demo-espera">${(DEMO.data.codigosEspera||[]).map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ul>
+      <div class="demo-sec">Calendario · entradas en el sistema</div><ul class="demo-espera">${(DEMO.data.entradasEspera||[]).map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ul>`;
   } else if(DUI.tab==='archivos'){
     for(const k of ['ab','ca']){ const e=E[k];
       h+=`<div class="demo-sec">${escapeHtml(e.titulo)} · archivo de envío</div><div class="muted" style="font-size:13px">${escapeHtml(e.archivo)} · ${e.items.filter(x=>x.tipo!=='no_envio'&&x.tipo!=='desconocido').length} productos</div>

@@ -324,6 +324,28 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   detail gets one row saying so. The by-product CSV adds «Fechas con diferencia». Tested on real data (Modo prueba has no
   closed supplier receptions). Comercial's list of extra columns is still pending.
 
+- **Calendario · entradas en el sistema (phase 4, 2026-11-25; comercial-plan §1)** — whether what a supplier reception
+  received was entered in Retool. **The Apps Script only copies**: `refrescarTodo` also reads the master's «Resumen» tab
+  when ≥ 60 min passed (07:00–22:59; `entradas_ts`; a failure is logged and retried in 10 min, never stops the orders),
+  `parsearEntradas_` keeps the last 30 days per hub `{ desde, ocs:{ "<Num Oc>":{ p, f, l:[[codigo, item, entrada, ud]] } } }`
+  (no money, rows without Num Oc skipped, repeated codes summed) and writes `rec_pd_entradas` (one row per hub) through
+  `rec_pd_entradas_put` with the same SB_SECRET (`sql/pd-entradas.sql`; `ehash_` props). `probarEntradas` logs,
+  `refrescarEntradas` forces a write. Jose runs the SQL and deploys a new version. **The app compares**:
+  `entComparar(cerrarDetalle, data)` in `/* ENTRADAS-PURE */` (`node tests/entradas.test.mjs`; fixture
+  `fixtures/entradas-2026-11-24.json` = real closes + a «Resumen» rebuilt from the plan's dry run: 4 green, 3 red): Num Oc
+  = `num_oc`, line by barcode (`entCodigo`, leading zeros off) else exact name; against **Recibido** in the OC's unit
+  (`entRecibidoOC`: pack ordered in piezas → × pack_n); Kg CH tolerance; no solicitado ignored. Estados verde / rojo
+  (`difs` dir `sin_entrada` app > Retool, `sin_recibir` Retool > app, incl. Retool lines we don't have) / amarillo (an OC
+  not in Resumen; with 2 OCs a line not found isn't flagged while one is missing) / sin_oc (`{prov}|{fecha}` keys) /
+  sin_detalle. Calendar bars: `.pd.ok` teal, `.pd.mal` danger, `.pd.esp` `--c-pend` yellow (the one added hue, because the
+  plan asks yellow; only these bars and their tag); legend says CH isn't checked. Bar detail lists the differences in two
+  groups. Above the calendar (Admin and Comercial), `entMananaHtml`: every hub, closes of the last 21 days
+  (`ENT_DIAS_LISTA`), «Por dar entrada» (closed before today, oldest first) and «Entrada con diferencias», per hub with
+  «Copiar mensaje para el hub» (`entCopiar`, tag from `config/slack.json` `hubs` {slug: '@x'}, edited in Admin → Slack as
+  «Hub = @usuario»). Cache 60 s (`ENT`). Table missing → a setup note, bars as before. Modo prueba: planted once
+  (`DEMO.st.entPlantado`: Cremería verde, Botanas rojo, Panadería amarillo at Contry, Botanas sin OC at Cumbres); panel
+  tab «Comercial» lists what to expect. CH receptions: pending another source.
+
 ## Modo prueba (2026-11-18)
 - `?demo={semilla}` runs the whole app unchanged on fake data; Admin → **Modo prueba** opens it in a new tab (no PIN
   inside a test tab). Nothing reaches production: `demoFetch` (top of the script) replaces `window.fetch` and answers

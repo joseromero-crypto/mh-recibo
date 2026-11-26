@@ -29,6 +29,10 @@
  *      present»). From then on `refrescarTodo` writes every hub to rec_pd_snapshot every minute (05:00–22:59), and the
  *      app reads that row in a fraction of a second; this web app stays as its fallback. `quitarTimer` turns it off.
  *      Executions → refrescarTodo shows each run's time; rec_pd_snapshot.ms holds the latest one.
+ *   6. Entradas (comercial-plan §1, 2026-11-25): run sql/pd-entradas.sql in Supabase (same SB_SECRET), paste this file,
+ *      run `probarEntradas` once (logs what «Resumen» holds per hub, writes nothing), then `refrescarEntradas` once. From
+ *      then on refrescarTodo also reads «Resumen» when ≥ 60 min have passed (07:00–22:59) and writes rec_pd_entradas.
+ *      A failed read never stops the orders: it is logged and retried 10 minutes later.
  *
  * Call:  GET {exec}?token=…&hub=mh-contry[&proveedor=LALA][&fresh=1]
  *   → { leido, ordenes:[{num_oc, proveedor, fecha_entrega, comercial, comprador, lineas:[…]}], contactos,
@@ -46,7 +50,7 @@ const VENTANA_DIAS = 14;
 const CACHE_SEG = 30;
 const MASTER = '14-Wt08IJuNc7e5nKA0R_omBHc0JY2olSxu_FCCVHOLQ';
 const TABS = { ordenes: 'Base datos Compras', catalogo: 'Catalogo2', proveedores: 'Proveedores',
-               encargados: 'Encargados', nuevos: 'Productos Nuevos' };
+               encargados: 'Encargados', nuevos: 'Productos Nuevos', resumen: 'Resumen' };
 // City → reference hub file (Encargados + Inv {city} + Productos Nuevos). A city without one still gets orders,
 // caducidad and comprador from the master; comercial/temp stay empty and the app shows «Contacta al equipo
 // comercial en el canal de abastecimiento en Slack».
@@ -189,6 +193,12 @@ function refrescarTodo() {
     const faltan = snapshotPut_(secret, filas, Date.now() - t0);
     if (faltan.length) snapshotPut_(secret, faltan.map(s => ({ hub: s, hash: datos[s].hash, data: datos[s].data })), Date.now() - t0);
     filas.forEach(f => { if (f.data) props.setProperty('hash_' + f.hub, datos[f.hub].hash); });
+    // «Resumen» (what Retool shows as entered): once an hour at most, never at the cost of the orders above
+    const ultima = Number(props.getProperty('entradas_ts') || 0);
+    if (h >= ENTRADAS_HORAS[0] && Date.now() - ultima >= ENTRADAS_MIN * 60000) {
+      try { entradasTodo_(secret); props.setProperty('entradas_ts', String(Date.now())); }
+      catch (e) { console.error('Entradas: ' + (e.message || e)); props.setProperty('entradas_ts', String(Date.now() - (ENTRADAS_MIN - 10) * 60000)); }
+    }
   } finally {
     lock.releaseLock();
   }
@@ -207,11 +217,91 @@ function instalarTimer() {
   ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'refrescarTodo').forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('refrescarTodo').timeBased().everyMinutes(TIMER_MIN).create();
   const props = PropertiesService.getScriptProperties();
-  Object.keys(HUBS).forEach(s => props.deleteProperty('hash_' + s));   // send everything once
+  Object.keys(HUBS).forEach(s => { props.deleteProperty('hash_' + s); props.deleteProperty('ehash_' + s); });   // send everything once
+  props.deleteProperty('entradas_ts');
   refrescarTodo();
 }
 function quitarTimer() {
   ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'refrescarTodo').forEach(t => ScriptApp.deleteTrigger(t));
+}
+
+/* ── Entradas (comercial-plan §1): «Resumen» = compras pastes Retool's «recibo» page there every day. Same first columns as
+ * «Base datos Compras»; Entrada = what was entered in Retool. Only Num Oc, Cod. Barras, Item, Ud, Entrada, Proveedor,
+ * Fecha are kept (no money). Rows without Num Oc can't be matched and are skipped. Last ENTRADAS_DIAS days by Fecha.
+ * data per hub: { desde, ocs: { "<Num Oc>": { p: proveedor, f: fecha, l: [[codigo, item, entrada, 'Kg'|'Pz'], …] } } };
+ * repeated codes (or names, when there's no code) inside one OC are summed. ── */
+const ENTRADAS_MIN = 60;
+const ENTRADAS_DIAS = 30;
+const ENTRADAS_HORAS = [7, 23];   // from 07:00; refrescarTodo itself stops at 22:59
+
+function entradasTodo_(secret) {
+  const t0 = Date.now();
+  const porHub = parsearEntradas_(libro_(MASTER, [TABS.resumen]));
+  const props = PropertiesService.getScriptProperties();
+  const datos = {}, filas = [];
+  Object.keys(HUBS).forEach(slug => {
+    const d = porHub[slug];
+    const hash = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(d), Utilities.Charset.UTF_8));
+    datos[slug] = { data: d, hash: hash };
+    const fila = { hub: slug, hash: hash };
+    if (props.getProperty('ehash_' + slug) !== hash) fila.data = d;
+    filas.push(fila);
+  });
+  const faltan = rpcPut_('rec_pd_entradas_put', secret, filas, Date.now() - t0);
+  if (faltan.length) rpcPut_('rec_pd_entradas_put', secret, faltan.map(s => ({ hub: s, hash: datos[s].hash, data: datos[s].data })), Date.now() - t0);
+  filas.forEach(f => { if (f.data) props.setProperty('ehash_' + f.hub, datos[f.hub].hash); });
+}
+function parsearEntradas_(libro) {
+  const t = tabla_(libro, TABS.resumen, ['hub', 'num_oc', 'item', 'entrada']);
+  const C = t.col, porCodigo = {};
+  Object.keys(HUBS).forEach(slug => { porCodigo[HUBS[slug].hub] = slug; });
+  const hoy = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), desde = addDays_(hoy, -ENTRADAS_DIAS);
+  const out = {}, idx = {};
+  Object.keys(HUBS).forEach(slug => { out[slug] = { desde: desde, ocs: {} }; });
+  t.rows.forEach(r => {
+    const slug = porCodigo[txt_(r.v[C.hub])];
+    if (!slug) return;
+    const numOc = txt_(r.v[C.num_oc]).replace(/^-$/, '');
+    if (!numOc) return;
+    const fecha = C.fecha != null ? fecha_(r.v[C.fecha], r.d[C.fecha], TZ) : '';
+    if (fecha && fecha < desde) return;
+    const codigo = C.cod_barras != null ? codigo_(r.d[C.cod_barras]) : '', item = txt_(r.v[C.item]);
+    if (!codigo && !item) return;
+    const ocs = out[slug].ocs;
+    if (!ocs[numOc]) ocs[numOc] = { p: C.proveedor != null ? txt_(r.v[C.proveedor]) : '', f: fecha, l: [] };
+    const o = ocs[numOc];
+    if (fecha && (!o.f || fecha < o.f)) o.f = fecha;
+    const k = slug + '|' + numOc + '|' + (codigo || 'n:' + provKey_(item));
+    const entrada = num_(r.v[C.entrada]);
+    if (idx[k]) { idx[k][2] = Math.round((idx[k][2] + entrada) * 1000) / 1000; return; }
+    const linea = [codigo, item, entrada, C.ud != null && /^kg/i.test(txt_(r.v[C.ud])) ? 'Kg' : 'Pz'];
+    idx[k] = linea; o.l.push(linea);
+  });
+  return out;
+}
+// Manual runs from the editor
+function refrescarEntradas() {
+  const secret = PropertiesService.getScriptProperties().getProperty('SB_SECRET');
+  if (!secret) throw new Error('Falta SB_SECRET en Script properties');
+  entradasTodo_(secret);
+  PropertiesService.getScriptProperties().setProperty('entradas_ts', String(Date.now()));
+}
+function probarEntradas() {
+  const d = parsearEntradas_(libro_(MASTER, [TABS.resumen]));
+  Object.keys(d).forEach(slug => {
+    const ocs = d[slug].ocs, ks = Object.keys(ocs);
+    console.log(slug + ': ' + ks.length + ' OCs, ' + ks.reduce((n, k) => n + ocs[k].l.length, 0) + ' renglones, ' +
+                JSON.stringify(JSON.stringify(d[slug]).length) + ' bytes' + (ks.length ? ' · ej. ' + ks[0] + ' ' + JSON.stringify(ocs[ks[0]]).slice(0, 200) : ''));
+  });
+}
+function rpcPut_(fn, secret, filas, ms) {
+  const r = UrlFetchApp.fetch(SB_URL + '/rest/v1/rpc/' + fn, {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY },
+    payload: JSON.stringify({ p_secret: secret, p_rows: filas, p_ms: ms }),
+  });
+  if (r.getResponseCode() >= 300) throw new Error(fn + ' → ' + r.getResponseCode() + ' ' + r.getContentText());
+  return JSON.parse(r.getContentText() || '[]') || [];
 }
 
 /* ── Parsing ── */
