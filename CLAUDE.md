@@ -294,11 +294,23 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   `modo` 'admin' | 'comercial'. `VST(modo)` = state, `vRender(modo)` = re-render, `vEl(modo)` = target. Every handler they
   print passes `'${m}'` (admCalMes, admCalVer, admCodigosCsv, pvFecha, pvRango, pvVer, pvVolver, pvCsv); `pvLoad(st)`/
   `pvDefaults(st)` take the state. `PV`, `_admCal`, `_admCod` stay shared (one screen shows at a time).
-- **View only**: nothing in comercial mode writes. «Ver» opens `openRecepcion(info, 'comercial')`: `rvSoloVer()` → no
+- **View only**, except Códigos confirmations (below): nothing else in comercial mode writes. «Ver» opens `openRecepcion(info, 'comercial')`: `rvSoloVer()` → no
   «Corregir lo recibido» (`rvEditable`), no «Terminar», and the invoice box is `facBoxSoloVer` (latest non-inicio `factura`
   review rendered, no list / photos / picks / auto-save; FACV stays null). Slack copy, FDR, CSV and «Copiar lista» stay.
   CSV downloads (Proveedores, Códigos) stay: they are what comercial uses. A new write control in the closed view must
   check `rvSoloVer()`.
+
+- **Códigos (phase 2, 2026-11-25; comercial-plan §3a)** — same in Admin and Comercial (`admCodigos` → `codRender`). Each
+  row (product + scanned code) proposes the Retool fix **SKU Calii ⇥ código del producto físico**. `skuCalii`: Masterview
+  `sku` through `codigo_sistema` → `pickEntry` (hub's city; skipped on `nameClash`), else `skuPorNombre` (exact Masterview
+  name of a barcode entry). Masterview name entries are bare URLs with no SKU, so a product with no barcode in Retool is
+  «sin SKU» (most Carnes): Descartar only, never copied. Confirmar / Descartar / Deshacer one row at a time (rule 2) need «Tu
+  nombre» (`st.quien`, memory only). «Copiar para Retool» = confirmed rows, TSV without header; then «Ya lo cargué en
+  Retool» marks exactly the copied rows (`st.codCopiados`) `cargado`. Warns when one scanned code is confirmed on 2+ SKUs.
+  State: `rec_codigos_fix` (`sql/codigos-fix.sql`, Jose runs it; select+insert only, append-only, latest per
+  tipo+clave+sku wins, `estado` confirmado|cargado|descartado|pendiente = undo). A `cargado` row scanned wrong again after
+  its ts is pending again («se volvió a escanear»). Table missing → list shown, buttons hidden, err-box. CSV adds SKU Calii,
+  Estado, Quién. Modo prueba: planted once per test (`DEMO.st.codPlantado`), panel tab «Códigos» lists what to expect.
 
 ## Modo prueba (2026-11-18)
 - `?demo={semilla}` runs the whole app unchanged on fake data; Admin → **Modo prueba** opens it in a new tab (no PIN

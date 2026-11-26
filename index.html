@@ -311,6 +311,7 @@ mark{background:var(--c-teal-light);color:inherit;padding:0 4px;border-radius:6p
 .tabs{display:inline-flex;max-width:100%;gap:4px;overflow-x:auto;margin:4px 0 14px;padding:4px;border-radius:var(--r-pill);background:var(--c-surface);scrollbar-width:none}
 .tabs .choice{flex-shrink:0;min-height:36px;padding:0 14px;font-size:13px;font-weight:600;border-radius:var(--r-pill);background:transparent;color:var(--c-muted)}
 .tabs .choice.sel{background:var(--c-white);color:var(--c-ink);box-shadow:0 1px 3px rgba(14,26,25,.12)}
+.cod-mas summary{cursor:pointer}
 .adm-row{background:var(--c-surface);border-radius:var(--r-lg);padding:12px 14px;margin-bottom:8px;font-size:14px;line-height:1.45}
 .adm-row .btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .adm-row .btns .btn{min-height:36px;padding:0 14px;font-size:13px}
@@ -577,7 +578,8 @@ const DEMO=(()=>{
   const seed=m[1], key='mr_demo_'+seed;
   let ss=null; try{ ss=window.sessionStorage; }catch(_){}
   let st=null; try{ st=JSON.parse(ss&&ss.getItem(key)||'null'); }catch(_){}
-  if(!st || st.v!==1) st={ v:1, nextId:1, tables:{ rec_events:[], rec_alert_config:[], rec_alerts:[] }, files:{}, ls:{}, hechos:{} };
+  if(!st || st.v!==1) st={ v:1, nextId:1, tables:{ rec_events:[], rec_alert_config:[], rec_alerts:[], rec_codigos_fix:[] }, files:{}, ls:{}, hechos:{} };
+  if(!st.tables.rec_codigos_fix) st.tables.rec_codigos_fix=[]; // state saved before Comercial → Códigos
   // localStorage → memory. Methods live on the prototype so Object.keys(localStorage) lists only the items, as on a real Storage.
   function MemStorage(){}
   MemStorage.prototype.getItem=function(k){ return Object.prototype.hasOwnProperty.call(this,k)?this[k]:null; };
@@ -931,6 +933,7 @@ function applyMasterview(j){
   S.imgCount=j.count||0;
 }
 function imgDbCount(){ return (S.imgCount||Math.round(Object.keys(S.imgDb).length/2)).toLocaleString('es-MX'); }
+let IMGDB_READY=null; // boot's loadImageDB(); Códigos waits for it (SKU Calii)
 async function loadImageDB(){
   setDbStatus('loading','Cargando base de imágenes…');
   try{ localStorage.removeItem('mr_imgdb_cache'); }catch(_){} // old copy, replaced by MV_CACHE
@@ -5432,35 +5435,135 @@ async function admReabrir(i){
   catch(e){ toast('No se pudo reabrir: '+e.message); }
 }
 
-/* ── Códigos incorrectos: scans the receptor re-assigned by name because the barcode didn't match the product
-   ("Código incorrecto en sistema"). Weekly / monthly list, grouped per product + scanned code, for comercial. ── */
-let _admCod=[];
+/* ── Códigos incorrectos (comercial-plan §3a): scans the receptor re-assigned by name because the barcode didn't match the
+   product ("Código incorrecto en sistema"), grouped per product + scanned code. Each row proposes a Retool fix: SKU Calii
+   (Masterview `sku`, through the product's system barcode → pickEntry for the hub's city, else the exact Masterview name)
+   ⇥ the barcode scanned on the physical product. Comercial confirms or discards each row (rule 2: no confirm-all); only
+   confirmed rows go into «Copiar para Retool»; «Ya lo cargué en Retool» marks the rows that were copied. State lives in
+   rec_codigos_fix (append-only, latest per tipo+clave+sku wins; sql/codigos-fix.sql). A row loaded into Retool that is
+   scanned the wrong way again after that comes back as pending. No SKU → «sin SKU», never copied. ── */
+let _admCod=[], _codFix=new Map(), _skuNom=null;
+function skuPorNombre(producto){
+  if(!_skuNom || _skuNom.db!==S.imgDb){
+    const m=new Map(), add=e=>{ if(e && typeof e==='object' && e.sku && e.name){ const k=normName(e.name); if(!m.has(k)) m.set(k, e.sku); } };
+    for(const k in S.imgDb) add(S.imgDb[k]);
+    for(const k in S.imgAlt||{}) (S.imgAlt[k]||[]).forEach(add);
+    _skuNom={ db:S.imgDb, m };
+  }
+  return _skuNom.m.get(normName(producto||''))||'';
+}
+function skuCalii(codigoSistema, producto, hub){
+  const city=(S.hubCities||{})[SORTING_SLUG[hub]||hub], k=codeKey(codigoSistema||''), e=k?pickEntry(k, city):null;
+  if(e && typeof e==='object' && e.sku && !nameClash(producto, e.name)) return e.sku;
+  return skuPorNombre(producto);
+}
+const codKey=(clave, sku)=>'barcode|'+clave+'|'+(sku||'');
+// pendiente | confirmado | cargado | descartado; a cargado row scanned wrong again afterwards is pending again (volvio)
+function codEstado(r){
+  const f=_codFix.get(codKey(r.escaneado, r.sku));
+  if(!f) return { estado:'pendiente' };
+  if(f.estado==='cargado' && r.ultimaTs>f.ts) return { estado:'pendiente', volvio:true, f };
+  return { estado:f.estado, f };
+}
 async function admCodigos(el, m='admin'){
   const st=VST(m);
+  if(IMGDB_READY) await IMGDB_READY; // SKU Calii comes from Masterview
+  st.codSinTabla=false;
   const dias=st.codDias||7, desde=localDateStr(new Date(serverNow().getTime()-dias*86400000));
-  const evs=await pgSelectAll('rec_events', `tipo=in.(scan,confirmacion)&fecha=gte.${desde}&detalle->codigo_incorrecto=not.is.null&select=hub,area,fecha,producto,receptor,ts,detalle&order=id.desc`);
+  const [evs, fix]=await Promise.all([
+    pgSelectAll('rec_events', `tipo=in.(scan,confirmacion)&fecha=gte.${desde}&detalle->codigo_incorrecto=not.is.null&select=hub,area,fecha,producto,receptor,ts,detalle&order=id.desc`),
+    pgSelectAll('rec_codigos_fix', 'tipo=eq.barcode&select=*&order=id.asc').catch(e=>{ if(isNetErr(e)) throw e; st.codSinTabla=true; return []; })]);
+  _codFix=new Map(); for(const f of fix) _codFix.set(codKey(f.clave, f.sku), f); // id order: latest wins
   const by=new Map();
   for(const e of evs){
     if(e.hub==='test-hub' && !IS_LOCAL) continue;
     const d=e.detalle.codigo_incorrecto, k=e.producto+'|'+d.escaneado;
     let r=by.get(k);
-    if(!r){ r={ producto:e.producto, escaneado:d.escaneado, sistema:d.codigo_sistema||'', dice:d.sistema_dice||'', hubs:new Set(), veces:0, ultima:e.fecha }; by.set(k, r); }
-    r.hubs.add(hubName(e.hub)); r.veces++; if(e.fecha>r.ultima) r.ultima=e.fecha;
+    if(!r){ r={ producto:e.producto, escaneado:String(d.escaneado||'').trim(), sistema:d.codigo_sistema||'', dice:d.sistema_dice||'', hubs:new Set(), hub:e.hub, veces:0, ultima:e.fecha, ultimaTs:e.ts }; by.set(k, r); }
+    r.hubs.add(hubName(e.hub)); r.veces++; if(e.fecha>r.ultima) r.ultima=e.fecha; if(e.ts>r.ultimaTs) r.ultimaTs=e.ts;
   }
   _admCod=[...by.values()].sort((a,b)=>b.veces-a.veces || a.producto.localeCompare(b.producto));
-  const sel=`<div class="filters" style="margin-bottom:10px"><select onchange="VST('${m}').codDias=Number(this.value);vRender('${m}')">
+  _admCod.forEach(r=>{ r.sku=skuCalii(r.sistema, r.producto, r.hub); });
+  codRender(el, m);
+}
+function codRender(el, m){
+  const st=VST(m), dias=st.codDias||7, M=`'${m}'`;
+  const sel=`<div class="filters" style="margin-bottom:10px"><select onchange="VST(${M}).codDias=Number(this.value);vRender(${M})">
     <option value="7" ${dias===7?'selected':''}>Últimos 7 días</option><option value="30" ${dias===30?'selected':''}>Últimos 30 días</option></select></div>`;
-  el.innerHTML=`<div class="muted" style="margin-bottom:8px">Productos cuyo código escaneado no coincidió con el sistema; el receptor lo buscó por nombre. Para corregir en Retool con comercial.</div>${sel}`
-    +(_admCod.length ? `<button class="btn btn-secondary btn-block" style="margin-bottom:10px" onclick="admCodigosCsv('${m}')">Descargar CSV para comercial</button>`
-      +_admCod.map(r=>`<div class="adm-row"><div style="display:flex;gap:10px;align-items:center">${imgTag(r.sistema, r.producto, 'thumb')}<b style="flex:1;min-width:0">${nameHtml(r.producto)}</b></div>
-        <div class="muted" style="font-size:13px;margin-top:4px">Escaneado: <b>${escapeHtml(r.escaneado)}</b> · En sistema: <b>${escapeHtml(r.sistema||'sin código')}</b>${r.dice?` · el código escaneado aparece como «${escapeHtml(r.dice)}»`:''}</div>
-        <div class="muted" style="font-size:12px">${r.veces} vez${r.veces===1?'':'es'} · ${escapeHtml([...r.hubs].join(', '))} · última ${fechaLarga(r.ultima)}</div></div>`).join('')
-      : '<div class="empty-hint">Sin códigos incorrectos en este periodo.</div>');
+  let h=`<div class="muted" style="margin-bottom:8px">Productos cuyo código escaneado no coincidió con el sistema; el receptor lo buscó por nombre. Confirma cada uno y cópialo para la carga masiva de Retool: <b>SKU Calii</b> y el <b>código del producto físico</b>.</div>${sel}`;
+  if(st.codSinTabla) h+=`<div class="err-box">Falta la tabla de confirmaciones: corre <b>sql/codigos-fix.sql</b> en Supabase. Mientras, la lista se ve pero no se puede confirmar.</div>`;
+  if(!_admCod.length){ el.innerHTML=h+'<div class="empty-hint">Sin códigos incorrectos en este periodo.</div>'; return; }
+  const rows=_admCod.map((r,i)=>Object.assign({ r, i }, codEstado(r)));
+  const G=e=>rows.filter(x=>x.estado===e), conf=G('confirmado');
+  h+=`<div class="adm-field" style="margin:0 0 10px"><span>Tu nombre</span><input id="cod-quien" class="text-input" autocomplete="off" placeholder="Para registrar quién confirma" value="${escapeHtml(st.quien||'')}" oninput="VST(${M}).quien=this.value.trim()"></div>`;
+  // Copy: SKU Calii ⇥ scanned barcode, confirmed rows only. The same scanned code on two SKUs would overwrite in Retool.
+  const dup=new Map(); conf.forEach(x=>{ const a=dup.get(x.r.escaneado)||[]; a.push(x.r.sku); dup.set(x.r.escaneado, a); });
+  const dups=[...dup.entries()].filter(([,a])=>new Set(a).size>1);
+  h+=`<button class="btn btn-primary btn-block" ${conf.length?'':'disabled'} onclick="codCopiar(${M})">Copiar para Retool${conf.length?' · '+conf.length:''}</button>`
+    +(dups.length?`<div class="warn-box">${dups.map(([c,a])=>`El código <b>${escapeHtml(c)}</b> va en ${a.length} SKUs (${a.map(escapeHtml).join(', ')}). Retool guarda un código por artículo: deja confirmado solo el correcto.`).join('<br>')}</div>`:'')
+    +(st.codCopiados&&st.codCopiados.length?`<div class="warn-box">Copiaste ${pvPl(st.codCopiados.length,'código')}. Pégalos en la carga masiva de Retool y después:
+      <button class="btn btn-warn btn-block" onclick="codCargado(${M})">Ya lo cargué en Retool</button><button class="link-btn" onclick="VST(${M}).codCopiados=null;codRender(vEl(${M}),${M})">Todavía no</button></div>`
+      :conf.length?'':`<div class="muted" style="font-size:13px;margin:6px 0 0">Confirma los productos para poder copiarlos.</div>`);
+  const fila=x=>{ const r=x.r, f=x.f, sinSku=!r.sku, quien=f&&f.quien?' · '+escapeHtml(f.quien):'';
+    let est='', btns='';
+    if(x.estado==='pendiente'){
+      est=x.volvio?`<div class="note" style="margin:6px 0 0">Se cargó en Retool${quien} y se volvió a escanear con otro código después. Revísalo otra vez.</div>`:'';
+      btns=sinSku?`<button class="btn btn-secondary" onclick="codMarcar(${x.i},'descartado',${M})">Descartar</button>`
+        :`<button class="btn btn-warn" onclick="codMarcar(${x.i},'confirmado',${M})">Confirmar</button><button class="btn btn-secondary" onclick="codMarcar(${x.i},'descartado',${M})">Descartar</button>`;
+    } else {
+      est=`<div style="margin-top:6px">${x.estado==='confirmado'?`<span class="tag green">Confirmado${quien}</span>`:x.estado==='cargado'?`<span class="tag">Cargado en Retool${quien}</span>`:`<span class="tag">Descartado${quien}</span>`}${f&&f.ts?` <span class="muted" style="font-size:12px">${fechaLarga(localDateStr(new Date(f.ts)))}</span>`:''}</div>`;
+      btns=`<button class="btn btn-secondary" onclick="codMarcar(${x.i},'pendiente',${M})">Deshacer</button>`;
+    }
+    return `<div class="adm-row"><div style="display:flex;gap:10px;align-items:center">${imgTag(r.sistema, r.producto, 'thumb')}<b style="flex:1;min-width:0">${nameHtml(r.producto)}</b></div>
+      <div style="font-size:14px;margin-top:6px">SKU Calii: ${sinSku?'<span class="tag orange">sin SKU</span>':`<b>${escapeHtml(r.sku)}</b>`} · Código del producto: <b>${escapeHtml(r.escaneado)}</b></div>
+      <div class="muted" style="font-size:13px">En sistema: ${escapeHtml(r.sistema||'sin código')}${r.dice?` · el código escaneado aparece como «${escapeHtml(r.dice)}»`:''}</div>
+      ${sinSku?'<div class="muted" style="font-size:12px">No está en Masterview: búscalo en Retool a mano. No entra en la copia.</div>':''}
+      <div class="muted" style="font-size:12px">${r.veces} vez${r.veces===1?'':'es'} · ${escapeHtml([...r.hubs].join(', '))} · última ${fechaLarga(r.ultima)}</div>
+      ${est}${st.codSinTabla?'':`<div class="btns">${btns}</div>`}</div>`; };
+  const pend=G('pendiente');
+  h+=`<div class="section-title">Por confirmar · ${pend.length}</div>`+(pend.map(fila).join('')||'<div class="muted" style="font-size:13px">Nada por confirmar.</div>');
+  if(conf.length) h+=`<div class="section-title">Confirmados · ${conf.length}</div>`+conf.map(fila).join('');
+  for(const [e,t] of [['cargado','Ya cargados en Retool'],['descartado','Descartados']]){ const a=G(e);
+    if(a.length) h+=`<details class="cod-mas"><summary class="section-title">${t} · ${a.length}</summary>${a.map(fila).join('')}</details>`; }
+  h+=`<button class="btn btn-secondary btn-block" style="margin-top:12px" onclick="admCodigosCsv(${M})">Descargar CSV</button>`;
+  el.innerHTML=h;
+}
+async function codGuardar(rows, m){
+  const st=VST(m);
+  if(!st.quien){ const i=document.getElementById('cod-quien'); toast('Escribe tu nombre primero'); if(i) i.focus(); return false; }
+  const ts=serverNow().toISOString();
+  const out=rows.map(({ r, estado })=>({ tipo:'barcode', clave:r.escaneado, sku:r.sku||'', estado, quien:st.quien, ts,
+    detalle:{ producto:r.producto, codigo_sistema:r.sistema||null, modo:m } }));
+  try{ await pgInsert('rec_codigos_fix', out); }
+  catch(e){ toast(isNetErr(e)?'Sin conexión: no se guardó':'No se guardó: '+e.message, 4000); return false; }
+  for(const o of out) _codFix.set(codKey(o.clave, o.sku), o);
+  return true;
+}
+async function codMarcar(i, estado, m){
+  const r=_admCod[i]; if(!r) return;
+  if(await codGuardar([{ r, estado }], m)){ const st=VST(m); if(st.codCopiados) st.codCopiados=st.codCopiados.filter(k=>k!==codKey(r.escaneado, r.sku)); codRender(vEl(m), m); }
+}
+async function codCopiar(m){
+  const st=VST(m), conf=_admCod.filter(r=>codEstado(r).estado==='confirmado' && r.sku);
+  if(!conf.length) return;
+  const txt=conf.map(r=>`${r.sku}\t${r.escaneado}`).join('\n');
+  try{ await navigator.clipboard.writeText(txt); }
+  catch(_){ const t=document.createElement('textarea'); t.value=txt; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  st.codCopiados=conf.map(r=>codKey(r.escaneado, r.sku));
+  toast(`✓ ${pvPl(conf.length,'código')} copiado${conf.length===1?'':'s'}: SKU Calii y código`);
+  codRender(vEl(m), m);
+}
+// Marks exactly the rows that were copied (and are still confirmed), not every confirmed row
+async function codCargado(m){
+  const st=VST(m), ks=new Set(st.codCopiados||[]);
+  const rows=_admCod.filter(r=>ks.has(codKey(r.escaneado, r.sku)) && codEstado(r).estado==='confirmado').map(r=>({ r, estado:'cargado' }));
+  if(!rows.length){ st.codCopiados=null; codRender(vEl(m), m); return; }
+  if(await codGuardar(rows, m)){ st.codCopiados=null; toast(`✓ ${pvPl(rows.length,'código')} marcado${rows.length===1?'':'s'} como cargado${rows.length===1?'':'s'}`); codRender(vEl(m), m); }
 }
 function admCodigosCsv(m='admin'){
-  const st=VST(m);
-  const cols=['Producto','Código escaneado','Código en sistema (Retool)','El código escaneado aparece como','Veces','Hubs','Última fecha'];
-  const body=_admCod.map(r=>[r.producto, r.escaneado, r.sistema, r.dice, r.veces, [...r.hubs].join(', '), r.ultima].map(csvCell).join(','));
+  const st=VST(m), EST={ pendiente:'Por confirmar', confirmado:'Confirmado', cargado:'Cargado en Retool', descartado:'Descartado' };
+  const cols=['SKU Calii','Código del producto (escaneado)','Producto','Código en sistema (Retool)','El código escaneado aparece como','Estado','Quién','Veces','Hubs','Última fecha'];
+  const body=_admCod.map(r=>{ const x=codEstado(r); return [r.sku||'sin SKU', r.escaneado, r.producto, r.sistema, r.dice, EST[x.estado], x.f&&x.f.quien||'', r.veces, [...r.hubs].join(', '), r.ultima].map(csvCell).join(','); });
   downloadText(`codigos-incorrectos_${todayStr()}_${st.codDias||7}d.csv`, [cols.map(csvCell).join(',')].concat(body).join('\r\n')+'\r\n');
 }
 
@@ -6096,7 +6199,37 @@ function demoGenerar(){
     }
   }
   const contactos={ 'Bimbo':{ comercial:'Ana Prueba', comprador:'Luis Prueba' }, 'Lácteos Prueba':{ comercial:'Ana Prueba', comprador:'Luis Prueba' }, 'Abarrotes Prueba':{ comercial:'Ana Prueba', comprador:'Marta Prueba' }, 'Refrescos Prueba':{ comercial:'Ana Prueba', comprador:'Luis Prueba' } };
-  DEMO.data={ ent, picks:ent.ab.picks, invoices, bridge:{ ordenes, catalogo, contactos, proveedores:['Abarrotes Prueba','Bimbo','Lácteos Prueba','Refrescos Prueba','Proveedor Sin Orden'], avisos:[] } };
+  /* ── Comercial → Códigos (comercial-plan §3a): «Código incorrecto en sistema» scans already in the table, planted once per
+     test (DEMO.st.codPlantado). SKU by barcode, SKU by exact name, no SKU, one scanned code on two products, and one row
+     loaded into Retool that was scanned wrong again afterwards. ── */
+  const codigosEspera=[];
+  {
+    const T=DEMO.st.tables, nuevo=()=>{ let c; do{ c='750'+String(int(1000000000,9999999999)); }while(S.imgDb[bcKey(c)]); return c; };
+    const sku=p=>{ const e=S.imgDb[bcKey(p.code)]; return e&&e.sku||''; };
+    const [a,b,c,d,e]=take(5), dup=nuevo(), casos=[
+      { p:a, esc:nuevo(), sis:a.code, hubs:['mh-contry','mh-cumbres','mh-contry'], dias:[1,2,4] },
+      { p:b, esc:nuevo(), sis:'', hubs:['mh-san-nicolas'], dias:[3] },
+      { p:{ producto:'Galletas de prueba sin SKU 200g' }, esc:nuevo(), sis:'', hubs:['mh-guadalupe'], dias:[2] },
+      { p:c, esc:dup, sis:c.code, hubs:['mh-contry'], dias:[1] },
+      { p:d, esc:dup, sis:d.code, hubs:['mh-cumbres'], dias:[2] },
+      { p:e, esc:nuevo(), sis:e.code, hubs:['mh-contry'], dias:[1], cargado:4 }];
+    if(!DEMO.st.codPlantado){
+      for(const k of casos) k.hubs.forEach((hub,j)=>{ const f=addDaysStr(hoy,-k.dias[j]);
+        T.rec_events.push({ id:DEMO.st.nextId++, session_id:'demo-codigos-'+hub, hub, area:'abarrotes', fecha:f, tipo:'scan', sku_key:k.p.code?bcKey(k.p.code):'name:'+normName(k.p.producto),
+          producto:k.p.producto, cantidad:1, metodo:'codigo_incorrecto', receptor:'Prueba', device_id:'demo', ts:f+'T15:00:00.000Z',
+          detalle:{ uid:'demo-cod-'+DEMO.st.nextId, codigo:k.esc, codigo_incorrecto:{ escaneado:k.esc, codigo_sistema:k.sis, sistema_dice:'', sistema_dice_codigo:null } } }); });
+      const k=casos[5], f=addDaysStr(hoy,-k.cargado);
+      T.rec_codigos_fix.push({ id:DEMO.st.nextId++, tipo:'barcode', clave:k.esc, sku:sku(k.p), estado:'cargado', quien:'Ana Prueba', ts:f+'T18:00:00.000Z', detalle:{ producto:k.p.producto, modo:'comercial' } });
+      DEMO.st.codPlantado=true; DEMO_SAVE();
+    }
+    codigosEspera.push(`${a.producto}: SKU ${sku(a)||'¿?'} por su código del sistema · escaneado 3 veces en Contry y Cumbres`,
+      `${b.producto}: sin código en el sistema → SKU ${sku(b)||'¿?'} por su nombre exacto`,
+      'Galletas de prueba sin SKU 200g: «sin SKU», solo se puede descartar y no entra en la copia',
+      `${c.producto} y ${d.producto}: el mismo código escaneado ${dup}; si confirmas los dos, avisa que Retool guarda un código por artículo`,
+      `${e.producto}: se cargó en Retool hace 4 días (Ana Prueba) y se volvió a escanear mal ayer → vuelve a «Por confirmar» con aviso`,
+      'Sin tu nombre no deja confirmar · Copiar para Retool copia solo los confirmados (SKU ⇥ código) · «Ya lo cargué en Retool» los pasa a «Ya cargados»');
+  }
+  DEMO.data={ ent, picks:ent.ab.picks, invoices, codigosEspera, bridge:{ ordenes, catalogo, contactos, proveedores:['Abarrotes Prueba','Bimbo','Lácteos Prueba','Refrescos Prueba','Proveedor Sin Orden'], avisos:[] } };
   DEMO._ready();
 }
 // The order bridge (proveedor/apps-script.gs) answers {leido, ordenes, contactos, proveedores, catalogo, avisos}
@@ -6188,7 +6321,7 @@ function demoCerrar(){ DUI.open=false; document.getElementById('demo-panel').cla
 function demoRender(){
   const el=document.getElementById('demo-body'); if(!el) return;
   if(!DEMO.data){ el.innerHTML='<div class="muted">Preparando los datos de prueba…</div>'; DEMO.ready.then(()=>{ if(DUI.open) demoRender(); }); return; }
-  const tabs=[['llego','Qué llegó'],['archivos','Archivos y factura'],['ajustes','Ajustes']];
+  const tabs=[['llego','Qué llegó'],['archivos','Archivos y factura'],['codigos','Códigos'],['ajustes','Ajustes']];
   let h=`<div class="tabs">${tabs.map(([k,n])=>`<button class="choice ${DUI.tab===k?'sel':''}" onclick="DUI.tab='${k}';demoRender()">${n}</button>`).join('')}</div>`;
   const E=DEMO.data.ent;
   if(DUI.tab==='llego'){
@@ -6204,6 +6337,9 @@ function demoRender(){
     h+=`<div class="demo-sec">Llegó (${llego.length})</div>`+llego.map(row).join('');
     if(no.length) h+=`<div class="demo-sec">No llegó · no lo busques</div>`+no.map(row).join('');
     h+=`<div class="demo-sec">Lo que la app debería marcar</div><ul class="demo-espera">${e.espera.map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ul>`;
+  } else if(DUI.tab==='codigos'){
+    h+=`<div class="info-card" style="font-size:14px">Inicio → <b>Comercial</b> → <b>Códigos</b> (o Admin → Códigos). Ya hay escaneos con «Código incorrecto en sistema» en los últimos días.</div>
+      <div class="demo-sec">Lo que la app debería marcar</div><ul class="demo-espera">${(DEMO.data.codigosEspera||[]).map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ul>`;
   } else if(DUI.tab==='archivos'){
     for(const k of ['ab','ca']){ const e=E[k];
       h+=`<div class="demo-sec">${escapeHtml(e.titulo)} · archivo de envío</div><div class="muted" style="font-size:13px">${escapeHtml(e.archivo)} · ${e.items.filter(x=>x.tipo!=='no_envio'&&x.tipo!=='desconocido').length} productos</div>
@@ -6291,7 +6427,8 @@ async function boot(){
   if(DEMO) demoUi();
   renderInicio(); // always Inicio, nothing pre-selected (rule 7)
   loadReceptores();
-  await Promise.all([syncClock(), loadImageDB()]);
+  IMGDB_READY=loadImageDB();
+  await Promise.all([syncClock(), IMGDB_READY]);
   _imgMemo.clear();
   if(DEMO){ try{ demoGenerar(); }catch(e){ console.error(e); toast('No se pudieron preparar los datos de prueba: '+e.message, 6000); } }
   flushOutbox(); // events left over from an earlier visit
