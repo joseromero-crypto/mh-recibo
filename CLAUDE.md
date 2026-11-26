@@ -24,7 +24,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
 - Product photos (Masterview): read-only from the public bucket `masterview` (`latest.json`, `version.txt`), uploaded only
   in Invoice Reader. `loadImageDB`: `masterview/`, then the last cached copy whatever its version, then the bundled
   `imagedb.json` (a full copy of `latest.json`). Cached in Cache Storage `calii-masterview`, not localStorage; `sw.js`
-  keeps that cache on activate. Read entries through `imgUrl`/`imgName`/`pickEntry(key, hubCity())`: `map` first, then `alt`. `getImgUrl`: barcode → exact name →
+  keeps that cache on activate. The stored version is version.txt + `MV_SHAPE`: bump it when the app reads a new field
+  (Invoice Reader added `skuByName` on 2026-11-25 without moving version.txt, so phones kept a copy without it). Read entries through `imgUrl`/`imgName`/`pickEntry(key, hubCity())`: `map` first, then `alt`. `getImgUrl`: barcode → exact name →
   none, never a guess; a barcode whose Masterview name shares no word with the product's is skipped (`nameClash`).
 - New tables need explicit `grant`s in the same SQL that creates them (Supabase change, 2026-10-30).
 - **Local runs write to prod.** Use `hub='test-hub'` or stub write helpers before testing write flows.
@@ -306,7 +307,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   top-level `skuByName` (normName → SKU; asked of Invoice Reader 2026-11-25 for products with no barcode, read as
   `S.skuByName`, empty until it ships), then the exact name of a barcode entry. No SKU → «sin SKU» (most Carnes today):
   never exported. **No confirm / discard (Jose, 2026-11-26):** «Descargar CSV para Retool» = every row with a SKU, header
-  «SKU Calii», «Código de barras», no BOM (`downloadText(…, true)`), under a warning (`codAvisoHtml`: unconfirmed, review the
+  «SKU Calii», «Código de barras», no BOM (`downloadText(…, true)`); a scanned «code» that isn't ≥6 digits was typed text («smoo»,
+  «costilla») → «No es un código de barras», never exported (`codValido`, `codEnCsv`). Under a warning (`codAvisoHtml`: unconfirmed, review the
   file, n sin SKU left out, one scanned code on 2+ SKUs). «CSV completo (para revisar)» keeps every row. The table
   `rec_codigos_fix` (`sql/codigos-fix.sql`) still exists but nothing reads or writes it now. Modo prueba: planted once per test (`DEMO.st.codPlantado`), panel tab «Códigos» lists what to expect.
 

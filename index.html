@@ -931,6 +931,9 @@ function normalizeImgDbKeys(db){
 // Masterview lives in Cache Storage, not localStorage: 2 MB would crowd the outbox and the session mirror
 // near iPhone Safari's limit. sw.js keeps this cache across deploys.
 const MV_CACHE='calii-masterview';
+// Added to the stored version: bump it when the app starts reading a new Masterview field. Invoice Reader added
+// `skuByName` on 2026-11-25 without changing version.txt, so phones kept a copy without it (Códigos showed «sin SKU»).
+const MV_SHAPE='|sbn';
 async function mvCacheRead(){
   try{
     const res=await (await caches.open(MV_CACHE)).match(MV_BASE+'latest.json');
@@ -960,12 +963,12 @@ async function loadImageDB(){
   try{
     const ver=(await fetch(MV_BASE+'version.txt',{cache:'no-store'}).then(r=>{ if(!r.ok) throw 0; return r.text(); })).trim();
     let j;
-    if(cached && cached.v===ver){ j=await cached.res.clone().json(); }
+    if(cached && cached.v===ver+MV_SHAPE){ j=await cached.res.clone().json(); }
     else{
       const text=await fetch(MV_BASE+'latest.json',{cache:'no-store'}).then(r=>{ if(!r.ok) throw 0; return r.text(); });
       j=JSON.parse(text);
       if(!j.map) throw 0;
-      await mvCacheWrite(ver, text);
+      await mvCacheWrite(ver+MV_SHAPE, text);
     }
     applyMasterview(j);
     setDbStatus('ok',`Base de imágenes (${imgDbCount()} productos)`);
@@ -5646,6 +5649,10 @@ async function admCodigos(el, m='admin'){
 function codTabsHtml(m){ const t=VST(m).codTipo||'barcode';
   return `<div class="tabs" style="margin-top:0">${[['barcode','Códigos de barras'],['spv','SKU proveedor']].map(([k,n])=>`<button class="choice ${t===k?'sel':''}" onclick="VST('${m}').codTipo='${k}';vRender('${m}')">${n}</button>`).join('')}</div>`; }
 // The warning above every Retool download: nothing was confirmed row by row
+// A scanned «code» with letters or under 6 characters was typed text (the receptor searched by name in the scan field):
+// it would land in Retool's barcode field, so it stays out of the CSV.
+const codValido=c=>/^\d{6,}$/.test(String(c||''));
+const codEnCsv=r=>r.sku && codValido(r.escaneado);
 function codAvisoHtml(n, sinSku, dups){
   return `<div class="warn-box">El CSV trae <b>todo lo que se generó</b> (${n}), sin confirmar uno por uno. Revísalo antes de subirlo a Retool: si un renglón está mal, bórralo del archivo.${sinSku?` ${sinSku} sin SKU no ${sinSku===1?'va':'van'} en el archivo.`:''}${dups.length?'<br>'+dups.join('<br>'):''}</div>`;
 }
@@ -5655,27 +5662,28 @@ function codRender(el, m){
     <option value="7" ${dias===7?'selected':''}>Últimos 7 días</option><option value="30" ${dias===30?'selected':''}>Últimos 30 días</option></select></div>`;
   let h=codTabsHtml(m)+`<div class="muted" style="margin-bottom:8px">Productos cuyo código escaneado no coincidió con el sistema; el receptor lo buscó por nombre. El CSV es para la carga masiva de Retool: <b>SKU Calii</b> y el <b>código del producto físico</b>.</div>${sel}`;
   if(!_admCod.length){ el.innerHTML=h+'<div class="empty-hint">Sin códigos incorrectos en este periodo.</div>'; return; }
-  const con=_admCod.filter(r=>r.sku);
+  const con=_admCod.filter(codEnCsv);
   // The same scanned code on two SKUs would overwrite in Retool
   const dup=new Map(); con.forEach(r=>{ const a=dup.get(r.escaneado)||[]; a.push(r.sku); dup.set(r.escaneado, a); });
   const dups=[...dup.entries()].filter(([,a])=>new Set(a).size>1).map(([c,a])=>`El código <b>${escapeHtml(c)}</b> sale en ${a.length} SKUs (${a.map(escapeHtml).join(', ')}). Retool guarda un código por artículo: deja solo el correcto.`);
   h+=`<button class="btn btn-primary btn-block" ${con.length?'':'disabled'} onclick="codRetoolCsv(${M})">Descargar CSV para Retool${con.length?' · '+con.length:''}</button>`
-    +codAvisoHtml(con.length, _admCod.length-con.length, dups);
+    +codAvisoHtml(con.length, _admCod.filter(r=>!r.sku).length, dups);
   const fila=r=>{ const sinSku=!r.sku;
     return `<div class="adm-row"><div style="display:flex;gap:10px;align-items:center">${imgTag(r.sistema, r.producto, 'thumb')}<b style="flex:1;min-width:0">${nameHtml(r.producto)}</b></div>
       <div style="font-size:14px;margin-top:6px">SKU Calii: ${sinSku?'<span class="tag orange">sin SKU</span>':`<b>${escapeHtml(r.sku)}</b>`} · Código del producto: <b>${escapeHtml(r.escaneado)}</b></div>
       <div class="muted" style="font-size:13px">En sistema: ${escapeHtml(r.sistema||'sin código')}${r.dice?` · el código escaneado aparece como «${escapeHtml(r.dice)}»`:''}</div>
       ${sinSku?'<div class="muted" style="font-size:12px">No está en Masterview: búscalo en Retool a mano. No va en el CSV.</div>':''}
       <div class="muted" style="font-size:12px">${r.veces} vez${r.veces===1?'':'es'} · ${escapeHtml([...r.hubs].join(', '))} · última ${fechaLarga(r.ultima)}</div></div>`; };
-  const sin=_admCod.filter(r=>!r.sku);
+  const sin=_admCod.filter(r=>!r.sku), malos=_admCod.filter(r=>r.sku && !codValido(r.escaneado));
   h+=`<div class="section-title">En el CSV · ${con.length}</div>`+(con.map(fila).join('')||'<div class="muted" style="font-size:13px">Ninguno tiene SKU.</div>');
   if(sin.length) h+=`<div class="section-title">Sin SKU · ${sin.length}</div>`+sin.map(fila).join('');
+  if(malos.length) h+=`<div class="section-title">No es un código de barras · ${malos.length}</div><div class="muted" style="font-size:13px;margin-bottom:6px">El receptor escribió texto en vez de escanear: no va en el CSV.</div>`+malos.map(fila).join('');
   h+=`<button class="btn btn-secondary btn-block" style="margin-top:12px" onclick="admCodigosCsv(${M})">CSV completo (para revisar)</button>`;
   el.innerHTML=h;
 }
 // Column A = SKU Calii, column B = the new value. No BOM: the header has to reach Retool's bulk upload as plain «SKU Calii».
 function codRetoolCsv(m){
-  const con=_admCod.filter(r=>r.sku); if(!con.length) return;
+  const con=_admCod.filter(codEnCsv); if(!con.length) return;
   const body=[['SKU Calii','Código de barras']].concat(con.map(r=>[r.sku, r.escaneado])).map(x=>x.map(csvCell).join(',')).join('\r\n')+'\r\n';
   downloadText(`retool_codigo-de-barras_${todayStr()}.csv`, body, true);
 }

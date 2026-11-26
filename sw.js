@@ -1,7 +1,7 @@
 /* Calii MH Recibo — service worker (plan §8)
    Network-first for the app shell: online always gets the freshest deploy, offline falls back to cache.
    BUMP CACHE_NAME on every deploy that changes index.html. */
-const CACHE_NAME = 'calii-mhrecibo-v1-cod-sin-confirmar';
+const CACHE_NAME = 'calii-mhrecibo-v1-mv-skubyname';
 const MV_CACHE = 'calii-masterview'; // written by index.html, must survive deploys
 const SHELL = [
   './',
