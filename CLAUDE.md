@@ -343,8 +343,8 @@ Reception app for Calii micro hubs: receive the inter-hub shipments assembled at
   but never before ENT_DESDE, `entRango`; repainted alone by `entMananaPintar`), «Por dar entrada» (today included, Jose
   2026-11-25; oldest first) and «Entrada con diferencias», per hub with
   «Copiar mensaje para el hub» (`entCopiar`, header carries the date range, tag from `config/slack.json` `hubs` {slug: '@x'}, edited in Admin → Slack as
-  «Hub = @usuario»). Message (2026-11-26): differences read «Favor de confirmar los inventarios de:» + only one line per product: name ·
-  barcode (`difs[].bc`, raw) · Sorting Hub position (`fetchSorting(hub, false)` → `positionOf(bc, name, so)`; loadSorting
+  «Hub = @usuario»). Message (2026-11-26): differences read «Favor de confirmar los inventarios de:» + only one line per product: «name
+  (barcode) (pasillo-estante-nivel)» (`difs[].bc`, raw; no Canasta word, no posición dentro) from the Sorting Hub file (`fetchSorting(hub, false)` → `positionOf(bc, name, so)`; loadSorting
   wraps it). «Por dar entrada» unchanged. **Marcar en verde a mano** (2026-11-26, Jose): the hub fixes a red reception in Retool, which
   «Resumen» never shows, so a red reception (bar detail and morning list, Admin and Comercial — Comercial's second write)
   gets «El hub ya lo corrigió · marcar en verde» → event tipo `entrada` {ok, quien, difs} on its session, latest wins,

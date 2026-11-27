@@ -5543,7 +5543,7 @@ async function entCopiar(i){
     g.mal.forEach(({e})=>e.difs.forEach(d=>{
       const k=(d.codigo||'')+'|'+entNombre(d.producto); if(vistos.has(k)) return; vistos.add(k);
       const pos=so && so.bc.size ? positionOf(d.bc||d.codigo, d.producto, so) : null;
-      out.push(`• ${d.producto}${d.bc||d.codigo?' · '+(d.bc||d.codigo):''} · ${pos?pos.palabra+' '+pos.full:'sin posición'}`);
+      out.push(`• ${d.producto}${d.bc||d.codigo?` (${d.bc||d.codigo})`:''} (${pos?pos.full.split(' · ')[0]:'sin posición'})`); // pasillo-estante-nivel only
     })); }
   const txt=out.join('\n');
   try{ await navigator.clipboard.writeText(txt); }
