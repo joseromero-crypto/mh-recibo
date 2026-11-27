@@ -1100,6 +1100,11 @@ function imgTag(barcode, producto, cls){
    ════════════════════════════════════════════════════════════════════════════════════ */
 S.sortBC=new Map(); S.sortName=new Map(); S.sortStatus='loading'; S.sortUpdatedAt=null;
 async function loadSorting(slug){
+  const x=await fetchSorting(slug);
+  S.sortBC=x.bc; S.sortName=x.nm; S.sortStatus=x.status; S.sortUpdatedAt=x.updatedAt;
+}
+// Same read, returned instead of stored (entCopiar reads any hub's file; keeps only this hub's cache in localStorage)
+async function fetchSorting(slug, keepCache=true){
   const src=SORTING_SLUG[slug]||slug, CK='mr_sorting_'+src;
   let cached=null; try{ cached=JSON.parse(localStorage.getItem(CK)||'null'); }catch(_){}
   let data=null, status='ok';
@@ -1110,7 +1115,7 @@ async function loadSorting(slug){
       if(cached && cached.v===v) data=cached.data;
       else{
         data=await (await sbPublic(`sorting/${src}/latest.json`, SORTING_BUCKET)).json();
-        try{
+        if(keepCache) try{
           for(const k of Object.keys(localStorage)) if(k.startsWith('mr_sorting_') && k!==CK) localStorage.removeItem(k);
           localStorage.setItem(CK, JSON.stringify({v, data}));
         }catch(_){}
@@ -1123,12 +1128,12 @@ async function loadSorting(slug){
     const k=codeKey(it[1]); if(k && !bc.has(k)) bc.set(k,it);
     const n=normName(it[0]); if(n && !nm.has(n)) nm.set(n,it);
   }
-  S.sortBC=bc; S.sortName=nm; S.sortStatus=status; S.sortUpdatedAt=data&&data.updatedAt;
+  return { bc, nm, status, updatedAt:data&&data.updatedAt };
 }
 // B01–B16 are freezer aisles (Sorting Hub §12.1)
 const FREEZER_AISLE_RE=/^B\d{2}$/;
-function positionOf(barcode, producto){
-  const it=S.sortBC.get(codeKey(barcode)) || S.sortName.get(normName(producto));
+function positionOf(barcode, producto, so){
+  const it=(so||{bc:S.sortBC}).bc.get(codeKey(barcode)) || (so||{nm:S.sortName}).nm.get(normName(producto));
   if(!it) return null;
   const pasillo=String(it[2]||'').trim().toUpperCase(), estante=String(it[3]||'').trim(), nivel=String(it[4]||'').trim(), dentro=String(it[5]||'').trim();
   if(!pasillo) return null;
@@ -5393,7 +5398,7 @@ function entComparar(rec, data){
   for(const o of hay) for(const [codigo, item, entrada, ud] of D[o].l||[]){
     const k=entCodigo(codigo), n=entNombre(item);
     let x=(k && byCode.get(k)) || (!k && byName.get(n));
-    if(!x){ x={ codigo:k, item, kgpz:ud==='Kg'?'Kg':'Pz', entrada:0, usado:false }; rt.push(x); if(k) byCode.set(k, x); if(n && !byName.has(n)) byName.set(n, x); }
+    if(!x){ x={ codigo:k, bc:String(codigo==null?'':codigo).trim(), item, kgpz:ud==='Kg'?'Kg':'Pz', entrada:0, usado:false }; rt.push(x); if(k) byCode.set(k, x); if(n && !byName.has(n)) byName.set(n, x); }
     x.entrada=entR2(x.entrada+(Number(entrada)||0));
   }
   const difs=[], tol=(kgpz, q)=>kgpz==='Kg' ? Math.max(0.05*q, 0.10) : 0;
@@ -5402,12 +5407,12 @@ function entComparar(rec, data){
     const sk=String(l.sku_key||''), k=/^name:/.test(sk)?'':entCodigo(sk), n=entNombre(l.producto);
     const x=(k && byCode.get(k)) || byName.get(n) || null;
     const rec_=entRecibidoOC(l);
-    if(!x){ if(!faltan.length && rec_>0) difs.push({ producto:l.producto, codigo:k, kgpz:l.kgpz||'Pz', recibido:rec_, entrada:0, dir:'sin_entrada' }); continue; }
+    if(!x){ if(!faltan.length && rec_>0) difs.push({ producto:l.producto, codigo:k, bc:k?sk:'', kgpz:l.kgpz||'Pz', recibido:rec_, entrada:0, dir:'sin_entrada' }); continue; }
     x.usado=true;
     const d=entR2(rec_-x.entrada);
-    if(Math.abs(d)>tol(l.kgpz, Math.max(rec_, x.entrada))+1e-9) difs.push({ producto:l.producto, codigo:k, kgpz:l.kgpz||'Pz', recibido:rec_, entrada:x.entrada, dir:d>0?'sin_entrada':'sin_recibir' });
+    if(Math.abs(d)>tol(l.kgpz, Math.max(rec_, x.entrada))+1e-9) difs.push({ producto:l.producto, codigo:k, bc:k?sk:x.bc, kgpz:l.kgpz||'Pz', recibido:rec_, entrada:x.entrada, dir:d>0?'sin_entrada':'sin_recibir' });
   }
-  for(const x of rt) if(!x.usado && x.entrada>0) difs.push({ producto:x.item, codigo:x.codigo, kgpz:x.kgpz, recibido:0, entrada:x.entrada, dir:'sin_recibir' });
+  for(const x of rt) if(!x.usado && x.entrada>0) difs.push({ producto:x.item, codigo:x.codigo, bc:x.bc, kgpz:x.kgpz, recibido:0, entrada:x.entrada, dir:'sin_recibir' });
   return { estado:difs.length?'rojo':faltan.length?'amarillo':'verde', ocs, faltan, difs };
 }
 /* ENTRADAS-PURE:END */
@@ -5473,7 +5478,7 @@ function entEstadoHtml(e){
   if(!e) return '';
   if(ENT.sinTabla) return '';
   const cls={ verde:'green', rojo:'red', amarillo:'orange pend', sin_oc:'orange pend' }[e.estado]||'';
-  let h=`<span class="tag ${cls}">${ENT_TXT[e.estado]}</span>`;
+  let h=`<span class="tag ${cls}">${ENT_TXT[e.estado]}${e.manual?' *':''}</span>`;
   if(e.estado==='sin_oc') h+=` <span class="muted" style="font-size:12px">no se puede revisar contra el sistema</span>`;
   if(e.estado==='amarillo' && e.faltan.length && e.faltan.length<e.ocs.length) h+=` <span class="muted" style="font-size:12px">falta la OC ${e.faltan.map(escapeHtml).join(', ')}</span>`;
   return h;
@@ -5531,9 +5536,15 @@ async function entCopiar(i){
   const out=[`*${hubName(hub)} · entradas en el sistema · recibido ${rango}*${tag?' '+tag:''}`];
   if(g.esp.length){ out.push('', 'Por dar entrada (recibido en la app, sin entrada en el sistema):');
     g.esp.slice().sort((a,b)=>a.c.fecha.localeCompare(b.c.fecha)).forEach(({c})=>out.push(`• ${prov(c)} · recibido ${pvFechaCorta(c.fecha)} (${c.fecha===hoy?'hoy':`hace ${daysBetween(c.fecha, hoy)} d`})`)); }
-  // Differences: the hub confirms the stock of each product (Jose, 2026-11-26), not «check the reception»
-  if(g.mal.length){ out.push('', 'Favor de confirmar los inventarios de:');
-    g.mal.forEach(({c,e})=>e.difs.forEach(d=>out.push(`• ${d.producto} — recibido ${entQ(d.recibido,d.kgpz)}, en sistema ${entQ(d.entrada,d.kgpz)} (${prov(c)} · ${pvFechaCorta(c.fecha)})`))); }
+  // Differences: only the products whose stock the hub confirms (Jose, 2026-11-26), with barcode and Sorting Hub position
+  if(g.mal.length){
+    let so=null; try{ so=await fetchSorting(hub, false); }catch(_){}
+    const vistos=new Set(); out.push('', 'Favor de confirmar los inventarios de:');
+    g.mal.forEach(({e})=>e.difs.forEach(d=>{
+      const k=(d.codigo||'')+'|'+entNombre(d.producto); if(vistos.has(k)) return; vistos.add(k);
+      const pos=so && so.bc.size ? positionOf(d.bc||d.codigo, d.producto, so) : null;
+      out.push(`• ${d.producto}${d.bc||d.codigo?' · '+(d.bc||d.codigo):''} · ${pos?pos.palabra+' '+pos.full:'sin posición'}`);
+    })); }
   const txt=out.join('\n');
   try{ await navigator.clipboard.writeText(txt); }
   catch(_){ const t=document.createElement('textarea'); t.value=txt; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
@@ -5603,8 +5614,8 @@ async function admCalendario(el, m='admin'){
         const s=r.desde<w?w:r.desde, e=r.hasta>wEnd?wEnd:r.hasta;
         let l=lanes.findIndex(end=>end<s); if(l<0){ l=lanes.length; lanes.push(e); } else lanes[l]=e;
         const c0=daysBetween(w,s)+1, span=daysBetween(s,e)+1;
-        const nm=a.id==='pd'?areaName(r.area):a.name;
-        const tip=`${nm} · ${r.cerrada?'cerrada':'abierta'}${r.ent?' · '+ENT_TXT[r.ent.estado].toLowerCase():''} · ${fechaLarga(r.desde)}${r.hasta!==r.desde?' – '+fechaLarga(r.hasta):''}`;
+        const nm=(a.id==='pd'?areaName(r.area):a.name)+(r.ent&&r.ent.manual?' *':'');
+        const tip=`${nm} · ${r.cerrada?'cerrada':'abierta'}${r.ent?' · '+ENT_TXT[r.ent.estado].toLowerCase()+(r.ent.manual?' (marcada a mano)':''):''} · ${fechaLarga(r.desde)}${r.hasta!==r.desde?' – '+fechaLarga(r.hasta):''}`;
         h+=`<button class="cal-bar ${a.id}${r.cerrada?'':' open'}${r.ent&&ENT_CLS[r.ent.estado]?' '+ENT_CLS[r.ent.estado]:''}${s===r.desde?' s':''}${e===r.hasta?' e':''}" style="grid-row:${row+l};grid-column:${c0} / span ${span}" title="${escapeHtml(tip)}" onclick="admCalVer(${idx},'${m}')" aria-label="${escapeHtml(tip)}">${span>1||a.id==='pd'?escapeHtml(nm):''}</button>`;
       });
       row+=Math.max(1,lanes.length);
@@ -5613,7 +5624,7 @@ async function admCalendario(el, m='admin'){
   }
   const conPd=grupos.some(a=>a.id==='pd') && !ENT.sinTabla;
   h+=`<div class="cal-legend">${grupos.map(a=>`<span><i class="cal-sw ${a.id}"></i>${a.name}: ${cubre[a.id].size} de ${diasMes} días</span>`).join('')}<span><i class="cal-sw open"></i>abierta / sin cerrar</span></div>
-    ${conPd?`<div class="cal-legend" style="margin-top:-4px"><span>Proveedores en el sistema:</span><span><i class="cal-sw pd-ok"></i>con entrada</span><span><i class="cal-sw pd-esp"></i>por dar entrada</span><span><i class="cal-sw pd-mal"></i>con diferencias</span></div>
+    ${conPd?`<div class="cal-legend" style="margin-top:-4px"><span>Proveedores en el sistema:</span><span><i class="cal-sw pd-ok"></i>con entrada</span><span><i class="cal-sw pd-esp"></i>por dar entrada</span><span><i class="cal-sw pd-mal"></i>con diferencias</span>${ses.some(r=>r.ent&&r.ent.manual)?'<span>* marcada en verde a mano</span>':''}</div>
     <div class="muted" style="font-size:12px;margin:-4px 0 8px">Solo proveedores desde el ${fechaLarga(ENT_DESDE)}: CH no está en «Resumen». ${escapeHtml(entRevisado())}</div>`:''}
     <div id="cal-detalle"><div class="muted" style="font-size:13px">Toca una barra para ver la recepción.</div></div>
     <div id="ent-manana"></div>`;
