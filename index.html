@@ -1052,6 +1052,39 @@ function showScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active', s.id===id));
   window.scrollTo(0,0);
 }
+/* ── Phone back button / swipe back: one step back inside the app, never out of the site ──
+   One extra history entry is kept on top (backArm); each back pops it, we re-arm it and do the
+   in-app back: close the open overlay, else the screen's own «←» button, else undo Inicio's last
+   pick. Only Inicio with nothing picked lets the browser leave. Blocking modals stay (rule 3). */
+function backArm(){ try{ if(!(history.state&&history.state.mrBack)) history.pushState({mrBack:1}, ''); }catch(_){} }
+function iniBack(){
+  if(INI.origen==='pd'){
+    if(INI.prov){ pdCambiarProv(); return true; }
+    if(INI.receptor){ iniPick('receptor', null); return true; }
+  } else {
+    if(INI.receptor){ iniPick('receptor', null); return true; }
+    if(INI.area){ iniPick('area', null); return true; }
+  }
+  if(INI.hub){ iniPick('hub', null); return true; }
+  if(INI.origen){ iniPick('origen', null); return true; }
+  return false;
+}
+function appBack(){
+  if(modalOpen()) return true;                                  // blocking: answer it with its buttons
+  if(document.getElementById('camera-overlay').classList.contains('open')){ closeCamera(); return true; }
+  if(document.getElementById('fdr')){ fdrCerrar(); return true; }
+  if(document.getElementById('sheet').classList.contains('open')){ closeSheet(); return true; }
+  const scr=document.querySelector('.screen.active'); if(!scr) return false;
+  if(scr.id==='screen-inicio') return iniBack();
+  const sub=scr.querySelector('[onclick^="pvVolver"]');         // Proveedores detail → list
+  if(sub && sub.offsetParent){ sub.click(); return true; }
+  const b=scr.querySelector('.topbar .back'); if(b){ b.click(); return true; }
+  return false;
+}
+window.addEventListener('popstate', ()=>{
+  let handled=false; try{ handled=appBack(); }catch(e){ console.warn('back', e); handled=true; }
+  if(handled) backArm(); else history.back();                   // Inicio, nothing picked: leave
+});
 
 /* ════════════════════════════════════════════════════════════════════════════════════
    SMALL HELPERS (ours)
@@ -6878,6 +6911,7 @@ async function boot(){
   registerServiceWorker();
   if(DEMO) demoUi();
   renderInicio(); // always Inicio, nothing pre-selected (rule 7)
+  backArm();
   loadReceptores();
   IMGDB_READY=loadImageDB();
   await Promise.all([syncClock(), IMGDB_READY]);
